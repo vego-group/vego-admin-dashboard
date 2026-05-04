@@ -1,0 +1,59 @@
+'use client';
+
+import { Bell } from 'lucide-react';
+import { Avatar } from '@/components/ui/Avatar';
+import { useAuthStore } from '@/store/auth';
+import { ThemeToggle } from './ThemeToggle';
+import { LanguageSwitcher } from './LanguageSwitcher';
+import { useI18n } from '@/i18n/I18nProvider';
+
+interface TopbarProps {
+  title: string;
+  subtitle?: string;
+}
+
+export function Topbar({ title, subtitle }: TopbarProps) {
+  const user = useAuthStore((s) => s.user);
+  const { t } = useI18n();
+
+  return (
+    <header className="flex items-start justify-between gap-4 px-6 pt-6 pb-2 sm:px-8">
+      <div className="min-w-0 flex-1">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50 sm:text-[28px]">
+          {title}
+        </h1>
+        {subtitle && (
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2.5">
+        <LanguageSwitcher />
+        <ThemeToggle />
+
+        <button
+          type="button"
+          className="relative inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-slate-600 transition-colors hover:bg-slate-50 dark:bg-slate-900/40 dark:text-slate-300 dark:hover:bg-slate-800"
+          style={{ borderColor: 'rgb(var(--border))' }}
+          aria-label="Notifications"
+        >
+          <Bell className="h-4 w-4" />
+          <span className="absolute end-2 top-2 h-1.5 w-1.5 rounded-full bg-rose-500 ring-2 ring-white dark:ring-slate-900" />
+        </button>
+
+        <div className="flex items-center gap-3 rounded-full border bg-white py-1 ps-1 pe-4 dark:bg-slate-900/40"
+          style={{ borderColor: 'rgb(var(--border))' }}>
+          <Avatar name={user?.name ?? 'John Doe'} size="md" />
+          <div className="hidden flex-col leading-tight sm:flex">
+            <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              {user?.name ?? 'John Doe'}
+            </span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+              {user?.role === 'admin' ? 'Fleet Manager' : t('common.appTagline')}
+            </span>
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+}

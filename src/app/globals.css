@@ -1,0 +1,129 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light theme tokens */
+    --background: 248 250 252;            /* slate-50 */
+    --foreground: 15 23 42;               /* slate-900 */
+    --card: 255 255 255;                  /* white */
+    --card-foreground: 15 23 42;
+    --muted: 241 245 249;                 /* slate-100 */
+    --muted-foreground: 100 116 139;      /* slate-500 */
+    --border: 226 232 240;                /* slate-200 */
+    --input: 226 232 240;
+    --ring: 99 102 241;                   /* brand-500 */
+    --primary: 30 27 75;                  /* brand-950 (deep navy/indigo for active) */
+    --primary-foreground: 255 255 255;
+    --sidebar: 255 255 255;
+    --sidebar-foreground: 15 23 42;
+    --topbar: 15 23 42;                   /* nearly black header strip */
+  }
+
+  .dark {
+    --background: 9 14 28;                /* very deep navy */
+    --foreground: 226 232 240;
+    --card: 17 24 39;                     /* gray-900-ish */
+    --card-foreground: 241 245 249;
+    --muted: 30 41 59;                    /* slate-800 */
+    --muted-foreground: 148 163 184;      /* slate-400 */
+    --border: 30 41 59;
+    --input: 30 41 59;
+    --ring: 129 140 248;                  /* brand-400 */
+    --primary: 99 102 241;
+    --primary-foreground: 255 255 255;
+    --sidebar: 15 23 42;                  /* slate-900 */
+    --sidebar-foreground: 226 232 240;
+    --topbar: 2 6 23;                     /* slate-950 */
+  }
+
+  * {
+    border-color: rgb(var(--border));
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: rgb(var(--background));
+    color: rgb(var(--foreground));
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  /* Arabic typography refinement */
+  html[dir='rtl'] body {
+    font-family: var(--font-ibm-plex-arabic), system-ui, sans-serif;
+  }
+
+  /* Custom scrollbar — subtle, themed */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--border));
+    border-radius: 9999px;
+    border: 2px solid rgb(var(--background));
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--muted-foreground) / 0.4);
+  }
+
+  /* Input reset */
+  input,
+  textarea,
+  select {
+    background-color: transparent;
+  }
+
+  /* Focus ring */
+  *:focus-visible {
+    outline: 2px solid rgb(var(--ring));
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+}
+
+@layer components {
+  /* Card style used across the app */
+  .card-surface {
+    @apply rounded-2xl border bg-[rgb(var(--card))] text-[rgb(var(--card-foreground))] shadow-card;
+    border-color: rgb(var(--border));
+  }
+
+  /* Reusable status pill */
+  .pill {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+}
+
+@layer utilities {
+  /* Logical-property helpers for clean RTL */
+  .ms-auto {
+    margin-inline-start: auto;
+  }
+  .me-auto {
+    margin-inline-end: auto;
+  }
+
+  /* Bg gradient mesh used on auth page */
+  .auth-bg {
+    background:
+      radial-gradient(at 20% 20%, rgb(99 102 241 / 0.18) 0px, transparent 50%),
+      radial-gradient(at 80% 0%, rgb(59 130 246 / 0.15) 0px, transparent 50%),
+      radial-gradient(at 80% 100%, rgb(16 185 129 / 0.12) 0px, transparent 50%),
+      rgb(var(--background));
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+}
