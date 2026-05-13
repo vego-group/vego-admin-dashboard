@@ -160,7 +160,7 @@ export default function StationsPage() {
           </Card>
         ) : view === 'map' ? (
           <Card className="p-5">
-            <LiveFleetMap height={500} selectedStation={selectedStation} />
+            <LiveFleetMap height={500} stations={stations} />
           </Card>
         ) : (
           <>

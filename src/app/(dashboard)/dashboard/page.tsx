@@ -11,11 +11,13 @@ import { BatteryHealthChart } from '@/components/dashboard/BatteryHealthChart';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useI18n } from '@/i18n/I18nProvider';
-import { dashboardApi } from '@/lib/api';
+import { dashboardApi, fleetApi, stationsApi } from '@/lib/api';
 import type {
   DashboardMetrics,
   UsagePoint,
   BatteryHealthPoint,
+  Vehicle,
+  BatteryStation,
 } from '@/types';
 
 export default function DashboardPage() {
@@ -23,21 +25,27 @@ export default function DashboardPage() {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [usage, setUsage] = useState<UsagePoint[]>([]);
   const [health, setHealth] = useState<BatteryHealthPoint[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [stations, setStations] = useState<BatteryStation[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [m, u, h] = await Promise.all([
+        const [m, u, h, v, s] = await Promise.all([
           dashboardApi.getMetrics(),
           dashboardApi.getUsage(),
           dashboardApi.getBatteryHealth(),
+          fleetApi.list(),
+          stationsApi.list(),
         ]);
         if (!cancelled) {
           setMetrics(m);
           setUsage(u);
           setHealth(h);
+          setVehicles(v);
+          setStations(s);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -109,7 +117,7 @@ export default function DashboardPage() {
             </h2>
             <p className="text-xs text-slate-500">{t('dashboard.liveFleetMapSubtitle')}</p>
           </div>
-          <LiveFleetMap />
+          <LiveFleetMap vehicles={vehicles} stations={stations} />
         </Card>
         {loading || !metrics ? (
           <Card className="p-5">
