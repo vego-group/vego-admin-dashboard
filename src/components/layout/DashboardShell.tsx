@@ -3,7 +3,7 @@
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 import { useAuthStore } from '@/store/auth';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface DashboardShellProps {
@@ -15,15 +15,19 @@ interface DashboardShellProps {
 export function DashboardShell({ title, subtitle, children }: DashboardShellProps) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const router = useRouter();
+  const [mounted, setMounted] = useState(false);
 
-  // Protected route guard
+  useEffect(() => { setMounted(true); }, []);
+
+  // Protected route guard — wait for Zustand to rehydrate from localStorage before redirecting
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (mounted && !isAuthenticated) {
       router.replace('/login');
     }
-  }, [isAuthenticated, router]);
+  }, [mounted, isAuthenticated, router]);
 
-  if (!isAuthenticated) return null;
+  // Return null on server AND during initial client render so hydration matches
+  if (!mounted || !isAuthenticated) return null;
 
   return (
     <div className="flex h-screen bg-[rgb(var(--background))]">
