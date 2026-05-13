@@ -26,12 +26,14 @@ export function DashboardShell({ title, subtitle, children }: DashboardShellProp
   if (!isAuthenticated) return null;
 
   return (
-    <div className="flex min-h-screen bg-[rgb(var(--background))]">
+    <div className="flex h-screen bg-[rgb(var(--background))]">
       <Sidebar />
-      <main className="flex-1 overflow-x-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar title={title} subtitle={subtitle} />
-        <div className="px-6 pb-8 pt-4 sm:px-8">{children}</div>
-      </main>
+        <main className="flex-1 overflow-y-auto overflow-x-hidden">
+          <div className="px-6 pb-8 pt-4 sm:px-8">{children}</div>
+        </main>
+      </div>
     </div>
   );
 }

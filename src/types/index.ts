@@ -15,12 +15,12 @@ export interface Vehicle {
   plateNumber: string;
   model: 'VegoMax Pro' | 'VegoLite' | 'VEGO Pro 400' | 'VEGO Cargo 500';
   status: VehicleStatus;
-  batteryLevel: number; // 0-100
+  batteryLevel: number;
   location: string;
   coordinates: { lat: number; lng: number };
   assignedDriverId?: string;
   assignedDriverName?: string;
-  lastTripAt: string; // ISO date
+  lastTripAt: string;
   totalDistanceKm: number;
   currentSpeedKmh: number;
   estimatedRangeKm: number;
@@ -50,6 +50,7 @@ export interface Driver {
   id: string;
   name: string;
   phone: string;
+  email?: string;
   vehicleModel: string;
   status: DriverStatus;
   trips: number;
@@ -57,6 +58,36 @@ export interface Driver {
   charges: number;
   swaps: number;
   avatarUrl?: string;
+}
+
+// ----- Zone Control -----------------------------------------------------------
+
+export type ZoneType = 'operational' | 'no_ride' | 'slow' | 'parking';
+
+/**
+ * A point on the map in viewport-percentage coordinates (0-100 on each axis).
+ * Using percentages rather than lat/lng means the polygon stays correct relative
+ * to our stylized SVG map regardless of viewport size. When the real map library
+ * is wired up, swap this for { lat, lng } and adjust the renderer.
+ */
+export interface ZonePoint {
+  x: number; // 0-100
+  y: number; // 0-100
+}
+
+export interface Zone {
+  id: string;
+  name: string;
+  type: ZoneType;
+  /** Maximum allowed speed inside the zone, in km/h. 0 means "no riding" allowed. */
+  speedLimitKmh: number;
+  /** Whether the zone rules are currently being enforced. */
+  active: boolean;
+  /** Whether the zone is shown on the map (toggled by the eye icon). */
+  visible: boolean;
+  /** Closed polygon. Minimum 3 points to be a valid zone. */
+  polygon: ZonePoint[];
+  createdAt: string;
 }
 
 export interface Trip {
@@ -82,10 +113,10 @@ export interface DashboardMetrics {
   lowBatteryCount: number;
   averageCostPerVehicle: number;
   successRate: number;
-  fleetTrend: number; // % change from yesterday
+  fleetTrend: number;
   batteriesTrend: number;
   tripsTrend: number;
-  durationTrend: number; // negative = improvement
+  durationTrend: number;
 }
 
 export interface UsagePoint {

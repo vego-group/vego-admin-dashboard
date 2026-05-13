@@ -7,7 +7,9 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
-  signIn: (email: string, password: string) => Promise<boolean>;
+  pendingPhone: string | null;
+  sendOtp: (phone: string) => Promise<boolean>;
+  verifyOtp: (otp: string) => Promise<boolean>;
   signOut: () => void;
 }
 
@@ -25,19 +27,28 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
       isLoading: false,
       error: null,
-      signIn: async (email, password) => {
+      pendingPhone: null,
+      sendOtp: async (phone) => {
         set({ isLoading: true, error: null });
-        // Simulate network latency
         await new Promise((resolve) => setTimeout(resolve, 600));
-        // Demo credentials — any non-empty values pass
-        if (email && password.length >= 4) {
-          set({ user: MOCK_USER, isAuthenticated: true, isLoading: false });
+        if (phone && phone.length >= 9) {
+          set({ pendingPhone: phone, isLoading: false });
           return true;
         }
-        set({ error: 'Invalid email or password', isLoading: false });
+        set({ error: 'Please enter a valid phone number', isLoading: false });
         return false;
       },
-      signOut: () => set({ user: null, isAuthenticated: false, error: null }),
+      verifyOtp: async (otp) => {
+        set({ isLoading: true, error: null });
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        if (otp.length === 6) {
+          set({ user: MOCK_USER, isAuthenticated: true, isLoading: false, pendingPhone: null });
+          return true;
+        }
+        set({ error: 'Invalid OTP code. Please try again.', isLoading: false });
+        return false;
+      },
+      signOut: () => set({ user: null, isAuthenticated: false, error: null, pendingPhone: null }),
     }),
     {
       name: 'myvego.auth',

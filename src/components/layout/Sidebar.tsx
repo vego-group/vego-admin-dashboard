@@ -9,6 +9,7 @@ import {
   Users,
   Settings2,
   LineChart,
+  Map,
   LogOut,
 } from 'lucide-react';
 import { Logo } from './Logo';
@@ -23,6 +24,7 @@ const navItems = [
   { href: '/stations', icon: BatteryCharging, key: 'nav.batteryStations' },
   { href: '/drivers', icon: Users, key: 'nav.drivers' },
   { href: '/vehicle-control', icon: Settings2, key: 'nav.vehicleControl' },
+  { href: '/zones', icon: Map, key: 'nav.zones' },
   { href: '/reports', icon: LineChart, key: 'nav.reports' },
 ];
 
@@ -42,12 +44,10 @@ export function Sidebar() {
       className="sticky top-0 flex h-screen w-[260px] shrink-0 flex-col border-e bg-[rgb(var(--sidebar))] text-[rgb(var(--sidebar-foreground))]"
       style={{ borderColor: 'rgb(var(--border))' }}
     >
-      {/* Brand */}
       <div className="px-5 pb-4 pt-6">
         <Logo />
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 px-3 py-2">
         <ul className="space-y-1">
           {navItems.map((item) => {
@@ -74,7 +74,6 @@ export function Sidebar() {
         </ul>
       </nav>
 
-      {/* Sign out */}
       <div className="p-4">
         <button
           type="button"

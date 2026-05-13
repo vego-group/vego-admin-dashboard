@@ -17,7 +17,7 @@ export function Topbar({ title, subtitle }: TopbarProps) {
   const { t } = useI18n();
 
   return (
-    <header className="flex items-start justify-between gap-4 px-6 pt-6 pb-2 sm:px-8">
+    <header className="sticky top-0 z-30 flex items-start justify-between gap-4 border-b bg-[rgb(var(--background))] px-6 pt-6 pb-2 sm:px-8" style={{ borderColor: 'rgb(var(--border))' }}>
       <div className="min-w-0 flex-1">
         <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50 sm:text-[28px]">
           {title}
