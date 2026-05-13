@@ -64,15 +64,9 @@ export interface Driver {
 
 export type ZoneType = 'operational' | 'no_ride' | 'slow' | 'parking';
 
-/**
- * A point on the map in viewport-percentage coordinates (0-100 on each axis).
- * Using percentages rather than lat/lng means the polygon stays correct relative
- * to our stylized SVG map regardless of viewport size. When the real map library
- * is wired up, swap this for { lat, lng } and adjust the renderer.
- */
 export interface ZonePoint {
-  x: number; // 0-100
-  y: number; // 0-100
+  lat: number;
+  lng: number;
 }
 
 export interface Zone {

@@ -173,11 +173,11 @@ export default function ZonesPage() {
       : '';
 
   return (
-    <DashboardShell title={t('zones.title')} subtitle={t('zones.subtitle')}>
+    <DashboardShell title={t('zones.title')} subtitle={t('zones.subtitle')} fullHeight>
       {/* Two-column layout: list (left) | map (right) */}
-      <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
+      <div className="grid flex-1 gap-4 lg:grid-cols-[340px_1fr]" style={{ minHeight: 0 }}>
         {/* LEFT: Search + Zones list */}
-        <Card className="flex flex-col p-4" style={{ minHeight: 'calc(100vh - 180px)' }}>
+        <Card className="flex flex-col overflow-hidden p-4">
           <Input
             placeholder={t('zones.searchByZone')}
             value={query}
@@ -214,7 +214,7 @@ export default function ZonesPage() {
         </Card>
 
         {/* RIGHT: Map + toolbar */}
-        <div className="flex flex-col gap-3" style={{ minHeight: 'calc(100vh - 180px)' }}>
+        <div className="flex h-full flex-col gap-3">
           {/* Map toolbar */}
           <div className="flex items-center justify-end gap-2">
             {drawingMode ? (

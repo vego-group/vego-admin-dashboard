@@ -20,30 +20,13 @@ export interface ZoneMapProps {
 
 /* ── Coordinate helpers ──────────────────────────────────── */
 
-// Riyadh bounding box — maps ZonePoint (0-100%) to real lat/lng
-const B = { north: 24.83, south: 24.62, west: 46.58, east: 46.80 };
-
-function toLL(p: ZonePoint): [number, number] {
-  return [
-    B.north - (p.y / 100) * (B.north - B.south),
-    B.west  + (p.x / 100) * (B.east  - B.west),
-  ];
-}
-
 function toLLArr(pts: ZonePoint[]): [number, number][] {
-  return pts.map(toLL);
+  return pts.map((p) => [p.lat, p.lng]);
 }
 
-function fromLL(lat: number, lng: number): ZonePoint {
-  return {
-    x: Math.max(0, Math.min(100, ((lng - B.west)  / (B.east  - B.west))  * 100)),
-    y: Math.max(0, Math.min(100, ((B.north - lat) / (B.north - B.south)) * 100)),
-  };
-}
-
-function pctCenter(pts: ZonePoint[]): ZonePoint {
-  const s = pts.reduce((a, p) => ({ x: a.x + p.x, y: a.y + p.y }), { x: 0, y: 0 });
-  return { x: s.x / pts.length, y: s.y / pts.length };
+function avgCenter(pts: ZonePoint[]): ZonePoint {
+  const s = pts.reduce((a, p) => ({ lat: a.lat + p.lat, lng: a.lng + p.lng }), { lat: 0, lng: 0 });
+  return { lat: s.lat / pts.length, lng: s.lng / pts.length };
 }
 
 /* ── Tooltip HTML ────────────────────────────────────────── */
@@ -198,14 +181,14 @@ export default function ZoneMapInner({
         zoneLayers.current.push(poly);
 
         // Name label at polygon center
-        const center = pctCenter(zone.polygon);
+        const center = avgCenter(zone.polygon);
         const labelIcon = L.divIcon({
           className: '',
           html: `<div style="transform:translate(-50%,-50%);white-space:nowrap"><span style="display:inline-block;background:${cfg.color};color:white;padding:2px 8px;border-radius:5px;font-size:10px;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,0.25)">${zone.name}</span></div>`,
           iconSize:   [0, 0],
           iconAnchor: [0, 0],
         });
-        const label = L.marker(toLL(center), { icon: labelIcon, interactive: false, zIndexOffset: 200 });
+        const label = L.marker([center.lat, center.lng], { icon: labelIcon, interactive: false, zIndexOffset: 200 });
         label.addTo(map);
         zoneLayers.current.push(label);
       }
@@ -256,8 +239,7 @@ export default function ZoneMapInner({
       if (drawingMode) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         map.on('click', (e: any) => {
-          const pt = fromLL(e.latlng.lat, e.latlng.lng);
-          onDrawingPointAddRef.current?.(pt);
+          onDrawingPointAddRef.current?.({ lat: e.latlng.lat, lng: e.latlng.lng });
         });
       }
     })();
@@ -298,7 +280,7 @@ export default function ZoneMapInner({
 
       // Dot at each placed point
       for (const p of drawingPoints) {
-        const dot = L.circleMarker(toLL(p), {
+        const dot = L.circleMarker([p.lat, p.lng], {
           radius:      5,
           color:       '#6366f1',
           fillColor:   '#6366f1',

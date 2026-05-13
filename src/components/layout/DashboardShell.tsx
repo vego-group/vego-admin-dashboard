@@ -10,9 +10,11 @@ interface DashboardShellProps {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
+  /** When true, disables page scroll so content fills the viewport exactly (e.g. maps) */
+  fullHeight?: boolean;
 }
 
-export function DashboardShell({ title, subtitle, children }: DashboardShellProps) {
+export function DashboardShell({ title, subtitle, children, fullHeight = false }: DashboardShellProps) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -26,16 +28,25 @@ export function DashboardShell({ title, subtitle, children }: DashboardShellProp
     }
   }, [mounted, isAuthenticated, router]);
 
-  // Return null on server AND during initial client render so hydration matches
-  if (!mounted || !isAuthenticated) return null;
+  // Show spinner while Zustand rehydrates from localStorage (avoids white flash)
+  if (!mounted) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[rgb(var(--background))]">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
+      </div>
+    );
+  }
+  if (!isAuthenticated) return null;
 
   return (
     <div className="flex h-screen bg-[rgb(var(--background))]">
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar title={title} subtitle={subtitle} />
-        <main className="flex-1 overflow-y-auto overflow-x-hidden">
-          <div className="px-6 pb-8 pt-4 sm:px-8">{children}</div>
+        <main className={fullHeight ? 'flex-1 overflow-hidden' : 'flex-1 overflow-y-auto overflow-x-hidden'}>
+          <div className={fullHeight ? 'flex h-full flex-col px-6 pb-4 pt-4 sm:px-8' : 'px-6 pb-8 pt-4 sm:px-8'}>
+            {children}
+          </div>
         </main>
       </div>
     </div>

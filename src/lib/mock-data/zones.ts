@@ -1,9 +1,5 @@
 import type { Zone } from '@/types';
 
-/**
- * Mock zones with polygon coords expressed as percentages of the map viewport.
- * Each polygon is a closed shape (the renderer handles closing the path).
- */
 export const mockZones: Zone[] = [
   {
     id: 'ZN001',
@@ -13,11 +9,11 @@ export const mockZones: Zone[] = [
     active: true,
     visible: true,
     polygon: [
-      { x: 24, y: 30 },
-      { x: 36, y: 26 },
-      { x: 44, y: 36 },
-      { x: 38, y: 48 },
-      { x: 24, y: 46 },
+      { lat: 24.7670, lng: 46.6328 },
+      { lat: 24.7754, lng: 46.6592 },
+      { lat: 24.7544, lng: 46.6768 },
+      { lat: 24.7292, lng: 46.6636 },
+      { lat: 24.7334, lng: 46.6328 },
     ],
     createdAt: '2026-01-15T10:00:00Z',
   },
@@ -29,11 +25,11 @@ export const mockZones: Zone[] = [
     active: true,
     visible: true,
     polygon: [
-      { x: 32, y: 60 },
-      { x: 46, y: 58 },
-      { x: 52, y: 70 },
-      { x: 42, y: 78 },
-      { x: 30, y: 72 },
+      { lat: 24.7040, lng: 46.6504 },
+      { lat: 24.7082, lng: 46.6812 },
+      { lat: 24.6830, lng: 46.6944 },
+      { lat: 24.6662, lng: 46.6724 },
+      { lat: 24.6788, lng: 46.6460 },
     ],
     createdAt: '2026-02-08T14:30:00Z',
   },
@@ -45,11 +41,11 @@ export const mockZones: Zone[] = [
     active: true,
     visible: true,
     polygon: [
-      { x: 60, y: 40 },
-      { x: 72, y: 38 },
-      { x: 78, y: 50 },
-      { x: 70, y: 56 },
-      { x: 60, y: 50 },
+      { lat: 24.7460, lng: 46.7120 },
+      { lat: 24.7502, lng: 46.7384 },
+      { lat: 24.7250, lng: 46.7516 },
+      { lat: 24.7124, lng: 46.7340 },
+      { lat: 24.7250, lng: 46.7120 },
     ],
     createdAt: '2026-02-20T09:15:00Z',
   },
@@ -61,11 +57,11 @@ export const mockZones: Zone[] = [
     active: true,
     visible: true,
     polygon: [
-      { x: 52, y: 78 },
-      { x: 66, y: 76 },
-      { x: 72, y: 88 },
-      { x: 60, y: 92 },
-      { x: 50, y: 86 },
+      { lat: 24.6662, lng: 46.6944 },
+      { lat: 24.6704, lng: 46.7252 },
+      { lat: 24.6452, lng: 46.7384 },
+      { lat: 24.6368, lng: 46.7120 },
+      { lat: 24.6494, lng: 46.6900 },
     ],
     createdAt: '2026-03-05T16:45:00Z',
   },
