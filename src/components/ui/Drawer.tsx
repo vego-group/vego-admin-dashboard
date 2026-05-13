@@ -44,16 +44,16 @@ export function Drawer({
       {/* Backdrop */}
       {open && withBackdrop && (
         <div
-          className="fixed inset-0 z-40 bg-slate-900/30 backdrop-blur-[2px] animate-fade-in"
+          className="fixed inset-0 z-[1009] bg-slate-900/30 backdrop-blur-[2px] animate-fade-in"
           onClick={onClose}
           aria-hidden="true"
         />
       )}
 
-      {/* Panel */}
+      {/* Panel — z-[1010] sits above Leaflet's highest z-index (1000 for controls) */}
       <aside
         className={cn(
-          'fixed end-0 top-0 z-50 flex h-full flex-col bg-[rgb(var(--card))] shadow-elevated transition-transform duration-300 ease-out',
+          'fixed end-0 top-0 z-[1010] flex h-full flex-col bg-[rgb(var(--card))] shadow-elevated transition-transform duration-300 ease-out',
           'border-s',
           sizeClasses[size],
           open ? 'translate-x-0' : 'translate-x-full rtl:-translate-x-full',
