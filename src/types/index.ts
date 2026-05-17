@@ -60,6 +60,19 @@ export interface Driver {
   avatarUrl?: string;
 }
 
+// ----- Notifications ----------------------------------------------------------
+
+export type NotificationType = 'alert' | 'warning' | 'success' | 'info' | 'error';
+
+export interface Notification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  description: string;
+  createdAt: string;
+  read: boolean;
+}
+
 // ----- Zone Control -----------------------------------------------------------
 
 export type ZoneType = 'operational' | 'no_ride' | 'slow' | 'parking';

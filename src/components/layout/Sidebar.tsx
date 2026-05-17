@@ -10,22 +10,25 @@ import {
   Settings2,
   LineChart,
   Map,
+  Bell,
   LogOut,
 } from 'lucide-react';
 import { Logo } from './Logo';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useAuthStore } from '@/store/auth';
+import { useNotificationStore } from '@/store/notifications';
 import { cn } from '@/lib/cn';
 import { useRouter } from 'next/navigation';
 
 const navItems = [
-  { href: '/dashboard', icon: LayoutDashboard, key: 'nav.dashboard' },
-  { href: '/fleet', icon: Bike, key: 'nav.fleet' },
-  { href: '/stations', icon: BatteryCharging, key: 'nav.batteryStations' },
-  { href: '/drivers', icon: Users, key: 'nav.drivers' },
-  { href: '/vehicle-control', icon: Settings2, key: 'nav.vehicleControl' },
-  { href: '/zones', icon: Map, key: 'nav.zones' },
-  { href: '/reports', icon: LineChart, key: 'nav.reports' },
+  { href: '/dashboard',        icon: LayoutDashboard, key: 'nav.dashboard' },
+  { href: '/fleet',            icon: Bike,            key: 'nav.fleet' },
+  { href: '/stations',         icon: BatteryCharging, key: 'nav.batteryStations' },
+  { href: '/drivers',          icon: Users,           key: 'nav.drivers' },
+  { href: '/vehicle-control',  icon: Settings2,       key: 'nav.vehicleControl' },
+  { href: '/zones',            icon: Map,             key: 'nav.zones' },
+  { href: '/notifications',    icon: Bell,            key: 'nav.notifications', showBadge: true },
+  { href: '/reports',          icon: LineChart,       key: 'nav.reports' },
 ];
 
 export function Sidebar() {
@@ -33,6 +36,7 @@ export function Sidebar() {
   const { t } = useI18n();
   const router = useRouter();
   const signOut = useAuthStore((s) => s.signOut);
+  const unreadCount = useNotificationStore((s) => s.unreadCount);
 
   const handleSignOut = () => {
     signOut();
@@ -54,6 +58,7 @@ export function Sidebar() {
             const Icon = item.icon;
             const isActive =
               pathname === item.href || pathname?.startsWith(item.href + '/');
+            const badge = item.showBadge && unreadCount > 0 ? unreadCount : null;
             return (
               <li key={item.href}>
                 <Link
@@ -67,6 +72,11 @@ export function Sidebar() {
                 >
                   <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={isActive ? 2.2 : 1.8} />
                   <span className="truncate">{t(item.key)}</span>
+                  {badge !== null && (
+                    <span className="ms-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-bold text-white">
+                      {badge}
+                    </span>
+                  )}
                 </Link>
               </li>
             );
