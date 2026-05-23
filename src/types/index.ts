@@ -46,6 +46,36 @@ export interface BatteryStation {
   type: 'swap' | 'fast_charge';
 }
 
+export type DocumentStatus = 'not_uploaded' | 'pending' | 'verified' | 'rejected';
+
+export interface DriverDocuments {
+  license: {
+    status: DocumentStatus;
+    hasLicense: boolean;
+    number?: string;
+    expiryDate?: string;
+  };
+  customsCard: {
+    status: DocumentStatus;
+  };
+  plate: {
+    status: DocumentStatus;
+    number?: string;
+  };
+}
+
+export type RegistrationRequestStatus = 'pending' | 'approved' | 'rejected';
+
+export interface DriverRegistrationRequest {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  requestedAt: string;
+  status: RegistrationRequestStatus;
+  documents: DriverDocuments;
+}
+
 export interface Driver {
   id: string;
   name: string;
@@ -57,7 +87,9 @@ export interface Driver {
   totalCost: number;
   charges: number;
   swaps: number;
+  walletBalance: number;
   avatarUrl?: string;
+  documents: DriverDocuments;
 }
 
 // ----- Notifications ----------------------------------------------------------
@@ -170,4 +202,69 @@ export interface User {
   email: string;
   role: UserRole;
   avatarUrl?: string;
+}
+
+// ----- Wallet ----------------------------------------------------------------
+
+export type TransactionType   = 'top_up' | 'fast_charge' | 'battery_swap';
+export type TransactionStatus = 'completed' | 'pending' | 'failed';
+
+export interface WalletTransaction {
+  id: string;
+  createdAt: string;
+  driverName: string;
+  driverId: string;
+  /** Positive = top-up credit, negative = debit (charge / swap) */
+  amount: number;
+  type: TransactionType;
+  paymentMethod?: string;
+  note?: string;
+  status: TransactionStatus;
+  adminName?: string;
+}
+
+export interface WalletStats {
+  totalTopUps: number;
+  totalSpent: number;
+  avgPerDriver: number;
+  topUpTrend: number;   // %
+  budgetUsedPercent: number;
+  activeDriversCount: number;
+}
+
+// ----- Battery Swapping -------------------------------------------------------
+
+export interface SwappingStation {
+  id: string;
+  cabinetId: string;
+  name: string;
+  district: string;
+  city: string;
+  coordinates: { lat: number; lng: number };
+  readyBatteries: number;
+  chargingBatteries: number;
+  emptySlots: number;
+  totalCapacity: number;
+  avgWaitTimeMinutes: number;
+  todaySwaps: number;
+}
+
+// ----- Fast Charging ----------------------------------------------------------
+
+export type FastChargingStatus = 'operational' | 'high_demand' | 'error';
+
+export interface FastChargingCabinet {
+  id: string;
+  cabinetId: string;
+  name: string;
+  district: string;
+  city: string;
+  coordinates: { lat: number; lng: number };
+  availablePorts: number;
+  chargingPorts: number;
+  errorPorts: number;
+  totalPorts: number;
+  avgChargeTimeMinutes: number;
+  todaySessions: number;
+  status: FastChargingStatus;
 }

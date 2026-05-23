@@ -4,3 +4,6 @@ export * from './drivers';
 export * from './metrics';
 export * from './zones';
 export * from './notifications';
+export * from './transactions';
+export * from './swapping-stations';
+export * from './fast-charging';

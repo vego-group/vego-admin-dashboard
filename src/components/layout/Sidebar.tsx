@@ -12,6 +12,8 @@ import {
   Map,
   Bell,
   LogOut,
+  Wallet,
+  Zap,
 } from 'lucide-react';
 import { Logo } from './Logo';
 import { useI18n } from '@/i18n/I18nProvider';
@@ -23,12 +25,14 @@ import { useRouter } from 'next/navigation';
 const navItems = [
   { href: '/dashboard',        icon: LayoutDashboard, key: 'nav.dashboard' },
   { href: '/fleet',            icon: Bike,            key: 'nav.fleet' },
-  { href: '/stations',         icon: BatteryCharging, key: 'nav.batteryStations' },
+  { href: '/battery-swapping', icon: BatteryCharging, key: 'nav.batterySwapping' },
+  { href: '/fast-charging',    icon: Zap,             key: 'nav.fastCharging' },
   { href: '/drivers',          icon: Users,           key: 'nav.drivers' },
   { href: '/vehicle-control',  icon: Settings2,       key: 'nav.vehicleControl' },
   { href: '/zones',            icon: Map,             key: 'nav.zones' },
   { href: '/notifications',    icon: Bell,            key: 'nav.notifications', showBadge: true },
   { href: '/reports',          icon: LineChart,       key: 'nav.reports' },
+  { href: '/wallet',           icon: Wallet,          key: 'nav.wallet' },
 ];
 
 export function Sidebar() {

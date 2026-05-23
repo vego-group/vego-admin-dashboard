@@ -9,6 +9,7 @@ import {
   mockBatteryHealth,
   mockCostAnalysis,
   mockDrivers,
+  mockPendingRequests,
   mockMetrics,
   mockMonthlyRevenue,
   mockStations,
@@ -17,8 +18,20 @@ import {
   mockVehicles,
   mockWeeklyTrips,
   mockZones,
+  mockSwappingStations,
+  mockFastChargingCabinets,
 } from '@/lib/mock-data';
-import type { BatteryStation, Driver, Vehicle, Zone, ZonePoint, ZoneType } from '@/types';
+import type {
+  BatteryStation, Driver, DriverDocuments, DriverRegistrationRequest,
+  Vehicle, Zone, ZonePoint, ZoneType,
+  SwappingStation, FastChargingCabinet,
+} from '@/types';
+
+const DEFAULT_DOCS: DriverDocuments = {
+  license:     { status: 'not_uploaded', hasLicense: false },
+  customsCard: { status: 'not_uploaded' },
+  plate:       { status: 'not_uploaded' },
+};
 
 const SIMULATED_DELAY = 200;
 const delay = () => new Promise((resolve) => setTimeout(resolve, SIMULATED_DELAY));
@@ -54,6 +67,7 @@ export interface DriverCreateInput {
   email?: string;
   vehicleModel: string;
   status: Driver['status'];
+  documents?: DriverDocuments;
 }
 
 export type DriverUpdateInput = Partial<DriverCreateInput>;
@@ -84,6 +98,8 @@ export const driversApi = {
       totalCost: 0,
       charges: 0,
       swaps: 0,
+      walletBalance: 0,
+      documents: input.documents ?? DEFAULT_DOCS,
     };
     mockDrivers.unshift(driver);
     return driver;
@@ -106,6 +122,39 @@ export const driversApi = {
     await delay();
     mockDrivers.splice(position, 0, driver);
     return driver;
+  },
+};
+
+export const registrationRequestsApi = {
+  async list(): Promise<DriverRegistrationRequest[]> {
+    await delay();
+    return [...mockPendingRequests];
+  },
+  async approve(req: DriverRegistrationRequest): Promise<Driver> {
+    await delay();
+    const idx = mockPendingRequests.findIndex((r) => r.id === req.id);
+    if (idx !== -1) mockPendingRequests[idx] = { ...req, status: 'approved' };
+    const driver: Driver = {
+      id: generateDriverId(),
+      name: req.name,
+      phone: req.phone,
+      email: req.email,
+      vehicleModel: '',
+      status: 'active',
+      trips: 0,
+      totalCost: 0,
+      charges: 0,
+      swaps: 0,
+      walletBalance: 0,
+      documents: req.documents,
+    };
+    mockDrivers.unshift(driver);
+    return driver;
+  },
+  async reject(id: string): Promise<void> {
+    await delay();
+    const idx = mockPendingRequests.findIndex((r) => r.id === id);
+    if (idx !== -1) mockPendingRequests[idx] = { ...mockPendingRequests[idx], status: 'rejected' };
   },
 };
 
@@ -213,5 +262,56 @@ export const reportsApi = {
   async getTopDrivers() {
     await delay();
     return mockTopDrivers;
+  },
+};
+
+// ----- Battery Swapping -------------------------------------------------------
+
+export const swappingApi = {
+  async list(): Promise<SwappingStation[]> {
+    await delay();
+    return [...mockSwappingStations];
+  },
+};
+
+// ----- Fast Charging ----------------------------------------------------------
+
+export const fastChargingApi = {
+  async list(): Promise<FastChargingCabinet[]> {
+    await delay();
+    return [...mockFastChargingCabinets];
+  },
+};
+
+// ----- Wallet (Driver) --------------------------------------------------------
+
+export const walletApi = {
+  /** Fetch the current wallet balance for a driver. */
+  async getBalance(driverId: string): Promise<number> {
+    await delay();
+    const driver = mockDrivers.find((d) => d.id === driverId);
+    return driver?.walletBalance ?? 0;
+  },
+
+  /**
+   * Top up a driver's wallet.
+   * Replace the body with a real fetch() call when the backend is ready.
+   */
+  async topUp(
+    driverId: string,
+    amount: number,
+    paymentMethod: string,
+    note?: string,
+  ): Promise<Driver> {
+    await delay();
+    void paymentMethod;
+    void note;
+    const index = mockDrivers.findIndex((d) => d.id === driverId);
+    if (index === -1) throw new Error(`Driver ${driverId} not found`);
+    mockDrivers[index] = {
+      ...mockDrivers[index],
+      walletBalance: mockDrivers[index].walletBalance + amount,
+    };
+    return mockDrivers[index];
   },
 };

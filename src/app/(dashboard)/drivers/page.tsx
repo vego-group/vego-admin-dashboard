@@ -5,7 +5,9 @@ import { Bike, Plane, UserX, DollarSign, Search, Plus } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { DriversTable } from '@/components/drivers/DriversTable';
+import { PendingRequestsTable } from '@/components/drivers/PendingRequestsTable';
 import { DriverFormModal, type DriverFormValues } from '@/components/drivers/DriverFormModal';
+import { TopUpModal } from '@/components/drivers/TopUpModal';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -16,10 +18,10 @@ import { Pagination } from '@/components/ui/Pagination';
 import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
 import { SuccessDialog } from '@/components/ui/SuccessDialog';
 import { useI18n } from '@/i18n/I18nProvider';
-import { driversApi } from '@/lib/api';
-import type { Driver, DriverStatus } from '@/types';
+import { driversApi, registrationRequestsApi } from '@/lib/api';
+import type { Driver, DriverStatus, DriverRegistrationRequest } from '@/types';
 
-type TabValue = 'all' | DriverStatus;
+type TabValue = 'all' | DriverStatus | 'pending_requests';
 type FormMode = { kind: 'closed' } | { kind: 'add' } | { kind: 'edit'; driver: Driver };
 
 export default function DriversPage() {
@@ -27,6 +29,7 @@ export default function DriversPage() {
 
   // Data
   const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<DriverRegistrationRequest[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -38,6 +41,7 @@ export default function DriversPage() {
   // Modals
   const [formMode, setFormMode] = useState<FormMode>({ kind: 'closed' });
   const [driverToDelete, setDriverToDelete] = useState<Driver | null>(null);
+  const [driverToTopUp, setDriverToTopUp] = useState<Driver | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [successDialog, setSuccessDialog] = useState<
     | { kind: 'added' }
@@ -50,20 +54,22 @@ export default function DriversPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const data = await driversApi.list();
+      const [driverData, requestData] = await Promise.all([
+        driversApi.list(),
+        registrationRequestsApi.list(),
+      ]);
       if (!cancelled) {
-        setDrivers(data);
+        setDrivers(driverData);
+        setPendingRequests(requestData);
         setLoading(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   const filtered = useMemo(() => {
     let result = drivers;
-    if (tab !== 'all') result = result.filter((d) => d.status === tab);
+    if (tab !== 'all' && tab !== 'pending_requests') result = result.filter((d) => d.status === tab);
     if (query) {
       const q = query.toLowerCase();
       result = result.filter(
@@ -82,6 +88,19 @@ export default function DriversPage() {
       email: values.email || undefined,
       vehicleModel: values.vehicleModel,
       status: values.status,
+      documents: {
+        license: {
+          status: values.licenseFrontName ? 'pending' : 'not_uploaded',
+          hasLicense: values.hasLicense,
+          number: values.licenseNumber || undefined,
+          expiryDate: values.licenseExpiry || undefined,
+        },
+        customsCard: { status: values.customsCardName ? 'pending' : 'not_uploaded' },
+        plate: {
+          status: values.plateImageName ? 'pending' : 'not_uploaded',
+          number: values.plateNumber || undefined,
+        },
+      },
     });
     setDrivers((prev) => [created, ...prev]);
     setSuccessDialog({ kind: 'added' });
@@ -126,7 +145,44 @@ export default function DriversPage() {
     });
   };
 
+  const handleTopUpSuccess = (updated: Driver) => {
+    setDrivers((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+  };
+
+  const handleApproveRequest = async (req: DriverRegistrationRequest) => {
+    const created = await registrationRequestsApi.approve(req);
+    setDrivers((prev) => [created, ...prev]);
+    setPendingRequests((prev) => prev.filter((r) => r.id !== req.id));
+  };
+
+  const handleRejectRequest = async (req: DriverRegistrationRequest) => {
+    await registrationRequestsApi.reject(req.id);
+    setPendingRequests((prev) => prev.filter((r) => r.id !== req.id));
+  };
+
   // ----- Render -------------------------------------------------------------
+
+  const pendingCount = pendingRequests.length;
+
+  const tabOptions = [
+    { value: 'all' as TabValue,        label: t('common.all') },
+    { value: 'active' as TabValue,     label: t('status.active') },
+    { value: 'on_leave' as TabValue,   label: t('status.onLeave') },
+    { value: 'inactive' as TabValue,   label: t('status.inactive') },
+    {
+      value: 'pending_requests' as TabValue,
+      label: (
+        <span className="inline-flex items-center gap-1.5">
+          {t('drivers.pendingRequests')}
+          {pendingCount > 0 && (
+            <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white leading-none">
+              {pendingCount}
+            </span>
+          )}
+        </span>
+      ),
+    },
+  ];
 
   return (
     <DashboardShell title={t('drivers.title')} subtitle={t('drivers.subtitle')}>
@@ -168,60 +224,68 @@ export default function DriversPage() {
               setTab(v);
               setPage(1);
             }}
-            options={[
-              { value: 'all', label: t('common.all') },
-              { value: 'active', label: t('status.active') },
-              { value: 'on_leave', label: t('status.onLeave') },
-              { value: 'inactive', label: t('status.inactive') },
-            ]}
+            options={tabOptions}
           />
 
-          <Button
-            variant="primary"
-            leftIcon={<Plus className="h-4 w-4" />}
-            onClick={() => setFormMode({ kind: 'add' })}
-          >
-            {t('drivers.addNewDriver')}
-          </Button>
+          {tab !== 'pending_requests' && (
+            <Button
+              variant="primary"
+              leftIcon={<Plus className="h-4 w-4" />}
+              onClick={() => setFormMode({ kind: 'add' })}
+            >
+              {t('drivers.addNewDriver')}
+            </Button>
+          )}
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <div className="min-w-[240px] flex-1">
-            <Input
-              placeholder={t('common.searchByName')}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              leftIcon={<Search className="h-4 w-4" />}
+        {tab !== 'pending_requests' && (
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <div className="min-w-[240px] flex-1">
+              <Input
+                placeholder={t('common.searchByName')}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                leftIcon={<Search className="h-4 w-4" />}
+              />
+            </div>
+            <Select
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+              options={[
+                { value: 'newest', label: t('common.newestFirst') },
+                { value: 'oldest', label: t('common.oldestFirst') },
+              ]}
+              className="w-[200px]"
             />
           </div>
-          <Select
-            value={sort}
-            onChange={(e) => setSort(e.target.value)}
-            options={[
-              { value: 'newest', label: t('common.newestFirst') },
-              { value: 'oldest', label: t('common.oldestFirst') },
-            ]}
-            className="w-[200px]"
-          />
-        </div>
+        )}
       </Card>
 
-      {/* Table */}
+      {/* Content */}
       <div className="mt-5">
         {loading ? (
           <Card className="p-5">
             <Skeleton className="h-[400px] w-full" />
           </Card>
+        ) : tab === 'pending_requests' ? (
+          <PendingRequestsTable
+            requests={pendingRequests}
+            onApprove={handleApproveRequest}
+            onReject={handleRejectRequest}
+          />
         ) : (
           <DriversTable
             drivers={filtered}
             onEdit={(d) => setFormMode({ kind: 'edit', driver: d })}
             onDelete={(d) => setDriverToDelete(d)}
+            onTopUp={(d) => setDriverToTopUp(d)}
           />
         )}
       </div>
 
-      <Pagination currentPage={page} totalPages={8} onChange={setPage} />
+      {tab !== 'pending_requests' && (
+        <Pagination currentPage={page} totalPages={8} onChange={setPage} />
+      )}
 
       {/* Modals */}
       <DriverFormModal
@@ -233,6 +297,13 @@ export default function DriversPage() {
             ? handleEditSubmit(values, id)
             : handleAddSubmit(values)
         }
+      />
+
+      <TopUpModal
+        open={!!driverToTopUp}
+        onClose={() => setDriverToTopUp(null)}
+        driver={driverToTopUp}
+        onSuccess={handleTopUpSuccess}
       />
 
       <ConfirmDeleteDialog
