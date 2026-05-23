@@ -135,7 +135,7 @@ export default function FastChargingPage() {
         </div>
 
         {view === 'card' && (
-          <div className="mt-4 min-w-[240px]">
+          <div className="mt-4">
             <Input
               placeholder={t('common.searchByName')}
               value={query}

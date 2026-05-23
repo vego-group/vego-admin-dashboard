@@ -123,15 +123,7 @@ export default function BatterySwappingPage() {
             </h2>
             <p className="text-xs text-slate-500">{t('batterySwapping.realtimeMap')}</p>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-[200px]">
-              <Input
-                placeholder={t('batterySwapping.searchCabinets')}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                leftIcon={<Search className="h-4 w-4" />}
-              />
-            </div>
+          <div className="flex flex-wrap items-center gap-2">
             <SegmentedControl
               variant="panel"
               value={view}
@@ -149,6 +141,15 @@ export default function BatterySwappingPage() {
               {t('batterySwapping.sync')}
             </button>
           </div>
+        </div>
+        {/* Search — full width below toolbar */}
+        <div className="mt-3">
+          <Input
+            placeholder={t('batterySwapping.searchCabinets')}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            leftIcon={<Search className="h-4 w-4" />}
+          />
         </div>
 
         {/* Filter tabs */}

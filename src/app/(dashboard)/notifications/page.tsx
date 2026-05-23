@@ -129,7 +129,7 @@ export default function NotificationsPage() {
       subtitle={t('notifications.subtitle')}
     >
       {/* ── Stat cards ───────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
         <StatCard
           icon={<Bell className="h-5 w-5" />}
           label={t('notifications.total')}
@@ -169,11 +169,12 @@ export default function NotificationsPage() {
 
       {/* ── Filter + actions row ──────────────────── */}
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        {/* Tabs */}
-        <div
-          className="flex items-center gap-1 rounded-xl border bg-slate-50/60 p-1 dark:bg-slate-900/40"
-          style={{ borderColor: 'rgb(var(--border))' }}
-        >
+        {/* Tabs — horizontally scrollable on small screens */}
+        <div className="min-w-0 overflow-x-auto">
+          <div
+            className="flex w-max items-center gap-1 rounded-xl border bg-slate-50/60 p-1 dark:bg-slate-900/40"
+            style={{ borderColor: 'rgb(var(--border))' }}
+          >
           {TABS.map((tab) => (
             <button
               key={tab.key}
@@ -193,6 +194,7 @@ export default function NotificationsPage() {
               )}
             </button>
           ))}
+          </div>
         </div>
 
         {/* Action buttons */}

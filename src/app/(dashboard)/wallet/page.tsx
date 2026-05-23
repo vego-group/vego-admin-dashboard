@@ -219,9 +219,9 @@ export default function WalletPage() {
 
       {/* ── Filters bar ───────────────────────────────────────────────── */}
       <Card className="mt-5 p-4">
-        <div className="flex flex-wrap items-end gap-3">
-          {/* Date range */}
-          <div className="flex items-end gap-2">
+        <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-end">
+          {/* Date range — stacks on mobile, inline on sm+ */}
+          <div className="grid grid-cols-2 items-end gap-2 sm:flex sm:w-auto">
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-500">{t('wallet.fromDate')}</label>
               <div className="relative">
@@ -230,12 +230,11 @@ export default function WalletPage() {
                   type="date"
                   value={fromDate}
                   onChange={(e) => setFilter(setFromDate)(e.target.value)}
-                  className="h-10 rounded-xl border bg-white ps-9 pe-3 text-sm text-slate-700 outline-none transition-colors focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:bg-slate-900/40 dark:text-slate-200"
+                  className="h-10 w-full rounded-xl border bg-white ps-9 pe-3 text-sm text-slate-700 outline-none transition-colors focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:bg-slate-900/40 dark:text-slate-200"
                   style={{ borderColor: 'rgb(var(--border))' }}
                 />
               </div>
             </div>
-            <span className="mb-2 text-slate-400">—</span>
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-500">{t('wallet.toDate')}</label>
               <div className="relative">
@@ -244,7 +243,7 @@ export default function WalletPage() {
                   type="date"
                   value={toDate}
                   onChange={(e) => setFilter(setToDate)(e.target.value)}
-                  className="h-10 rounded-xl border bg-white ps-9 pe-3 text-sm text-slate-700 outline-none transition-colors focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:bg-slate-900/40 dark:text-slate-200"
+                  className="h-10 w-full rounded-xl border bg-white ps-9 pe-3 text-sm text-slate-700 outline-none transition-colors focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:bg-slate-900/40 dark:text-slate-200"
                   style={{ borderColor: 'rgb(var(--border))' }}
                 />
               </div>
@@ -252,17 +251,18 @@ export default function WalletPage() {
           </div>
 
           {/* Driver */}
-          <div className="min-w-[160px]">
+          <div className="w-full sm:w-auto sm:min-w-[160px]">
             <label className="mb-1 block text-xs font-medium text-slate-500">{t('wallet.driver')}</label>
             <Select
               value={driverFilter}
               onChange={(e) => setFilter(setDriverFilter)(e.target.value)}
               options={driverOptions}
+              className="w-full"
             />
           </div>
 
           {/* Type */}
-          <div className="min-w-[140px]">
+          <div className="w-full sm:w-auto sm:min-w-[140px]">
             <label className="mb-1 block text-xs font-medium text-slate-500">{t('wallet.type')}</label>
             <Select
               value={typeFilter}
@@ -273,11 +273,12 @@ export default function WalletPage() {
                 { value: 'fast_charge',  label: t('wallet.typeFastCharge') },
                 { value: 'battery_swap', label: t('wallet.typeBatterySwap') },
               ]}
+              className="w-full"
             />
           </div>
 
           {/* Status */}
-          <div className="min-w-[140px]">
+          <div className="w-full sm:w-auto sm:min-w-[140px]">
             <label className="mb-1 block text-xs font-medium text-slate-500">{t('wallet.status')}</label>
             <Select
               value={statusFilter}
@@ -288,15 +289,17 @@ export default function WalletPage() {
                 { value: 'pending',   label: t('wallet.statusPending') },
                 { value: 'failed',    label: t('wallet.statusFailed') },
               ]}
+              className="w-full"
             />
           </div>
 
           {/* Export */}
-          <div className="ms-auto">
+          <div className="w-full sm:ms-auto sm:w-auto">
             <Button
               variant="primary"
               leftIcon={<Download className="h-4 w-4" />}
               onClick={() => exportCsv(filtered)}
+              className="w-full sm:w-auto"
             >
               {t('wallet.exportCsv')}
             </Button>

@@ -14,6 +14,7 @@ import {
   LogOut,
   Wallet,
   Zap,
+  X,
 } from 'lucide-react';
 import { Logo } from './Logo';
 import { useI18n } from '@/i18n/I18nProvider';
@@ -35,7 +36,12 @@ const navItems = [
   { href: '/wallet',           icon: Wallet,          key: 'nav.wallet' },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+}
+
+export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { t } = useI18n();
   const router = useRouter();
@@ -49,14 +55,31 @@ export function Sidebar() {
 
   return (
     <aside
-      className="sticky top-0 flex h-screen w-[260px] shrink-0 flex-col border-e bg-[rgb(var(--sidebar))] text-[rgb(var(--sidebar-foreground))]"
+      className={cn(
+        'flex w-[260px] shrink-0 flex-col border-e bg-[rgb(var(--sidebar))] text-[rgb(var(--sidebar-foreground))]',
+        // Mobile: fixed overlay sliding in/out
+        'fixed inset-y-0 start-0 z-50 transition-transform duration-300 ease-in-out',
+        // Desktop: sticky in the flex layout
+        'md:sticky md:top-0 md:z-auto md:h-screen md:translate-x-0',
+        // Mobile open / closed state
+        isOpen ? 'translate-x-0' : 'ltr:-translate-x-full rtl:translate-x-full'
+      )}
       style={{ borderColor: 'rgb(var(--border))' }}
     >
-      <div className="px-5 pb-4 pt-6">
+      {/* Header: logo + mobile close button */}
+      <div className="flex items-center justify-between px-5 pb-4 pt-6">
         <Logo />
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 md:hidden"
+          aria-label="Close menu"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
 
-      <nav className="flex-1 px-3 py-2">
+      <nav className="flex-1 overflow-y-auto px-3 py-2">
         <ul className="space-y-1">
           {navItems.map((item) => {
             const Icon = item.icon;

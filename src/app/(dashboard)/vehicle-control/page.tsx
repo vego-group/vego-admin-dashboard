@@ -60,7 +60,7 @@ export default function VehicleControlPage() {
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[320px_1fr_320px]">
-          <div className="h-[calc(100vh-160px)] min-h-[600px]">
+          <div className="min-h-[360px] lg:h-[calc(100vh-160px)]">
             <VehicleListPanel
               vehicles={vehicles}
               selectedId={selectedId}

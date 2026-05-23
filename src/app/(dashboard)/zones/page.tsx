@@ -177,7 +177,7 @@ export default function ZonesPage() {
       {/* Two-column layout: list (left) | map (right) */}
       <div className="grid flex-1 gap-4 lg:grid-cols-[340px_1fr]" style={{ minHeight: 0 }}>
         {/* LEFT: Search + Zones list */}
-        <Card className="flex flex-col overflow-hidden p-4">
+        <Card className="flex flex-col overflow-hidden p-4 max-h-[420px] lg:max-h-none">
           <Input
             placeholder={t('zones.searchByZone')}
             value={query}

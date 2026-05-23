@@ -218,14 +218,17 @@ export default function DriversPage() {
       {/* Filters bar */}
       <Card className="mt-5 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <SegmentedControl
-            value={tab}
-            onChange={(v) => {
-              setTab(v);
-              setPage(1);
-            }}
-            options={tabOptions}
-          />
+          {/* Horizontally scrollable on mobile to accommodate all 5 tabs */}
+          <div className="min-w-0 overflow-x-auto">
+            <SegmentedControl
+              value={tab}
+              onChange={(v) => {
+                setTab(v);
+                setPage(1);
+              }}
+              options={tabOptions}
+            />
+          </div>
 
           {tab !== 'pending_requests' && (
             <Button
