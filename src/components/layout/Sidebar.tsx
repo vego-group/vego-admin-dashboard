@@ -57,12 +57,12 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
     <aside
       className={cn(
         'flex w-[260px] shrink-0 flex-col border-e bg-[rgb(var(--sidebar))] text-[rgb(var(--sidebar-foreground))]',
-        // Mobile: fixed overlay sliding in/out
+        // Mobile: fixed overlay
         'fixed inset-y-0 start-0 z-50 transition-transform duration-300 ease-in-out',
-        // Desktop: sticky in the flex layout
+        // Desktop: back into the flex layout, always visible
         'md:sticky md:top-0 md:z-auto md:h-screen md:translate-x-0',
-        // Mobile open / closed state
-        isOpen ? 'translate-x-0' : 'ltr:-translate-x-full rtl:translate-x-full'
+        // Mobile-ONLY slide: max-md: ensures these never apply on desktop
+        !isOpen && 'max-md:ltr:-translate-x-full max-md:rtl:translate-x-full'
       )}
       style={{ borderColor: 'rgb(var(--border))' }}
     >
