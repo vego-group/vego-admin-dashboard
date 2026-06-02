@@ -4,6 +4,7 @@ import { useState } from 'react';
 import {
   Check, X, Eye, IdCard, FileText, Hash, UserCheck, Users,
   CheckCircle2, XCircle, Phone, Mail, CalendarDays, CreditCard, Car,
+  AlertTriangle,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
@@ -14,8 +15,8 @@ import type { DocumentStatus, DriverRegistrationRequest } from '@/types';
 
 interface PendingRequestsTableProps {
   requests: DriverRegistrationRequest[];
-  onApprove: (req: DriverRegistrationRequest) => void;
-  onReject:  (req: DriverRegistrationRequest) => void;
+  onApprove: (req: DriverRegistrationRequest) => Promise<void> | void;
+  onReject:  (req: DriverRegistrationRequest, reason: string) => Promise<void> | void;
 }
 
 // ── Document helpers ───────────────────────────────────────────────────────
@@ -69,7 +70,7 @@ function DocStatusBadge({ status }: { status: DocumentStatus }) {
   );
 }
 
-// ── Time ago (uses i18n common keys) ──────────────────────────────────────
+// ── Time ago ───────────────────────────────────────────────────────────────
 
 function useTimeAgo() {
   const { t } = useI18n();
@@ -119,32 +120,93 @@ function ApproveConfirmModal({
   );
 }
 
-// ── Reject confirmation modal ──────────────────────────────────────────────
+// ── Reject confirmation modal (with mandatory reason) ──────────────────────
+
+const MAX_REASON = 500;
 
 function RejectConfirmModal({
   req, open, loading, onClose, onConfirm,
 }: {
   req: DriverRegistrationRequest; open: boolean; loading: boolean;
-  onClose: () => void; onConfirm: () => void;
+  onClose: () => void; onConfirm: (reason: string) => void;
 }) {
   const { t } = useI18n();
+  const [reason, setReason] = useState('');
+  const [touched, setTouched] = useState(false);
+
+  const tooShort = reason.trim().length < 5;
+  const tooLong  = reason.length > MAX_REASON;
+  const hasError = touched && (tooShort || tooLong);
+
+  const handleClose = () => {
+    setReason('');
+    setTouched(false);
+    onClose();
+  };
+
+  const handleSubmit = () => {
+    setTouched(true);
+    if (tooShort || tooLong) return;
+    onConfirm(reason.trim());
+  };
+
   return (
-    <Modal open={open} onClose={onClose} size="sm" hideCloseButton>
-      <div className="px-6 pb-6 pt-8 text-center">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-100 dark:bg-rose-500/15">
-          <XCircle className="h-7 w-7 text-rose-600 dark:text-rose-400" />
+    <Modal open={open} onClose={handleClose} size="sm" hideCloseButton>
+      <div className="px-6 pb-6 pt-8">
+        {/* Icon + title */}
+        <div className="flex flex-col items-center text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-100 dark:bg-rose-500/15">
+            <XCircle className="h-7 w-7 text-rose-600 dark:text-rose-400" />
+          </div>
+          <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-slate-50">
+            {t('drivers.rejectRequestTitle')}
+          </h2>
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            {t('drivers.rejectRequestMessage', { name: req.name })}
+          </p>
         </div>
-        <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-slate-50">
-          {t('drivers.rejectRequestTitle')}
-        </h2>
-        <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-          {t('drivers.rejectRequestMessage', { name: req.name })}
-        </p>
-        <div className="mt-6 flex items-center justify-center gap-3">
-          <Button variant="secondary" onClick={onClose} disabled={loading} className="min-w-[110px]">
+
+        {/* Reason textarea */}
+        <div className="mt-5">
+          <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-200">
+            {t('drivers.rejectReason')} <span className="text-rose-500">*</span>
+          </label>
+          <textarea
+            rows={3}
+            maxLength={MAX_REASON}
+            placeholder={t('drivers.rejectReasonPlaceholder')}
+            value={reason}
+            onChange={(e) => { setReason(e.target.value); setTouched(true); }}
+            className={cn(
+              'w-full resize-none rounded-xl border px-3.5 py-2.5 text-sm text-slate-700 transition-colors',
+              'focus:outline-none focus:ring-2 dark:bg-slate-900/40 dark:text-slate-200',
+              hasError
+                ? 'border-rose-400 focus:border-rose-400 focus:ring-rose-400/20'
+                : 'focus:border-brand-500 focus:ring-brand-500/20',
+            )}
+            style={!hasError ? { borderColor: 'rgb(var(--border))' } : undefined}
+          />
+          <div className="mt-1 flex items-start justify-between gap-2">
+            {hasError ? (
+              <p className="flex items-center gap-1 text-xs text-rose-600">
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                {tooShort ? t('drivers.rejectReasonTooShort') : t('drivers.rejectReasonTooLong')}
+              </p>
+            ) : (
+              <span />
+            )}
+            <span className={cn('shrink-0 text-[11px] tabular-nums', tooLong ? 'text-rose-500' : 'text-slate-400')}>
+              {reason.length}/{MAX_REASON}
+            </span>
+          </div>
+        </div>
+
+        {/* Buttons */}
+        <div className="mt-5 flex items-center justify-center gap-3">
+          <Button variant="secondary" onClick={handleClose} disabled={loading} className="min-w-[110px]">
             {t('common.cancel')}
           </Button>
-          <Button variant="danger" onClick={onConfirm} isLoading={loading} className="min-w-[140px]">
+          <Button variant="danger" onClick={handleSubmit} isLoading={loading} className="min-w-[140px]">
             <X className="h-4 w-4" />
             {t('drivers.reject')}
           </Button>
@@ -322,30 +384,35 @@ function ViewDetailsModal({
 
 // ── Main component ─────────────────────────────────────────────────────────
 
-type ConfirmState = { type: 'approve' | 'reject'; req: DriverRegistrationRequest } | null;
+type ConfirmState =
+  | { type: 'approve'; req: DriverRegistrationRequest }
+  | { type: 'reject';  req: DriverRegistrationRequest }
+  | null;
 
 export function PendingRequestsTable({ requests, onApprove, onReject }: PendingRequestsTableProps) {
   const { t } = useI18n();
   const timeAgo = useTimeAgo();
 
-  const [viewReq, setViewReq] = useState<DriverRegistrationRequest | null>(null);
-  const [confirm, setConfirm] = useState<ConfirmState>(null);
-  const [acting, setActing] = useState(false);
+  const [viewReq, setViewReq]   = useState<DriverRegistrationRequest | null>(null);
+  const [confirm, setConfirm]   = useState<ConfirmState>(null);
+  const [acting,  setActing]    = useState(false);
 
-  const openApprove = (req: DriverRegistrationRequest) => setConfirm({ type: 'approve', req });
-  const openReject  = (req: DriverRegistrationRequest) => setConfirm({ type: 'reject',  req });
+  const openApprove  = (req: DriverRegistrationRequest) => setConfirm({ type: 'approve', req });
+  const openReject   = (req: DriverRegistrationRequest) => setConfirm({ type: 'reject',  req });
   const closeConfirm = () => setConfirm(null);
 
-  const handleConfirm = async () => {
-    if (!confirm) return;
+  const handleApproveConfirm = async () => {
+    if (!confirm || confirm.type !== 'approve') return;
     setActing(true);
-    try {
-      if (confirm.type === 'approve') await Promise.resolve(onApprove(confirm.req));
-      else                             await Promise.resolve(onReject(confirm.req));
-    } finally {
-      setActing(false);
-      setConfirm(null);
-    }
+    try { await onApprove(confirm.req); }
+    finally { setActing(false); setConfirm(null); }
+  };
+
+  const handleRejectConfirm = async (reason: string) => {
+    if (!confirm || confirm.type !== 'reject') return;
+    setActing(true);
+    try { await onReject(confirm.req, reason); }
+    finally { setActing(false); setConfirm(null); }
   };
 
   if (requests.length === 0) {
@@ -417,7 +484,7 @@ export function PendingRequestsTable({ requests, onApprove, onReject }: PendingR
                         </div>
                         <div>
                           <p className="font-semibold text-slate-900 dark:text-slate-100">{req.name}</p>
-                          <p className="text-xs text-slate-400">{req.id}</p>
+                          <p className="text-xs text-slate-400">#{req.id}</p>
                         </div>
                       </div>
                     </td>
@@ -505,18 +572,18 @@ export function PendingRequestsTable({ requests, onApprove, onReject }: PendingR
           open
           loading={acting}
           onClose={closeConfirm}
-          onConfirm={handleConfirm}
+          onConfirm={handleApproveConfirm}
         />
       )}
 
-      {/* Reject confirmation */}
+      {/* Reject confirmation — with reason textarea */}
       {confirm?.type === 'reject' && (
         <RejectConfirmModal
           req={confirm.req}
           open
           loading={acting}
           onClose={closeConfirm}
-          onConfirm={handleConfirm}
+          onConfirm={handleRejectConfirm}
         />
       )}
     </>

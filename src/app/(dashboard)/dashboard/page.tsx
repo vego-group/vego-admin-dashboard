@@ -20,54 +20,105 @@ import type {
   BatteryStation,
 } from '@/types';
 
+// ── Safe initial state — all zeros, no fake numbers ─────────────────────────
+
+const EMPTY_METRICS: DashboardMetrics = {
+  activeFleet: 0,
+  availableBatteries: 0,
+  totalTripsToday: 0,
+  avgTripDurationMinutes: 0,
+  chargingBatteries: 0,
+  averageSoc: 0,
+  lowBatteryCount: 0,
+  averageCostPerVehicle: 0,
+  successRate: 0,
+  fleetTrend: 0,
+  batteriesTrend: 0,
+  tripsTrend: 0,
+  durationTrend: 0,
+  totalDrivers: 0,
+  activeTrips: 0,
+  unresolvedAlarms: 0,
+  onlineDevices: 0,
+};
+
+const FALLBACK_USAGE: UsagePoint[] = Array.from({ length: 24 }, (_, i) => ({
+  hour: `${String(i).padStart(2, '0')}:00`,
+  value: 0,
+}));
+
+const FALLBACK_HEALTH: BatteryHealthPoint[] = [
+  { month: 'Jan', health: 0 }, { month: 'Feb', health: 0 }, { month: 'Mar', health: 0 },
+  { month: 'Apr', health: 0 }, { month: 'May', health: 0 }, { month: 'Jun', health: 0 },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function DashboardPage() {
   const { t } = useI18n();
-  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
-  const [usage, setUsage] = useState<UsagePoint[]>([]);
-  const [health, setHealth] = useState<BatteryHealthPoint[]>([]);
+
+  // KPI + Fleet Status — starts with zeros, replaced by real API data
+  const [metrics, setMetrics] = useState<DashboardMetrics>(EMPTY_METRICS);
+  const [metricsLoading, setMetricsLoading] = useState(true);
+
+  // Today's Usage chart
+  const [usage, setUsage] = useState<UsagePoint[]>(FALLBACK_USAGE);
+  const [usageLoading, setUsageLoading] = useState(true);
+
+  // Battery Health chart
+  const [health, setHealth] = useState<BatteryHealthPoint[]>(FALLBACK_HEALTH);
+  const [healthLoading, setHealthLoading] = useState(true);
+
+  // Live Fleet Map — empty until API responds
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [stations, setStations] = useState<BatteryStation[]>([]);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const [m, u, h, v, s] = await Promise.all([
-          dashboardApi.getMetrics(),
-          dashboardApi.getUsage(),
-          dashboardApi.getBatteryHealth(),
-          fleetApi.list(),
-          stationsApi.list(),
-        ]);
-        if (!cancelled) {
-          setMetrics(m);
-          setUsage(u);
-          setHealth(h);
-          setVehicles(v);
-          setStations(s);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+
+    // ── KPI + Fleet Status → GET /fleet-admin/dashboard ────────────────────
+    dashboardApi.getMetrics()
+      .then((data) => { if (!cancelled) setMetrics(data); })
+      .catch((err) => console.error('[Dashboard] metrics failed:', err))
+      .finally(() => { if (!cancelled) setMetricsLoading(false); });
+
+    // ── Today's Usage → GET /fleet-admin/dashboard/usage ───────────────────
+    dashboardApi.getUsage()
+      .then((data) => { if (!cancelled && data.length > 0) setUsage(data); })
+      .catch((err) => console.error('[Dashboard] usage failed:', err))
+      .finally(() => { if (!cancelled) setUsageLoading(false); });
+
+    // ── Battery Health → GET /fleet-admin/dashboard/battery-health?months=6 ─
+    dashboardApi.getBatteryHealth()
+      .then((data) => { if (!cancelled && data.length > 0) setHealth(data); })
+      .catch((err) => console.error('[Dashboard] battery-health failed:', err))
+      .finally(() => { if (!cancelled) setHealthLoading(false); });
+
+    // ── Live Fleet Map vehicles → GET /fleet-admin/motorcycles ─────────────
+    fleetApi.list()
+      .then((data) => { if (!cancelled) setVehicles(data); })
+      .catch((err) => console.error('[Dashboard] vehicles failed:', err));
+
+    // ── Live Fleet Map stations → GET /fleet-admin/cabinets ────────────────
+    stationsApi.list()
+      .then((data) => { if (!cancelled) setStations(data); })
+      .catch((err) => console.error('[Dashboard] stations failed:', err));
+
+    return () => { cancelled = true; };
   }, []);
 
   return (
     <DashboardShell title={t('dashboard.title')} subtitle={t('dashboard.subtitle')}>
-      {/* KPI cards */}
+
+      {/* ── KPI cards ──────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {loading || !metrics ? (
-          Array.from({ length: 4 }).map((_, i) => (
-            <Card key={i} className="p-5">
-              <Skeleton className="h-4 w-24" />
-              <Skeleton className="mt-3 h-8 w-16" />
-              <Skeleton className="mt-3 h-3 w-32" />
-            </Card>
-          ))
+        {metricsLoading ? (
+          <>
+            <Skeleton className="h-28 rounded-2xl" />
+            <Skeleton className="h-28 rounded-2xl" />
+            <Skeleton className="h-28 rounded-2xl" />
+            <Skeleton className="h-28 rounded-2xl" />
+          </>
         ) : (
           <>
             <MetricCard
@@ -108,7 +159,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Map + status side by side */}
+      {/* ── Map + Fleet Status ──────────────────────────────────────────────── */}
       <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="overflow-hidden p-5 lg:col-span-2">
           <div className="mb-4">
@@ -119,38 +170,20 @@ export default function DashboardPage() {
           </div>
           <LiveFleetMap vehicles={vehicles} stations={stations} />
         </Card>
-        {loading || !metrics ? (
-          <Card className="p-5">
-            <Skeleton className="h-5 w-32" />
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="mt-3 h-14" />
-            ))}
-          </Card>
+
+        {metricsLoading ? (
+          <Skeleton className="min-h-[360px] rounded-2xl" />
         ) : (
           <FleetStatusPanel metrics={metrics} />
         )}
       </div>
 
-      {/* Charts */}
+      {/* ── Charts ─────────────────────────────────────────────────────────── */}
       <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {loading ? (
-          <>
-            <Card className="p-5">
-              <Skeleton className="h-5 w-32" />
-              <Skeleton className="mt-5 h-[220px] w-full" />
-            </Card>
-            <Card className="p-5">
-              <Skeleton className="h-5 w-32" />
-              <Skeleton className="mt-5 h-[220px] w-full" />
-            </Card>
-          </>
-        ) : (
-          <>
-            <TodaysUsageChart data={usage} />
-            <BatteryHealthChart data={health} />
-          </>
-        )}
+        <TodaysUsageChart data={usage} loading={usageLoading} />
+        <BatteryHealthChart data={health} loading={healthLoading} />
       </div>
+
     </DashboardShell>
   );
 }

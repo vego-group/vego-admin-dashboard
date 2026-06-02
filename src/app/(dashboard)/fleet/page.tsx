@@ -19,6 +19,7 @@ import type { Vehicle, VehicleStatus } from '@/types';
 
 type TabValue = 'all' | VehicleStatus;
 type ViewMode = 'list' | 'table';
+const PAGE_SIZE = 12;
 
 export default function FleetPage() {
   const { t } = useI18n();
@@ -33,10 +34,13 @@ export default function FleetPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const data = await fleetApi.list();
-      if (!cancelled) {
-        setVehicles(data);
-        setLoading(false);
+      try {
+        const data = await fleetApi.list();
+        if (!cancelled) setVehicles(data);
+      } catch (err) {
+        console.error('[Fleet] Failed to load vehicles:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => {
@@ -73,6 +77,9 @@ export default function FleetPage() {
     }
     return result;
   }, [vehicles, tab, query, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <DashboardShell title={t('fleet.title')} subtitle={t('fleet.subtitle')}>
@@ -176,16 +183,18 @@ export default function FleetPage() {
           </Card>
         ) : view === 'list' ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {filtered.map((v) => (
+            {paginated.map((v) => (
               <VehicleCard key={v.id} vehicle={v} />
             ))}
           </div>
         ) : (
-          <FleetTable vehicles={filtered} />
+          <FleetTable vehicles={paginated} />
         )}
       </div>
 
-      <Pagination currentPage={page} totalPages={8} onChange={setPage} />
+      {totalPages > 1 && (
+        <Pagination currentPage={page} totalPages={totalPages} onChange={setPage} />
+      )}
     </DashboardShell>
   );
 }

@@ -11,10 +11,11 @@ const vehicleToneMap: Record<VehicleStatus, 'success' | 'info' | 'neutral' | 'wa
   maintenance: 'warning',
 };
 
-const driverToneMap: Record<DriverStatus, 'success' | 'warning' | 'danger'> = {
-  active: 'success',
-  on_leave: 'warning',
-  inactive: 'danger',
+const driverToneMap: Record<DriverStatus, 'success' | 'warning' | 'danger' | 'neutral'> = {
+  active:   'success',
+  inactive: 'neutral',
+  pending:  'warning',
+  blocked:  'danger',
 };
 
 const stationToneMap: Record<StationStatus, 'success' | 'info' | 'warning'> = {
@@ -24,9 +25,10 @@ const stationToneMap: Record<StationStatus, 'success' | 'info' | 'warning'> = {
 };
 
 const driverKeyMap: Record<DriverStatus, string> = {
-  active: 'active',
-  on_leave: 'onLeave',
+  active:   'active',
   inactive: 'inactive',
+  pending:  'pending',
+  blocked:  'blocked',
 };
 
 interface StatusPillProps {

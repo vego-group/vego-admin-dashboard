@@ -4,7 +4,7 @@
 
 export type VehicleStatus = 'active' | 'charging' | 'idle' | 'maintenance';
 export type StationStatus = 'available' | 'charging' | 'in_use';
-export type DriverStatus = 'active' | 'on_leave' | 'inactive';
+export type DriverStatus = 'active' | 'inactive' | 'pending' | 'blocked';
 export type Theme = 'light' | 'dark' | 'system';
 export type Locale = 'en' | 'ar';
 export type Direction = 'ltr' | 'rtl';
@@ -81,6 +81,8 @@ export interface Driver {
   name: string;
   phone: string;
   email?: string;
+  address?: string;
+  city?: string;
   vehicleModel: string;
   status: DriverStatus;
   trips: number;
@@ -156,6 +158,11 @@ export interface DashboardMetrics {
   batteriesTrend: number;
   tripsTrend: number;
   durationTrend: number;
+  // Additional counters from GET /fleet-admin/dashboard
+  totalDrivers: number;
+  activeTrips: number;
+  unresolvedAlarms: number;
+  onlineDevices: number;
 }
 
 export interface UsagePoint {
@@ -206,8 +213,8 @@ export interface User {
 
 // ----- Wallet ----------------------------------------------------------------
 
-export type TransactionType   = 'top_up' | 'fast_charge' | 'battery_swap';
-export type TransactionStatus = 'completed' | 'pending' | 'failed';
+export type TransactionType   = 'top_up' | 'fast_charge' | 'battery_swap' | 'refund';
+export type TransactionStatus = 'completed' | 'pending' | 'failed' | 'cancelled';
 
 export interface WalletTransaction {
   id: string;

@@ -1,77 +1,135 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Bike, DollarSign, Battery, Clock } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { MetricCard } from '@/components/dashboard/MetricCard';
+import { Card } from '@/components/ui/Card';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { WeeklyTripsChart } from '@/components/reports/WeeklyTripsChart';
 import { BatteryDistributionChart } from '@/components/reports/BatteryDistributionChart';
 import { MonthlyRevenueChart } from '@/components/reports/MonthlyRevenueChart';
 import { CostAnalysisChart } from '@/components/reports/CostAnalysisChart';
 import { TopDriversLeaderboard } from '@/components/reports/TopDriversLeaderboard';
 import { useI18n } from '@/i18n/I18nProvider';
+import { reportsApi, dashboardApi } from '@/lib/api';
+import type {
+  BatteryDistribution,
+  CostBreakdown,
+  DashboardMetrics,
+  RevenuePoint,
+} from '@/types';
+
+type WeeklyTrip    = { day: string; trips: number; revenue: number };
+type TopDriver     = { name: string; earnings: number; swaps: number; charges: number; dropOff: number };
 
 export default function ReportsPage() {
   const { t } = useI18n();
 
+  const [loading, setLoading]               = useState(true);
+  const [metrics, setMetrics]               = useState<DashboardMetrics | null>(null);
+  const [weeklyTrips, setWeeklyTrips]       = useState<WeeklyTrip[]>([]);
+  const [monthlyRevenue, setMonthlyRevenue] = useState<RevenuePoint[]>([]);
+  const [batteryDist, setBatteryDist]       = useState<BatteryDistribution[]>([]);
+  const [costAnalysis, setCostAnalysis]     = useState<CostBreakdown[]>([]);
+  const [topDrivers, setTopDrivers]         = useState<TopDriver[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [m, wt, mr, bd, ca, td] = await Promise.all([
+          dashboardApi.getMetrics(),
+          reportsApi.getWeeklyTrips(),
+          reportsApi.getMonthlyRevenue(),
+          reportsApi.getBatteryDistribution(),
+          reportsApi.getCostAnalysis(),
+          reportsApi.getTopDrivers(),
+        ]);
+        if (!cancelled) {
+          setMetrics(m);
+          setWeeklyTrips(wt);
+          setMonthlyRevenue(mr);
+          setBatteryDist(bd);
+          setCostAnalysis(ca);
+          setTopDrivers(td);
+        }
+      } catch (err) {
+        console.error('[Reports] Failed to load data:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <DashboardShell title={t('reports.title')} subtitle={t('reports.subtitle')}>
-      {/* Top metrics — colorful gradient cards */}
+
+      {/* Top metrics */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard
-          label={t('reports.totalTripsToday')}
-          value={234}
-          trend={12}
-          trendLabel={t('common.fromYesterday')}
-          icon={<Bike className="h-5 w-5" />}
-          iconColor="blue"
-        />
-        <MetricCard
-          label={t('reports.dailyRevenue')}
-          value="5,680"
-          unit="SAR"
-          trend={8}
-          trendLabel={t('common.fromYesterday')}
-          icon={<DollarSign className="h-5 w-5" />}
-          iconColor="green"
-        />
-        <MetricCard
-          label={t('reports.averageBattery')}
-          value={67}
-          unit="%"
-          trend={-3}
-          trendLabel={t('common.fromYesterday')}
-          icon={<Battery className="h-5 w-5" />}
-          iconColor="violet"
-        />
-        <MetricCard
-          label={t('reports.avgTripTime')}
-          value={24}
-          unit={t('common.minutes')}
-          trend={2}
-          trendLabel={t('common.minutes')}
-          icon={<Clock className="h-5 w-5" />}
-          iconColor="orange"
-        />
+        {loading || !metrics ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i} className="p-5">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="mt-3 h-8 w-16" />
+              <Skeleton className="mt-3 h-3 w-32" />
+            </Card>
+          ))
+        ) : (
+          <>
+            <MetricCard
+              label={t('reports.totalTripsToday')}
+              value={metrics.totalTripsToday}
+              trend={metrics.tripsTrend}
+              trendLabel={t('common.fromYesterday')}
+              icon={<Bike className="h-5 w-5" />}
+              iconColor="blue"
+            />
+            <MetricCard
+              label={t('reports.dailyRevenue')}
+              value={metrics.averageCostPerVehicle * metrics.activeFleet}
+              unit="SAR"
+              icon={<DollarSign className="h-5 w-5" />}
+              iconColor="green"
+            />
+            <MetricCard
+              label={t('reports.averageBattery')}
+              value={metrics.averageSoc}
+              unit="%"
+              icon={<Battery className="h-5 w-5" />}
+              iconColor="violet"
+            />
+            <MetricCard
+              label={t('reports.avgTripTime')}
+              value={metrics.avgTripDurationMinutes}
+              unit={t('common.minutes')}
+              icon={<Clock className="h-5 w-5" />}
+              iconColor="orange"
+            />
+          </>
+        )}
       </div>
 
       {/* Weekly Trips + Battery Distribution */}
       <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <WeeklyTripsChart />
-        <BatteryDistributionChart />
+        <WeeklyTripsChart data={weeklyTrips} loading={loading} />
+        <BatteryDistributionChart data={batteryDist} loading={loading} />
       </div>
 
       {/* Monthly Revenue full-width */}
       <div className="mt-5">
-        <MonthlyRevenueChart />
+        <MonthlyRevenueChart data={monthlyRevenue} loading={loading} />
       </div>
 
       {/* Cost Analysis + Top Drivers */}
       <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <CostAnalysisChart />
+        <CostAnalysisChart data={costAnalysis} loading={loading} />
         <div className="lg:col-span-2">
-          <TopDriversLeaderboard />
+          <TopDriversLeaderboard data={topDrivers} loading={loading} />
         </div>
       </div>
+
     </DashboardShell>
   );
 }

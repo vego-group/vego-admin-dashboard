@@ -1,11 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Bike, Plane, UserX, DollarSign, Search, Plus } from 'lucide-react';
+import { Bike, Clock, UserX, Ban, Search, Plus } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { DriversTable } from '@/components/drivers/DriversTable';
-import { PendingRequestsTable } from '@/components/drivers/PendingRequestsTable';
 import { DriverFormModal, type DriverFormValues } from '@/components/drivers/DriverFormModal';
 import { TopUpModal } from '@/components/drivers/TopUpModal';
 import { Card } from '@/components/ui/Card';
@@ -15,13 +14,12 @@ import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Pagination } from '@/components/ui/Pagination';
-import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
 import { SuccessDialog } from '@/components/ui/SuccessDialog';
 import { useI18n } from '@/i18n/I18nProvider';
-import { driversApi, registrationRequestsApi } from '@/lib/api';
-import type { Driver, DriverStatus, DriverRegistrationRequest } from '@/types';
+import { driversApi } from '@/lib/api';
+import type { Driver, DriverStatus } from '@/types';
 
-type TabValue = 'all' | DriverStatus | 'pending_requests';
+type TabValue = 'all' | DriverStatus;
 type FormMode = { kind: 'closed' } | { kind: 'add' } | { kind: 'edit'; driver: Driver };
 
 export default function DriversPage() {
@@ -29,7 +27,6 @@ export default function DriversPage() {
 
   // Data
   const [drivers, setDrivers] = useState<Driver[]>([]);
-  const [pendingRequests, setPendingRequests] = useState<DriverRegistrationRequest[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -40,13 +37,10 @@ export default function DriversPage() {
 
   // Modals
   const [formMode, setFormMode] = useState<FormMode>({ kind: 'closed' });
-  const [driverToDelete, setDriverToDelete] = useState<Driver | null>(null);
   const [driverToTopUp, setDriverToTopUp] = useState<Driver | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [successDialog, setSuccessDialog] = useState<
     | { kind: 'added' }
     | { kind: 'updated' }
-    | { kind: 'deleted'; driver: Driver; position: number }
     | null
   >(null);
 
@@ -54,22 +48,23 @@ export default function DriversPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [driverData, requestData] = await Promise.all([
-        driversApi.list(),
-        registrationRequestsApi.list(),
-      ]);
-      if (!cancelled) {
-        setDrivers(driverData);
-        setPendingRequests(requestData);
-        setLoading(false);
+      try {
+        const driverData = await driversApi.list();
+        if (!cancelled) setDrivers(driverData);
+      } catch (err) {
+        console.error('[Drivers] Failed to load data:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
   }, []);
 
+  const PAGE_SIZE = 10;
+
   const filtered = useMemo(() => {
     let result = drivers;
-    if (tab !== 'all' && tab !== 'pending_requests') result = result.filter((d) => d.status === tab);
+    if (tab !== 'all') result = result.filter((d) => d.status === tab);
     if (query) {
       const q = query.toLowerCase();
       result = result.filter(
@@ -79,6 +74,9 @@ export default function DriversPage() {
     return result;
   }, [drivers, tab, query]);
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   // ----- Handlers -----------------------------------------------------------
 
   const handleAddSubmit = async (values: DriverFormValues) => {
@@ -86,6 +84,8 @@ export default function DriversPage() {
       name: values.fullName,
       phone: values.phone,
       email: values.email || undefined,
+      address: values.address || undefined,
+      city: values.city || undefined,
       vehicleModel: values.vehicleModel,
       status: values.status,
       documents: {
@@ -95,7 +95,7 @@ export default function DriversPage() {
           number: values.licenseNumber || undefined,
           expiryDate: values.licenseExpiry || undefined,
         },
-        customsCard: { status: values.customsCardName ? 'pending' : 'not_uploaded' },
+        customsCard: { status: 'not_uploaded' },
         plate: {
           status: values.plateImageName ? 'pending' : 'not_uploaded',
           number: values.plateNumber || undefined,
@@ -108,80 +108,66 @@ export default function DriversPage() {
 
   const handleEditSubmit = async (values: DriverFormValues, driverId?: string) => {
     if (!driverId) return;
+
     const updated = await driversApi.update(driverId, {
       name: values.fullName,
       phone: values.phone,
       email: values.email || undefined,
+      address: values.address || undefined,
+      city: values.city || undefined,
       vehicleModel: values.vehicleModel,
-      status: values.status,
     });
+
     if (updated) {
-      setDrivers((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+      setDrivers((prev) => prev.map((d) => {
+        if (d.id !== updated.id) return d;
+        return {
+          ...updated,
+          status:        d.status,
+          walletBalance: d.walletBalance,
+          trips:         d.trips,
+          totalCost:     d.totalCost,
+          charges:       d.charges,
+          swaps:         d.swaps,
+        };
+      }));
       setSuccessDialog({ kind: 'updated' });
     }
   };
 
-  const handleConfirmDelete = async () => {
-    if (!driverToDelete) return;
-    setDeleting(true);
-    const position = drivers.findIndex((d) => d.id === driverToDelete.id);
-    const removed = await driversApi.remove(driverToDelete.id);
-    setDeleting(false);
-    if (removed) {
-      setDrivers((prev) => prev.filter((d) => d.id !== removed.id));
-      setSuccessDialog({ kind: 'deleted', driver: removed, position });
-    }
-    setDriverToDelete(null);
-  };
-
-  const handleUndoDelete = async () => {
-    if (successDialog?.kind !== 'deleted') return;
-    const { driver, position } = successDialog;
-    await driversApi.restore(driver, position);
-    setDrivers((prev) => {
-      const next = [...prev];
-      next.splice(position, 0, driver);
-      return next;
-    });
-  };
-
   const handleTopUpSuccess = (updated: Driver) => {
-    setDrivers((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+    setDrivers((prev) => prev.map((d) => (d.id === updated.id ? { ...d, walletBalance: updated.walletBalance } : d)));
   };
 
-  const handleApproveRequest = async (req: DriverRegistrationRequest) => {
-    const created = await registrationRequestsApi.approve(req);
-    setDrivers((prev) => [created, ...prev]);
-    setPendingRequests((prev) => prev.filter((r) => r.id !== req.id));
+  /** Toggle active ↔ inactive via /toggle-status */
+  const handleToggleStatus = async (driver: Driver) => {
+    const newStatus = await driversApi.toggleStatus(driver.id);
+    if (newStatus) {
+      setDrivers((prev) =>
+        prev.map((d) => (d.id === driver.id ? { ...d, status: newStatus as Driver['status'] } : d))
+      );
+    }
   };
 
-  const handleRejectRequest = async (req: DriverRegistrationRequest) => {
-    await registrationRequestsApi.reject(req.id);
-    setPendingRequests((prev) => prev.filter((r) => r.id !== req.id));
+  /** Block ↔ Unblock via /block or /unblock */
+  const handleBlockToggle = async (driver: Driver) => {
+    const newStatus = driver.status === 'blocked'
+      ? await driversApi.unblock(driver.id)
+      : await driversApi.block(driver.id);
+    if (newStatus) {
+      setDrivers((prev) =>
+        prev.map((d) => (d.id === driver.id ? { ...d, status: newStatus as Driver['status'] } : d))
+      );
+    }
   };
 
   // ----- Render -------------------------------------------------------------
 
-  const pendingCount = pendingRequests.length;
-
   const tabOptions = [
-    { value: 'all' as TabValue,        label: t('common.all') },
-    { value: 'active' as TabValue,     label: t('status.active') },
-    { value: 'on_leave' as TabValue,   label: t('status.onLeave') },
-    { value: 'inactive' as TabValue,   label: t('status.inactive') },
-    {
-      value: 'pending_requests' as TabValue,
-      label: (
-        <span className="inline-flex items-center gap-1.5">
-          {t('drivers.pendingRequests')}
-          {pendingCount > 0 && (
-            <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white leading-none">
-              {pendingCount}
-            </span>
-          )}
-        </span>
-      ),
-    },
+    { value: 'all' as TabValue,      label: t('common.all') },
+    { value: 'active' as TabValue,   label: t('status.active') },
+    { value: 'blocked' as TabValue,  label: t('status.blocked') },
+    { value: 'inactive' as TabValue, label: t('status.inactive') },
   ];
 
   return (
@@ -190,78 +176,68 @@ export default function DriversPage() {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <MetricCard
           label={t('drivers.activeDrivers')}
-          value={120}
+          value={drivers.filter((d) => d.status === 'active').length}
           icon={<Bike className="h-5 w-5" />}
           iconColor="indigo"
         />
         <MetricCard
-          label={t('drivers.onLeave')}
-          value={35}
-          icon={<Plane className="h-5 w-5" />}
+          label={t('drivers.pendingDrivers')}
+          value={drivers.filter((d) => d.status === 'pending').length}
+          icon={<Clock className="h-5 w-5" />}
           iconColor="blue"
         />
         <MetricCard
           label={t('drivers.inactive')}
-          value={234}
+          value={drivers.filter((d) => d.status === 'inactive').length}
           icon={<UserX className="h-5 w-5" />}
           iconColor="orange"
         />
         <MetricCard
-          label={t('drivers.totalCost')}
-          value="278.50"
-          unit="SAR"
-          icon={<DollarSign className="h-5 w-5" />}
-          iconColor="violet"
+          label={t('drivers.blockedDrivers')}
+          value={drivers.filter((d) => d.status === 'blocked').length}
+          icon={<Ban className="h-5 w-5" />}
+          iconColor="orange"
         />
       </div>
 
       {/* Filters bar */}
       <Card className="mt-5 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          {/* Horizontally scrollable on mobile to accommodate all 5 tabs */}
           <div className="min-w-0 overflow-x-auto">
             <SegmentedControl
               value={tab}
-              onChange={(v) => {
-                setTab(v);
-                setPage(1);
-              }}
+              onChange={(v) => { setTab(v); setPage(1); }}
               options={tabOptions}
             />
           </div>
-
-          {tab !== 'pending_requests' && (
-            <Button
-              variant="primary"
-              leftIcon={<Plus className="h-4 w-4" />}
-              onClick={() => setFormMode({ kind: 'add' })}
-            >
-              {t('drivers.addNewDriver')}
-            </Button>
-          )}
+          <Button
+            variant="primary"
+            leftIcon={<Plus className="h-4 w-4" />}
+            onClick={() => setFormMode({ kind: 'add' })}
+          >
+            {t('drivers.addNewDriver')}
+          </Button>
         </div>
 
-        {tab !== 'pending_requests' && (
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <div className="min-w-[240px] flex-1">
-              <Input
-                placeholder={t('common.searchByName')}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                leftIcon={<Search className="h-4 w-4" />}
-              />
-            </div>
-            <Select
-              value={sort}
-              onChange={(e) => setSort(e.target.value)}
-              options={[
-                { value: 'newest', label: t('common.newestFirst') },
-                { value: 'oldest', label: t('common.oldestFirst') },
-              ]}
-              className="w-[200px]"
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <div className="min-w-[240px] flex-1">
+            <Input
+              placeholder={t('common.searchByName')}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              leftIcon={<Search className="h-4 w-4" />}
             />
           </div>
-        )}
+          <Select
+            value={sort}
+            onChange={(e) => setSort(e.target.value)}
+            options={[
+              { value: 'newest', label: t('common.newestFirst') },
+              { value: 'oldest', label: t('common.oldestFirst') },
+            ]}
+            className="w-[200px]"
+          />
+        </div>
       </Card>
 
       {/* Content */}
@@ -270,24 +246,19 @@ export default function DriversPage() {
           <Card className="p-5">
             <Skeleton className="h-[400px] w-full" />
           </Card>
-        ) : tab === 'pending_requests' ? (
-          <PendingRequestsTable
-            requests={pendingRequests}
-            onApprove={handleApproveRequest}
-            onReject={handleRejectRequest}
-          />
         ) : (
           <DriversTable
-            drivers={filtered}
+            drivers={paginated}
             onEdit={(d) => setFormMode({ kind: 'edit', driver: d })}
-            onDelete={(d) => setDriverToDelete(d)}
             onTopUp={(d) => setDriverToTopUp(d)}
+            onToggleStatus={handleToggleStatus}
+            onBlockToggle={handleBlockToggle}
           />
         )}
       </div>
 
-      {tab !== 'pending_requests' && (
-        <Pagination currentPage={page} totalPages={8} onChange={setPage} />
+      {totalPages > 1 && (
+        <Pagination currentPage={page} totalPages={totalPages} onChange={setPage} />
       )}
 
       {/* Modals */}
@@ -309,21 +280,10 @@ export default function DriversPage() {
         onSuccess={handleTopUpSuccess}
       />
 
-      <ConfirmDeleteDialog
-        open={!!driverToDelete}
-        onClose={() => setDriverToDelete(null)}
-        onConfirm={handleConfirmDelete}
-        title={t('drivers.deleteUserTitle')}
-        description={t('drivers.deleteUserDescription')}
-        confirmLabel={t('drivers.deleteUserConfirm')}
-        isLoading={deleting}
-      />
-
       <SuccessDialog
         open={!!successDialog}
         onClose={() => setSuccessDialog(null)}
         variant={successDialog?.kind ?? 'added'}
-        onUndo={successDialog?.kind === 'deleted' ? handleUndoDelete : undefined}
       />
     </DashboardShell>
   );

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Bell,
   Check,
@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { Card } from '@/components/ui/Card';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { useNotificationStore } from '@/store/notifications';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
@@ -90,9 +91,11 @@ type FilterTab = 'all' | 'unread' | 'alert' | 'warning' | 'success';
 
 export default function NotificationsPage() {
   const { t } = useI18n();
-  const { notifications, unreadCount, markAsRead, markAllAsRead, remove, clearAll } =
+  const { notifications, unreadCount, loading, fetchNotifications, markAsRead, markAllAsRead, remove, clearAll } =
     useNotificationStore();
   const [filter, setFilter] = useState<FilterTab>('all');
+
+  useEffect(() => { void fetchNotifications(); }, [fetchNotifications]);
 
   const stats = useMemo(
     () => ({
@@ -222,7 +225,19 @@ export default function NotificationsPage() {
 
       {/* ── Notification list ─────────────────────── */}
       <Card className="mt-4 divide-y divide-slate-100 overflow-hidden dark:divide-slate-800">
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div className="space-y-px">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-start gap-4 px-5 py-4">
+                <Skeleton className="h-10 w-10 shrink-0 rounded-xl" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-48" />
+                  <Skeleton className="h-3 w-64" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-slate-400">
             <Bell className="mb-3 h-10 w-10 opacity-30" />
             <p className="text-sm">{t('notifications.noNotifications')}</p>

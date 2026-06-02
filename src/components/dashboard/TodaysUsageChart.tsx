@@ -10,14 +10,16 @@ import {
   YAxis,
 } from 'recharts';
 import { Card } from '@/components/ui/Card';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { useI18n } from '@/i18n/I18nProvider';
 import type { UsagePoint } from '@/types';
 
 interface TodaysUsageChartProps {
   data: UsagePoint[];
+  loading?: boolean;
 }
 
-export function TodaysUsageChart({ data }: TodaysUsageChartProps) {
+export function TodaysUsageChart({ data, loading }: TodaysUsageChartProps) {
   const { t } = useI18n();
 
   return (
@@ -27,7 +29,10 @@ export function TodaysUsageChart({ data }: TodaysUsageChartProps) {
       </h3>
 
       <div className="mt-5 h-[220px]">
-        <ResponsiveContainer width="100%" height="100%">
+        {loading ? (
+          <Skeleton className="h-full w-full rounded-xl" />
+        ) : null}
+        <ResponsiveContainer width="100%" height="100%" style={loading ? { display: 'none' } : undefined}>
           <AreaChart data={data} margin={{ top: 10, right: 4, left: -22, bottom: 0 }}>
             <defs>
               <linearGradient id="usageGradient" x1="0" y1="0" x2="0" y2="1">

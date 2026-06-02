@@ -2,38 +2,60 @@
 
 import { useState } from 'react';
 import { Card } from '@/components/ui/Card';
-import { AlertTriangle, Lock, Power, Unlock } from 'lucide-react';
+import { AlertTriangle, Lock, Power, Unlock, UserPlus, UserMinus, Loader2 } from 'lucide-react';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import type { Vehicle } from '@/types';
+import type { Driver } from '@/types';
 
 interface ControlPanelProps {
   vehicle: Vehicle;
-  onUpdate?: (updates: Partial<Vehicle>) => void;
+  drivers?: Driver[];
+  onAssignDriver?: (motorcycleId: string, driverId: string) => Promise<boolean>;
+  onUnassignDriver?: (motorcycleId: string) => Promise<boolean>;
 }
 
-export function ControlPanel({ vehicle, onUpdate }: ControlPanelProps) {
+export function ControlPanel({
+  vehicle,
+  drivers = [],
+  onAssignDriver,
+  onUnassignDriver,
+}: ControlPanelProps) {
   const { t } = useI18n();
-  const [isLocked, setIsLocked] = useState(vehicle.isLocked);
-  const [isRunning, setIsRunning] = useState(vehicle.isEngineRunning);
+
+  // Local UI-only controls (no backend endpoint for engine/lock/speed)
+  const [isLocked,   setIsLocked]   = useState(vehicle.isLocked);
+  const [isRunning,  setIsRunning]  = useState(vehicle.isEngineRunning);
   const [speedLimit, setSpeedLimit] = useState(vehicle.speedLimitKmh);
 
-  const toggleLock = () => {
-    const next = !isLocked;
-    setIsLocked(next);
-    onUpdate?.({ isLocked: next });
+  // Driver assignment
+  const [selectedDriverId, setSelectedDriverId] = useState('');
+  const [assigning,  setAssigning]  = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
+
+  const handleAssign = async () => {
+    if (!selectedDriverId || !onAssignDriver) return;
+    setAssigning(true);
+    setAssignError(null);
+    const ok = await onAssignDriver(vehicle.id, selectedDriverId);
+    setAssigning(false);
+    if (!ok) setAssignError(t('vehicleControl.assignFailed'));
+    else setSelectedDriverId('');
   };
 
-  const toggleEngine = () => {
-    const next = !isRunning;
-    setIsRunning(next);
-    onUpdate?.({ isEngineRunning: next });
+  const handleUnassign = async () => {
+    if (!onUnassignDriver) return;
+    setAssigning(true);
+    setAssignError(null);
+    const ok = await onUnassignDriver(vehicle.id);
+    setAssigning(false);
+    if (!ok) setAssignError(t('vehicleControl.unassignFailed'));
   };
 
-  const handleSpeedChange = (value: number) => {
-    setSpeedLimit(value);
-    onUpdate?.({ speedLimitKmh: value });
-  };
+  // Only show active drivers who are not already assigned to this motorcycle
+  const availableDrivers = drivers.filter(
+    (d) => d.status === 'active' && d.id !== vehicle.assignedDriverId
+  );
 
   return (
     <div className="space-y-4">
@@ -50,7 +72,7 @@ export function ControlPanel({ vehicle, onUpdate }: ControlPanelProps) {
           </p>
           <button
             type="button"
-            onClick={toggleEngine}
+            onClick={() => setIsRunning((v) => !v)}
             className={cn(
               'mt-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold text-white shadow-sm transition-all active:scale-[0.99]',
               isRunning
@@ -70,7 +92,7 @@ export function ControlPanel({ vehicle, onUpdate }: ControlPanelProps) {
           </p>
           <button
             type="button"
-            onClick={toggleLock}
+            onClick={() => setIsLocked((v) => !v)}
             className={cn(
               'mt-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border text-sm font-semibold transition-all active:scale-[0.99]',
               isLocked
@@ -98,7 +120,7 @@ export function ControlPanel({ vehicle, onUpdate }: ControlPanelProps) {
             min={0}
             max={45}
             value={speedLimit}
-            onChange={(e) => handleSpeedChange(Number(e.target.value))}
+            onChange={(e) => setSpeedLimit(Number(e.target.value))}
             className="mt-2 w-full accent-brand-600"
           />
           <div className="mt-1 flex justify-between text-[10px] text-slate-400">
@@ -109,8 +131,10 @@ export function ControlPanel({ vehicle, onUpdate }: ControlPanelProps) {
         </div>
 
         {/* Current Speed */}
-        <div className="mt-4 rounded-xl border bg-slate-50 p-3 dark:bg-slate-800/40"
-          style={{ borderColor: 'rgb(var(--border))' }}>
+        <div
+          className="mt-4 rounded-xl border bg-slate-50 p-3 dark:bg-slate-800/40"
+          style={{ borderColor: 'rgb(var(--border))' }}
+        >
           <div className="flex items-center justify-between text-xs">
             <span className="text-slate-500">{t('vehicleControl.currentSpeed')}</span>
             <span className="font-bold tabular-nums text-slate-900 dark:text-slate-100">
@@ -138,6 +162,84 @@ export function ControlPanel({ vehicle, onUpdate }: ControlPanelProps) {
             {t('vehicleControl.emergencyStop')}
           </button>
         </div>
+      </Card>
+
+      {/* Driver Assignment */}
+      <Card className="p-5">
+        <h3 className="mb-4 text-sm font-semibold text-slate-900 dark:text-slate-50">
+          {t('vehicleControl.driverAssignment')}
+        </h3>
+
+        {vehicle.assignedDriverName ? (
+          /* Driver currently assigned — show name + unassign button */
+          <div>
+            <div
+              className="flex items-center gap-3 rounded-xl border bg-slate-50/60 px-4 py-3 dark:bg-slate-800/40"
+              style={{ borderColor: 'rgb(var(--border))' }}
+            >
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-400 to-violet-500 text-sm font-bold text-white">
+                {vehicle.assignedDriverName.charAt(0)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-slate-400">{t('vehicleControl.assignedDriver')}</p>
+                <p className="truncate font-semibold text-slate-900 dark:text-slate-100">
+                  {vehicle.assignedDriverName}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleUnassign}
+              disabled={assigning}
+              className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 text-sm font-semibold text-rose-600 transition-colors hover:bg-rose-100 disabled:opacity-60 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400"
+            >
+              {assigning
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <UserMinus className="h-4 w-4" />
+              }
+              {t('vehicleControl.unassignDriver')}
+            </button>
+          </div>
+        ) : (
+          /* No driver — show dropdown + assign button */
+          <div>
+            <p className="mb-2 text-xs text-slate-500">{t('vehicleControl.noDriverAssigned')}</p>
+            <select
+              value={selectedDriverId}
+              onChange={(e) => setSelectedDriverId(e.target.value)}
+              className={cn(
+                'h-10 w-full appearance-none rounded-xl border bg-white px-3 text-sm text-slate-700 transition-colors',
+                'focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20',
+                'dark:bg-slate-900/40 dark:text-slate-200',
+              )}
+              style={{ borderColor: 'rgb(var(--border))' }}
+            >
+              <option value="">{t('vehicleControl.selectDriver')}</option>
+              {availableDrivers.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name} — {d.phone}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={handleAssign}
+              disabled={!selectedDriverId || assigning}
+              className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {assigning
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <UserPlus className="h-4 w-4" />
+              }
+              {t('vehicleControl.assignDriver')}
+            </button>
+          </div>
+        )}
+
+        {/* Error */}
+        {assignError && (
+          <p className="mt-2 text-xs text-rose-600">{assignError}</p>
+        )}
       </Card>
 
       {/* System Status */}
@@ -190,7 +292,7 @@ function SystemStatusRow({
   const toneClass = {
     success: 'text-emerald-600',
     warning: 'text-amber-600',
-    danger: 'text-rose-600',
+    danger:  'text-rose-600',
     neutral: 'text-slate-600 dark:text-slate-300',
   }[tone];
 

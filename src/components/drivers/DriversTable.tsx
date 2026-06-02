@@ -1,6 +1,7 @@
 'use client';
 
-import { Pencil, Trash2, IdCard, FileText, Hash, Wallet } from 'lucide-react';
+import { useState } from 'react';
+import { Pencil, IdCard, FileText, Hash, Wallet, Loader2, ShieldX, ShieldCheck } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { useI18n } from '@/i18n/I18nProvider';
@@ -11,8 +12,9 @@ import { formatCurrency } from '@/lib/format';
 interface DriversTableProps {
   drivers: Driver[];
   onEdit?: (driver: Driver) => void;
-  onDelete?: (driver: Driver) => void;
   onTopUp?: (driver: Driver) => void;
+  onToggleStatus?: (driver: Driver) => Promise<void>;
+  onBlockToggle?: (driver: Driver) => Promise<void>;
 }
 
 function walletBalanceColor(balance: number): string {
@@ -66,8 +68,25 @@ function DocsCount(driver: Driver) {
 
 // ── Table ──────────────────────────────────────────────────────────────────
 
-export function DriversTable({ drivers, onEdit, onDelete, onTopUp }: DriversTableProps) {
+export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlockToggle }: DriversTableProps) {
   const { t, locale } = useI18n();
+
+  // Per-row loading state for toggle (active↔inactive)
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  // Per-row loading state for block/unblock
+  const [blockingId, setBlockingId] = useState<string | null>(null);
+
+  const handleToggle = async (driver: Driver) => {
+    if (!onToggleStatus || togglingId) return;
+    setTogglingId(driver.id);
+    try { await onToggleStatus(driver); } finally { setTogglingId(null); }
+  };
+
+  const handleBlockToggle = async (driver: Driver) => {
+    if (!onBlockToggle || blockingId) return;
+    setBlockingId(driver.id);
+    try { await onBlockToggle(driver); } finally { setBlockingId(null); }
+  };
 
   return (
     <Card className="overflow-hidden">
@@ -93,6 +112,8 @@ export function DriversTable({ drivers, onEdit, onDelete, onTopUp }: DriversTabl
           <tbody>
             {drivers.map((d) => {
               const { verified, total } = DocsCount(d);
+              const isBlocked = d.status === 'blocked';
+
               return (
                 <tr
                   key={d.id}
@@ -136,8 +157,42 @@ export function DriversTable({ drivers, onEdit, onDelete, onTopUp }: DriversTabl
                   <td className="px-5 py-4 font-semibold tabular-nums text-slate-700 dark:text-slate-200">
                     {formatCurrency(d.totalCost, locale)}
                   </td>
+
+                  {/* Actions column */}
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-1.5">
+
+                      {/* Active ↔ Inactive toggle switch */}
+                      {onToggleStatus && (
+                        <button
+                          type="button"
+                          onClick={() => handleToggle(d)}
+                          disabled={!!togglingId || !!blockingId}
+                          title={d.status === 'active' ? t('drivers.deactivate') : t('drivers.activate')}
+                          aria-label={d.status === 'active' ? t('drivers.deactivate') : t('drivers.activate')}
+                          className={cn(
+                            'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent',
+                            'transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-1',
+                            (togglingId === d.id || blockingId === d.id) ? 'opacity-60' : '',
+                            d.status === 'active'
+                              ? 'bg-emerald-500 hover:bg-emerald-600'
+                              : 'bg-slate-300 hover:bg-slate-400 dark:bg-slate-600 dark:hover:bg-slate-500',
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              'pointer-events-none inline-flex h-4 w-4 items-center justify-center rounded-full bg-white shadow transition-transform duration-200',
+                              d.status === 'active' ? 'translate-x-4' : 'translate-x-0',
+                            )}
+                          >
+                            {togglingId === d.id && (
+                              <Loader2 className="h-2.5 w-2.5 animate-spin text-slate-400" />
+                            )}
+                          </span>
+                        </button>
+                      )}
+
+                      {/* Edit */}
                       <button
                         type="button"
                         onClick={() => onEdit?.(d)}
@@ -147,6 +202,8 @@ export function DriversTable({ drivers, onEdit, onDelete, onTopUp }: DriversTabl
                       >
                         <Pencil className="h-4 w-4" />
                       </button>
+
+                      {/* Top-up wallet */}
                       <button
                         type="button"
                         onClick={() => onTopUp?.(d)}
@@ -156,15 +213,33 @@ export function DriversTable({ drivers, onEdit, onDelete, onTopUp }: DriversTabl
                       >
                         <Wallet className="h-4 w-4" />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => onDelete?.(d)}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-rose-600 transition-colors hover:bg-rose-50 dark:hover:bg-rose-500/10"
-                        aria-label={t('common.delete')}
-                        title={t('common.delete')}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+
+                      {/* Block / Unblock */}
+                      {onBlockToggle && (
+                        <button
+                          type="button"
+                          onClick={() => handleBlockToggle(d)}
+                          disabled={!!blockingId || !!togglingId}
+                          title={isBlocked ? t('drivers.unblock') : t('drivers.block')}
+                          aria-label={isBlocked ? t('drivers.unblock') : t('drivers.block')}
+                          className={cn(
+                            'inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors',
+                            blockingId === d.id ? 'opacity-60' : '',
+                            isBlocked
+                              ? 'text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10'
+                              : 'text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10',
+                          )}
+                        >
+                          {blockingId === d.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : isBlocked ? (
+                            <ShieldCheck className="h-4 w-4" />
+                          ) : (
+                            <ShieldX className="h-4 w-4" />
+                          )}
+                        </button>
+                      )}
+
                     </div>
                   </td>
                 </tr>

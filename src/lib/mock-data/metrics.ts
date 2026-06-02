@@ -21,6 +21,11 @@ export const mockMetrics: DashboardMetrics = {
   batteriesTrend: 5,
   tripsTrend: 18,
   durationTrend: -2,
+  // New counters from GET /fleet-admin/dashboard
+  totalDrivers: 0,
+  activeTrips: 0,
+  unresolvedAlarms: 0,
+  onlineDevices: 0,
 };
 
 export const mockUsage: UsagePoint[] = [

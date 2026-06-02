@@ -2,11 +2,17 @@
 
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { Card } from '@/components/ui/Card';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { PieChart as PieIcon } from 'lucide-react';
 import { useI18n } from '@/i18n/I18nProvider';
-import { mockBatteryDistribution } from '@/lib/mock-data';
+import type { BatteryDistribution } from '@/types';
 
-export function BatteryDistributionChart() {
+interface Props {
+  data: BatteryDistribution[];
+  loading?: boolean;
+}
+
+export function BatteryDistributionChart({ data, loading }: Props) {
   const { t } = useI18n();
 
   return (
@@ -23,49 +29,53 @@ export function BatteryDistributionChart() {
         </span>
       </div>
 
-      <div className="mt-2 flex items-center gap-5">
-        <div className="h-[200px] w-[200px] shrink-0">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie
-                data={mockBatteryDistribution}
-                dataKey="percentage"
-                nameKey="range"
-                innerRadius={0}
-                outerRadius={80}
-                paddingAngle={2}
-                stroke="#fff"
-                strokeWidth={2}
-              >
-                {mockBatteryDistribution.map((entry, idx) => (
-                  <Cell key={idx} fill={entry.color} />
-                ))}
-              </Pie>
-              <Tooltip
-                contentStyle={{
-                  borderRadius: 12,
-                  border: '1px solid #e2e8f0',
-                  fontSize: 12,
-                }}
-              />
-            </PieChart>
-          </ResponsiveContainer>
+      {loading ? (
+        <Skeleton className="mt-4 h-[220px] w-full" />
+      ) : (
+        <div className="mt-2 flex items-center gap-5">
+          <div className="h-[200px] w-[200px] shrink-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={data}
+                  dataKey="percentage"
+                  nameKey="range"
+                  innerRadius={0}
+                  outerRadius={80}
+                  paddingAngle={2}
+                  stroke="#fff"
+                  strokeWidth={2}
+                >
+                  {data.map((entry, idx) => (
+                    <Cell key={idx} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  contentStyle={{
+                    borderRadius: 12,
+                    border: '1px solid #e2e8f0',
+                    fontSize: 12,
+                  }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <ul className="flex-1 space-y-2 text-xs">
+            {data.map((item) => (
+              <li key={item.range} className="flex items-center gap-2">
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: item.color }}
+                />
+                <span className="text-slate-600 dark:text-slate-300">{item.range}</span>
+                <span className="ms-auto font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+                  {item.percentage}%
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
-        <ul className="flex-1 space-y-2 text-xs">
-          {mockBatteryDistribution.map((item) => (
-            <li key={item.range} className="flex items-center gap-2">
-              <span
-                className="h-2.5 w-2.5 shrink-0 rounded-full"
-                style={{ backgroundColor: item.color }}
-              />
-              <span className="text-slate-600 dark:text-slate-300">{item.range}</span>
-              <span className="ms-auto font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-                {item.percentage}%
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
+      )}
     </Card>
   );
 }

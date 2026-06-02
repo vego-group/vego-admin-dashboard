@@ -47,10 +47,13 @@ export default function ZonesPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const data = await zonesApi.list();
-      if (!cancelled) {
-        setZones(data);
-        setLoading(false);
+      try {
+        const data = await zonesApi.list();
+        if (!cancelled) setZones(data);
+      } catch (err) {
+        console.error('[Zones] Failed to load zones:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => {

@@ -18,6 +18,7 @@ import { stationsApi } from '@/lib/api';
 import type { BatteryStation } from '@/types';
 
 type ViewMode = 'map' | 'card';
+const PAGE_SIZE = 9;
 
 export default function StationsPage() {
   const { t } = useI18n();
@@ -32,11 +33,16 @@ export default function StationsPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const data = await stationsApi.list();
-      if (!cancelled) {
-        setStations(data);
-        setSelectedStation(data[0] ?? null);
-        setLoading(false);
+      try {
+        const data = await stationsApi.list();
+        if (!cancelled) {
+          setStations(data);
+          setSelectedStation(data[0] ?? null);
+        }
+      } catch (err) {
+        console.error('[Stations] Failed to load stations:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => {
@@ -64,6 +70,9 @@ export default function StationsPage() {
     }
     return result;
   }, [stations, query]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <DashboardShell title={t('stations.title')} subtitle={t('stations.subtitle')}>
@@ -165,11 +174,13 @@ export default function StationsPage() {
         ) : (
           <>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {filtered.map((s) => (
+              {paginated.map((s) => (
                 <StationCard key={s.id} station={s} onClick={() => setSelectedStation(s)} />
               ))}
             </div>
-            <Pagination currentPage={page} totalPages={8} onChange={setPage} />
+            {totalPages > 1 && (
+              <Pagination currentPage={page} totalPages={totalPages} onChange={setPage} />
+            )}
           </>
         )}
       </div>

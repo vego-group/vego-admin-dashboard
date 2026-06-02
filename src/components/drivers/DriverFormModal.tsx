@@ -15,6 +15,8 @@ export interface DriverFormValues {
   fullName: string;
   phone: string;
   email: string;
+  address: string;
+  city: string;
   vehicleModel: string;
   status: DriverStatus;
   // Documents (all optional)
@@ -23,7 +25,6 @@ export interface DriverFormValues {
   licenseBackName: string;
   licenseNumber: string;
   licenseExpiry: string;
-  customsCardName: string;
   plateImageName: string;
   plateNumber: string;
 }
@@ -32,6 +33,8 @@ const emptyForm: DriverFormValues = {
   fullName: '',
   phone: '',
   email: '',
+  address: '',
+  city: '',
   vehicleModel: '',
   status: 'active',
   hasLicense: false,
@@ -39,7 +42,6 @@ const emptyForm: DriverFormValues = {
   licenseBackName: '',
   licenseNumber: '',
   licenseExpiry: '',
-  customsCardName: '',
   plateImageName: '',
   plateNumber: '',
 };
@@ -54,7 +56,6 @@ interface DriverFormModalProps {
 }
 
 const VEHICLE_OPTIONS = ['', 'VEGO Pro 400', 'VEGO Cargo 500', 'VegoMax Pro', 'VegoLite'];
-const STATUS_OPTIONS: DriverStatus[] = ['active', 'on_leave', 'inactive'];
 
 // ── Main modal ────────────────────────────────────────────────────────────────
 
@@ -65,14 +66,24 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
   const [values, setValues] = useState<DriverFormValues>(emptyForm);
   const [errors, setErrors] = useState<Partial<Record<keyof DriverFormValues, string>>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    setSubmitError(null);
     if (driver) {
+      // Normalise stored phone to 9-digit local format (strip +966 / 00966 / leading 0)
+      const rawPhone = driver.phone
+        .replace(/^\+?(?:00)?966/, '')
+        .replace(/^0/, '')
+        .replace(/\D/g, '')
+        .slice(0, 9);
       setValues({
         fullName: driver.name,
-        phone: driver.phone,
-        email: '',
+        phone: rawPhone,
+        email: driver.email ?? '',
+        address: driver.address ?? '',
+        city: driver.city ?? '',
         vehicleModel: driver.vehicleModel,
         status: driver.status,
         hasLicense: driver.documents.license.hasLicense,
@@ -80,7 +91,6 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
         licenseBackName: '',
         licenseNumber: driver.documents.license.number ?? '',
         licenseExpiry: driver.documents.license.expiryDate ?? '',
-        customsCardName: driver.documents.customsCard.status !== 'not_uploaded' ? 'existing-customs.pdf' : '',
         plateImageName: driver.documents.plate.status !== 'not_uploaded' ? 'existing-plate.jpg' : '',
         plateNumber: driver.documents.plate.number ?? '',
       });
@@ -99,7 +109,7 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
     const next: typeof errors = {};
     if (!values.fullName.trim()) next.fullName = t('drivers.fullNameRequired');
     if (!values.phone.trim()) next.phone = t('drivers.phoneRequired');
-    else if (!/^\d{6,}$/.test(values.phone.trim())) next.phone = t('drivers.phoneInvalid');
+    else if (!/^5\d{8}$/.test(values.phone.trim())) next.phone = t('drivers.phoneInvalidSaudi');
     if (values.email && !/^\S+@\S+\.\S+$/.test(values.email)) next.email = t('drivers.emailInvalid');
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -109,9 +119,12 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
     e.preventDefault();
     if (!validate()) return;
     setSubmitting(true);
+    setSubmitError(null);
     try {
       await onSubmit(values, driver?.id);
       onClose();
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'An unexpected error occurred. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -143,6 +156,14 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
         {/* Body */}
         <div className="max-h-[calc(100vh-220px)] overflow-y-auto px-6 py-5">
 
+          {/* API error banner */}
+          {submitError && (
+            <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-400">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{submitError}</span>
+            </div>
+          )}
+
           {/* ── Personal Information ─────────────────────────────────────── */}
           <SectionHeader icon={<User className="h-4 w-4" />} title={t('drivers.personalInformation')} />
 
@@ -155,12 +176,39 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
               />
             </Field>
             <Field label={t('drivers.phoneNumber')} required error={errors.phone}>
-              <Input
-                placeholder="5xxxxxxxx"
-                value={values.phone}
-                onChange={(e) => update('phone', e.target.value)}
-                inputMode="tel"
-              />
+              <div
+                className={cn(
+                  'flex h-11 w-full overflow-hidden rounded-xl border bg-white transition-colors',
+                  'focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/20',
+                  'dark:bg-slate-900/40',
+                  errors.phone ? 'border-rose-400' : ''
+                )}
+                style={!errors.phone ? { borderColor: 'rgb(var(--border))' } : undefined}
+              >
+                {/* Fixed country code prefix */}
+                <div
+                  className="flex shrink-0 items-center gap-1.5 border-e bg-slate-50 px-3 text-xs font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+                  style={{ borderColor: 'rgb(var(--border))' }}
+                >
+                  <span aria-hidden>🇸🇦</span>
+                  <span>+966</span>
+                </div>
+                {/* 9-digit local number */}
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  placeholder="5XXXXXXXX"
+                  maxLength={9}
+                  value={values.phone}
+                  onChange={(e) => {
+                    // Strip non-digits, remove leading zero, limit to 9 chars
+                    let raw = e.target.value.replace(/\D/g, '');
+                    if (raw.startsWith('0')) raw = raw.slice(1);
+                    update('phone', raw.slice(0, 9));
+                  }}
+                  className="h-full min-w-0 flex-1 bg-transparent px-3 text-sm text-slate-700 outline-none dark:text-slate-200"
+                />
+              </div>
             </Field>
           </div>
           <div className="mt-4">
@@ -173,29 +221,33 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
               />
             </Field>
           </div>
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label={`${t('drivers.address')} (${t('common.optional')})`}>
+              <Input
+                placeholder="Al Olaya, Riyadh"
+                value={values.address}
+                onChange={(e) => update('address', e.target.value)}
+              />
+            </Field>
+            <Field label={`${t('drivers.city')} (${t('common.optional')})`}>
+              <Input
+                placeholder="Riyadh"
+                value={values.city}
+                onChange={(e) => update('city', e.target.value)}
+              />
+            </Field>
+          </div>
 
           {/* ── Vehicle Assignment ───────────────────────────────────────── */}
           <div className="mt-6">
             <SectionHeader icon={<Car className="h-4 w-4" />} title={t('drivers.vehicleAssignment')} />
           </div>
-          <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="mt-3 grid grid-cols-1 gap-4">
             <Field label={t('drivers.assignVehicle')} required>
               <NativeSelect value={values.vehicleModel} onChange={(e) => update('vehicleModel', e.target.value)}>
                 {VEHICLE_OPTIONS.map((v) => (
                   <option key={v} value={v}>
                     {v === '' ? t('drivers.noVehicleAssigned') : v}
-                  </option>
-                ))}
-              </NativeSelect>
-            </Field>
-            <Field label={t('drivers.status')} required>
-              <NativeSelect
-                value={values.status}
-                onChange={(e) => update('status', e.target.value as DriverStatus)}
-              >
-                {STATUS_OPTIONS.map((s) => (
-                  <option key={s} value={s}>
-                    {t(`status.${s === 'on_leave' ? 'onLeave' : s}`)}
                   </option>
                 ))}
               </NativeSelect>
@@ -271,26 +323,6 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
                 </div>
               </div>
             )}
-          </div>
-
-          {/* Customs Card */}
-          <div className="mt-3 rounded-xl border p-4" style={{ borderColor: 'rgb(var(--border))' }}>
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                {t('drivers.customsCard')}
-              </span>
-              {isEdit && (
-                <DocStatusBadge status={existingDocStatus!.customsCard.status} />
-              )}
-            </div>
-            <div className="mt-3">
-              <FileUploadBox
-                label={`${t('common.optional')}`}
-                fileName={values.customsCardName}
-                onFileSelect={(n) => update('customsCardName', n)}
-                accept="image/*,.pdf"
-              />
-            </div>
           </div>
 
           {/* License Plate */}

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -46,7 +47,12 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const { t } = useI18n();
   const router = useRouter();
   const signOut = useAuthStore((s) => s.signOut);
-  const unreadCount = useNotificationStore((s) => s.unreadCount);
+  const unreadCount        = useNotificationStore((s) => s.unreadCount);
+  const fetchUnreadCount   = useNotificationStore((s) => s.fetchUnreadCount);
+
+  // Fetch unread count once on mount so the sidebar badge is always live,
+  // even before the user visits the Notifications page.
+  useEffect(() => { void fetchUnreadCount(); }, [fetchUnreadCount]);
 
   const handleSignOut = () => {
     signOut();

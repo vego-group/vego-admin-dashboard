@@ -1,6 +1,6 @@
 'use client';
 
-import { Bell, Menu } from 'lucide-react';
+import { Menu } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
 import { useAuthStore } from '@/store/auth';
 import { ThemeToggle } from './ThemeToggle';
@@ -49,16 +49,6 @@ export function Topbar({ title, subtitle, onMenuToggle }: TopbarProps) {
       <div className="flex items-center gap-1.5 sm:gap-2.5">
         <LanguageSwitcher />
         <ThemeToggle />
-
-        <button
-          type="button"
-          className="relative inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-slate-600 transition-colors hover:bg-slate-50 dark:bg-slate-900/40 dark:text-slate-300 dark:hover:bg-slate-800"
-          style={{ borderColor: 'rgb(var(--border))' }}
-          aria-label="Notifications"
-        >
-          <Bell className="h-4 w-4" />
-          <span className="absolute end-2 top-2 h-1.5 w-1.5 rounded-full bg-rose-500 ring-2 ring-white dark:ring-slate-900" />
-        </button>
 
         <div
           className="flex items-center gap-2 rounded-full border bg-white py-1 ps-1 pe-3 dark:bg-slate-900/40 sm:gap-3 sm:pe-4"

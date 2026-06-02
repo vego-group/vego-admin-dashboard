@@ -12,29 +12,21 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Pagination } from '@/components/ui/Pagination';
 import { useI18n } from '@/i18n/I18nProvider';
-import { fastChargingApi, stationsApi } from '@/lib/api';
+import { fastChargingApi } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import type { FastChargingCabinet, BatteryStation, FastChargingStatus } from '@/types';
 
 type ViewMode = 'map' | 'card';
 type FilterTab = 'all' | 'available' | 'charging' | 'error';
+const PAGE_SIZE = 9; // 3-column grid — fills rows evenly
 
-const NETWORK_LOAD = [
-  { hour: '06', pct: 18 },
-  { hour: '09', pct: 42 },
-  { hour: '12', pct: 64 },
-  { hour: '14', pct: 78 },
-  { hour: '16', pct: 94 },
-  { hour: '18', pct: 82 },
-  { hour: '20', pct: 55 },
-];
 
 export default function FastChargingPage() {
   const { t } = useI18n();
   const [cabinets, setCabinets] = useState<FastChargingCabinet[]>([]);
   const [mapStations, setMapStations] = useState<BatteryStation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<ViewMode>('card');
+  const [view, setView] = useState<ViewMode>('map');
   const [tab, setTab] = useState<FilterTab>('all');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
@@ -42,14 +34,30 @@ export default function FastChargingPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [fcData, allStations] = await Promise.all([
-        fastChargingApi.list(),
-        stationsApi.list(),
-      ]);
-      if (!cancelled) {
-        setCabinets(fcData);
-        setMapStations(allStations.filter((s) => s.type === 'fast_charge'));
-        setLoading(false);
+      try {
+        const fcData = await fastChargingApi.list();
+        if (!cancelled) {
+          setCabinets(fcData);
+          // Convert piles → BatteryStation shape for the map
+          setMapStations(fcData.map((c) => ({
+            id:                 c.id,
+            name:               c.name,
+            district:           c.district,
+            city:               c.city,
+            coordinates:        c.coordinates,
+            available:          c.availablePorts,
+            charging:           c.chargingPorts,
+            inUse:              c.chargingPorts,
+            totalCapacity:      c.totalPorts,
+            avgWaitTimeMinutes: c.avgChargeTimeMinutes,
+            todaySwaps:         c.todaySessions,
+            type:               'fast_charge' as const,
+          })));
+        }
+      } catch (err) {
+        console.error('[FastCharging] Failed to load data:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -73,6 +81,9 @@ export default function FastChargingPage() {
     }
     return result;
   }, [cabinets, tab, query]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const statusLabel = (s: FastChargingStatus) =>
     s === 'operational' ? t('fastCharging.operational')
@@ -139,7 +150,7 @@ export default function FastChargingPage() {
             <Input
               placeholder={t('common.searchByName')}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => { setQuery(e.target.value); setPage(1); }}
               leftIcon={<Search className="h-4 w-4" />}
             />
           </div>
@@ -158,10 +169,10 @@ export default function FastChargingPage() {
               <LiveFleetMap height={400} stations={mapStations} />
             </Card>
 
-            {/* Below-map section: Nearby Cabinets + Network Load */}
-            <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-5">
+            {/* Below-map section: Nearby Cabinets */}
+            <div className="mt-4">
               {/* Nearby Cabinets table */}
-              <Card className="overflow-hidden lg:col-span-3">
+              <Card className="overflow-hidden">
                 <div className="border-b px-5 py-4" style={{ borderColor: 'rgb(var(--border))' }}>
                   <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-50">
                     {t('fastCharging.nearbyCabinets')}
@@ -176,7 +187,6 @@ export default function FastChargingPage() {
                         <th className="px-5 py-3 font-semibold uppercase tracking-wide">{t('fastCharging.location')}</th>
                         <th className="px-5 py-3 font-semibold uppercase tracking-wide">{t('fastCharging.status')}</th>
                         <th className="px-5 py-3 font-semibold uppercase tracking-wide">{t('fastCharging.load')}</th>
-                        <th className="px-5 py-3 font-semibold uppercase tracking-wide">{t('fastCharging.action')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -205,12 +215,6 @@ export default function FastChargingPage() {
                                 <span className="tabular-nums text-slate-500">{loadPct}%</span>
                               </div>
                             </td>
-                            <td className="px-5 py-3">
-                              <button type="button"
-                                className="text-brand-600 hover:text-brand-700 font-medium transition-colors dark:text-brand-400">
-                                {t('fastCharging.viewDetails')}
-                              </button>
-                            </td>
                           </tr>
                         );
                       })}
@@ -218,56 +222,18 @@ export default function FastChargingPage() {
                   </table>
                 </div>
               </Card>
-
-              {/* Network Load chart */}
-              <Card className="p-5 lg:col-span-2">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-50">
-                    {t('fastCharging.networkLoad')}
-                  </h3>
-                  <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">
-                    3.3 MHz
-                  </span>
-                </div>
-
-                {/* Bar chart */}
-                <div className="mt-4 flex h-32 items-end gap-1.5">
-                  {NETWORK_LOAD.map((d) => (
-                    <div key={d.hour} className="flex flex-1 flex-col items-center gap-1">
-                      <div
-                        className="w-full rounded-t-sm bg-brand-500/80 dark:bg-brand-500/60 transition-all"
-                        style={{ height: `${d.pct}%` }}
-                      />
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-1.5 flex gap-1.5">
-                  {NETWORK_LOAD.map((d) => (
-                    <span key={d.hour} className="flex-1 text-center text-[9px] text-slate-400">{d.hour}</span>
-                  ))}
-                </div>
-
-                <div className="mt-4 space-y-2 border-t pt-4" style={{ borderColor: 'rgb(var(--border))' }}>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500">{t('fastCharging.peakUtilization')}</span>
-                    <span className="font-bold text-slate-700 dark:text-slate-200">13:30–18:00</span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500">{t('fastCharging.avgEfficiency')}</span>
-                    <span className="font-bold text-emerald-600 dark:text-emerald-400">94.2%</span>
-                  </div>
-                </div>
-              </Card>
             </div>
           </>
         ) : (
           <>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {filtered.map((c) => (
+              {paginated.map((c) => (
                 <FastChargingCabinetCard key={c.id} cabinet={c} />
               ))}
             </div>
-            <Pagination currentPage={page} totalPages={Math.max(1, Math.ceil(filtered.length / 6))} onChange={setPage} />
+            {totalPages > 1 && (
+              <Pagination currentPage={page} totalPages={totalPages} onChange={setPage} />
+            )}
           </>
         )}
       </div>

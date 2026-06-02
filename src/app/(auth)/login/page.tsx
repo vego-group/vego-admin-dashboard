@@ -9,7 +9,7 @@ import { cn } from '@/lib/cn';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { sendOtp, isLoading, isAuthenticated } = useAuthStore();
+  const { sendOtp, isLoading, isAuthenticated, error, clearError } = useAuthStore();
   const [phone, setPhone] = useState('');
   const [phoneError, setPhoneError] = useState('');
 
@@ -66,6 +66,7 @@ export default function LoginPage() {
                     const val = e.target.value.replace(/\D/g, '').slice(0, 9);
                     setPhone(val);
                     if (phoneError) setPhoneError('');
+                    if (error) clearError();
                   }}
                   maxLength={9}
                   className="min-w-0 flex-1 bg-white px-3 py-3 text-sm text-slate-900 placeholder-slate-400 outline-none"
@@ -90,6 +91,12 @@ export default function LoginPage() {
               >
                 {isLoading ? 'Sending...' : 'Continue →'}
               </button>
+
+              {error && (
+                <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2.5 text-xs font-medium text-rose-600">
+                  {error}
+                </div>
+              )}
             </form>
           </div>
 

@@ -28,7 +28,7 @@ interface ZoneFormDrawerProps {
   onSubmit: (values: ZoneFormValues, zoneId?: string) => void | Promise<void>;
 }
 
-const MAX_SPEED = 45;
+const MAX_SPEED = 100;
 
 export function ZoneFormDrawer({
   open,
