@@ -1165,6 +1165,81 @@ export const walletApi = {
     return inner.balance_sar ?? inner.balance ?? 0;
   },
 
+  /**
+   * Step 1 — Call BEFORE showing the Moyasar form.
+   * Backend provisions the pending wallet transaction and returns everything
+   * Moyasar.init() needs, including the metadata object that links the payment
+   * back to the wallet transaction.  Do NOT build your own metadata.
+   */
+  async initiateTopUp(params: {
+    driverId: string;
+    amount:   number;
+  }): Promise<{
+    walletTransactionUuid: string;
+    paymentData: {
+      amount:         number;              // already in halalas
+      currency:       string;
+      description:    string;
+      publishableKey: string;
+      callbackUrl:    string;
+      metadata:       Record<string, string>;
+    };
+  }> {
+    const res = await apiClient.post<{
+      success?: boolean;
+      message?: string;
+      data?: {
+        wallet_transaction_uuid?: string;
+        payment_data?: {
+          amount?:          number;
+          currency?:        string;
+          description?:     string;
+          publishable_key?: string;
+          callback_url?:    string | null;
+          metadata?:        Record<string, string>;
+        };
+      };
+    }>('/fleet-admin/wallet/top-up/initiate', {
+      driver_id: Number(params.driverId),
+      amount:    params.amount,
+    });
+
+    if (res.success === false) throw new Error(res.message ?? 'Top-up initiation failed');
+
+    const d  = res.data ?? {};
+    const pd = d.payment_data ?? {};
+
+    return {
+      walletTransactionUuid: d.wallet_transaction_uuid ?? '',
+      paymentData: {
+        amount:         pd.amount         ?? 0,
+        currency:       pd.currency       ?? 'SAR',
+        description:    pd.description    ?? 'Driver wallet top-up',
+        publishableKey: pd.publishable_key ?? '',
+        callbackUrl:    pd.callback_url   ?? '',
+        metadata:       (pd.metadata as Record<string, string>) ?? {},
+      },
+    };
+  },
+
+  /** Step 2 — Verify payment after Moyasar 3DS redirect. */
+  async verifyTopUp(paymentId: string): Promise<{
+    status:   string;
+    amount?:  number;
+    balance?: number;
+  }> {
+    const res = await apiClient.post<{
+      success?: boolean;
+      data?: { status?: string; amount?: number; balance?: number };
+    }>('/fleet-admin/wallet/top-up/verify', { payment_id: paymentId });
+
+    return {
+      status:  res.data?.status  ?? 'failed',
+      amount:  res.data?.amount,
+      balance: res.data?.balance,
+    };
+  },
+
   async topUp(
     driverId: string,
     amount: number,

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Script from 'next/script';
 import { Plus_Jakarta_Sans, IBM_Plex_Sans_Arabic } from 'next/font/google';
 import { Providers } from '@/components/providers/Providers';
 import './globals.css';
@@ -27,8 +28,12 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <link rel="stylesheet" href="https://cdn.moyasar.com/mpf/1.14.0/moyasar.css" />
+      </head>
       <body className={`${plusJakarta.variable} ${ibmPlexArabic.variable} font-sans`}>
         <Providers>{children}</Providers>
+        <Script src="https://cdn.moyasar.com/mpf/1.14.0/moyasar.js" strategy="afterInteractive" />
       </body>
     </html>
   );
