@@ -75,11 +75,11 @@ export default function OtpPage() {
   const otp = digits.join('');
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#eeeef8] px-4 py-10">
-      <div className="flex w-full max-w-[660px] items-stretch gap-5">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-[#eeeef8] px-4 py-12">
+      <div className="flex w-full max-w-[880px] items-stretch gap-5">
 
         {/* ── OTP card ──────────────────────────────── */}
-        <div className="flex flex-1 flex-col rounded-3xl bg-white px-8 pb-8 pt-6 shadow-sm">
+        <div className="flex flex-1 flex-col rounded-3xl bg-white px-10 pb-10 pt-8 shadow-sm">
           {/* Back link */}
           <button
             type="button"
@@ -91,19 +91,19 @@ export default function OtpPage() {
           </button>
 
           {/* Heading */}
-          <h1 className="mt-5 text-2xl font-bold text-slate-900">Verify Your Number</h1>
-          <p className="mt-1.5 text-sm text-slate-500">Enter the 6-digit code sent to</p>
-          <p className="mt-0.5 text-sm font-semibold text-slate-800" dir="ltr">
+          <h1 className="mt-6 text-[28px] font-bold text-slate-900">Verify Your Number</h1>
+          <p className="mt-2 text-base text-slate-500">Enter the 6-digit code sent to</p>
+          <p className="mt-0.5 text-base font-semibold text-slate-800" dir="ltr">
             +966 {pendingPhone ?? ''}
           </p>
 
-          <form onSubmit={handleSubmit} className="mt-6">
+          <form onSubmit={handleSubmit} className="mt-8">
             <label className="mb-3 block text-sm font-semibold text-slate-700">
               Verification Code
             </label>
 
             {/* OTP digit boxes */}
-            <div className="flex gap-2.5" onPaste={handlePaste}>
+            <div className="flex gap-3" onPaste={handlePaste}>
               {digits.map((digit, i) => (
                 <input
                   key={i}
@@ -115,7 +115,7 @@ export default function OtpPage() {
                   onChange={(e) => handleChange(e.target.value, i)}
                   onKeyDown={(e) => handleKeyDown(e, i)}
                   className={cn(
-                    'h-14 w-full rounded-xl border bg-white text-center text-xl font-bold text-slate-900 outline-none transition-all focus:ring-2 focus:ring-indigo-500/20',
+                    'h-16 w-full rounded-xl border bg-white text-center text-2xl font-bold text-slate-900 outline-none transition-all focus:ring-2 focus:ring-indigo-500/20',
                     digit ? 'border-indigo-400' : 'border-slate-200 focus:border-indigo-500'
                   )}
                   aria-label={`OTP digit ${i + 1}`}
@@ -125,19 +125,19 @@ export default function OtpPage() {
             </div>
 
             {error && (
-              <p className="mt-2.5 text-center text-xs text-rose-500">{error}</p>
+              <p className="mt-3 text-center text-sm text-rose-500">{error}</p>
             )}
 
             <button
               type="submit"
               disabled={isLoading || otp.length < OTP_LENGTH}
-              className="mt-6 w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-7 w-full rounded-xl bg-indigo-500 py-4 text-base font-semibold text-white transition-colors hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isLoading ? 'Verifying...' : 'Verify & Sign In →'}
             </button>
 
             {/* Resend */}
-            <p className="mt-4 text-center text-sm text-slate-500">
+            <p className="mt-5 text-center text-sm text-slate-500">
               Didn&apos;t receive the code?{' '}
               <button
                 type="button"
@@ -153,6 +153,14 @@ export default function OtpPage() {
 
         <BrandPanel />
       </div>
+
+      {/* Footer */}
+      <p className="mt-5 text-center text-sm text-slate-400">
+        By signing in, you agree to our{' '}
+        <a href="https://www.vego.sa/en/terms-and-conditions" target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">Terms of Service</a>
+        {' '}and{' '}
+        <a href="https://www.vego.sa/en/privacy-policy" target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">Privacy Policy</a>
+      </p>
     </div>
   );
 }
