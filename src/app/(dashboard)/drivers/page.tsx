@@ -82,7 +82,7 @@ export default function DriversPage() {
   const handleAddSubmit = async (values: DriverFormValues) => {
     const created = await driversApi.create({
       name: values.fullName,
-      phone: values.phone,
+      phone: '966' + values.phone,
       email: values.email || undefined,
       address: values.address || undefined,
       city: values.city || undefined,
@@ -111,7 +111,7 @@ export default function DriversPage() {
 
     const updated = await driversApi.update(driverId, {
       name: values.fullName,
-      phone: values.phone,
+      phone: '966' + values.phone,
       email: values.email || undefined,
       address: values.address || undefined,
       city: values.city || undefined,
