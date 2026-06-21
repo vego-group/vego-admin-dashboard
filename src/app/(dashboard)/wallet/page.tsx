@@ -77,6 +77,7 @@ function formatDT(iso: string): string {
 
 function defaultFrom(): string {
   const d = new Date();
+  d.setMonth(d.getMonth() - 2);
   d.setDate(1);
   return isoDate(d);
 }
@@ -182,16 +183,16 @@ export default function WalletPage() {
     let cancelled = false;
     (async () => {
       try {
-        const [txns, walletStats] = await Promise.all([
-          walletApi.getTransactions({ perPage: 200 }),
+        const [txnsRes, statsRes] = await Promise.allSettled([
+          walletApi.getTransactions({ perPage: 100 }),
           walletApi.getStats(),
         ]);
         if (!cancelled) {
-          setAllTransactions(txns);
-          setStats(walletStats);
+          if (txnsRes.status === 'fulfilled') setAllTransactions(txnsRes.value);
+          if (statsRes.status === 'fulfilled') setStats(statsRes.value);
         }
       } catch (err) {
-        logger.error('[Wallet] Failed to load data:', err);
+        logger.error('[Wallet] Unexpected error:', err);
       } finally {
         if (!cancelled) setDataLoading(false);
       }
