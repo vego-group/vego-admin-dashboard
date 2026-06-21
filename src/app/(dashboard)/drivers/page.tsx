@@ -18,6 +18,7 @@ import { SuccessDialog } from '@/components/ui/SuccessDialog';
 import { useI18n } from '@/i18n/I18nProvider';
 import { driversApi } from '@/lib/api';
 import type { Driver, DriverStatus } from '@/types';
+import { logger } from '@/lib/logger';
 
 type TabValue = 'all' | DriverStatus;
 type FormMode = { kind: 'closed' } | { kind: 'add' } | { kind: 'edit'; driver: Driver };
@@ -52,7 +53,7 @@ export default function DriversPage() {
         const driverData = await driversApi.list();
         if (!cancelled) setDrivers(driverData);
       } catch (err) {
-        console.error('[Drivers] Failed to load data:', err);
+        logger.error('[Drivers] Failed to load data:', err);
       } finally {
         if (!cancelled) setLoading(false);
       }

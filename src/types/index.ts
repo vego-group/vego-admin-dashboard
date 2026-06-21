@@ -109,7 +109,7 @@ export interface Notification {
 
 // ----- Zone Control -----------------------------------------------------------
 
-export type ZoneType = 'operational' | 'no_ride' | 'slow' | 'parking';
+export type ZoneType = 'normal' | 'slow' | 'restricted';
 
 export interface ZonePoint {
   lat: number;
@@ -118,13 +118,16 @@ export interface ZonePoint {
 
 export interface Zone {
   id: string;
+  /** Display name — equals name_en for convenience. */
   name: string;
+  name_en: string;
+  name_ar: string;
   type: ZoneType;
   /** Maximum allowed speed inside the zone, in km/h. 0 means "no riding" allowed. */
   speedLimitKmh: number;
   /** Whether the zone rules are currently being enforced. */
   active: boolean;
-  /** Whether the zone is shown on the map (toggled by the eye icon). */
+  /** Frontend-only — whether the zone polygon is visible on the map. */
   visible: boolean;
   /** Closed polygon. Minimum 3 points to be a valid zone. */
   polygon: ZonePoint[];

@@ -16,7 +16,7 @@ export function BrandPanel() {
 
       <h2 className="mt-6 text-3xl font-bold text-slate-900">MyVego</h2>
       <p className="mt-2 text-center text-base text-slate-500">
-        Electric Scooter Fleet Management System
+        Electric Bike Fleet Management System
       </p>
 
       <ul className="mt-8 w-full space-y-5">

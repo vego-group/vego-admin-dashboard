@@ -19,6 +19,7 @@ import type {
   Vehicle,
   BatteryStation,
 } from '@/types';
+import { logger } from '@/lib/logger';
 
 // ── Safe initial state — all zeros, no fake numbers ─────────────────────────
 
@@ -79,30 +80,30 @@ export default function DashboardPage() {
     // ── KPI + Fleet Status → GET /fleet-admin/dashboard ────────────────────
     dashboardApi.getMetrics()
       .then((data) => { if (!cancelled) setMetrics(data); })
-      .catch((err) => console.error('[Dashboard] metrics failed:', err))
+      .catch((err) => logger.error('[Dashboard] metrics failed:', err))
       .finally(() => { if (!cancelled) setMetricsLoading(false); });
 
     // ── Today's Usage → GET /fleet-admin/dashboard/usage ───────────────────
     dashboardApi.getUsage()
       .then((data) => { if (!cancelled && data.length > 0) setUsage(data); })
-      .catch((err) => console.error('[Dashboard] usage failed:', err))
+      .catch((err) => logger.error('[Dashboard] usage failed:', err))
       .finally(() => { if (!cancelled) setUsageLoading(false); });
 
     // ── Battery Health → GET /fleet-admin/dashboard/battery-health?months=6 ─
     dashboardApi.getBatteryHealth()
       .then((data) => { if (!cancelled && data.length > 0) setHealth(data); })
-      .catch((err) => console.error('[Dashboard] battery-health failed:', err))
+      .catch((err) => logger.error('[Dashboard] battery-health failed:', err))
       .finally(() => { if (!cancelled) setHealthLoading(false); });
 
     // ── Live Fleet Map vehicles → GET /fleet-admin/motorcycles ─────────────
     fleetApi.list()
       .then((data) => { if (!cancelled) setVehicles(data); })
-      .catch((err) => console.error('[Dashboard] vehicles failed:', err));
+      .catch((err) => logger.error('[Dashboard] vehicles failed:', err));
 
     // ── Live Fleet Map stations → GET /fleet-admin/cabinets ────────────────
     stationsApi.list()
       .then((data) => { if (!cancelled) setStations(data); })
-      .catch((err) => console.error('[Dashboard] stations failed:', err));
+      .catch((err) => logger.error('[Dashboard] stations failed:', err));
 
     return () => { cancelled = true; };
   }, []);

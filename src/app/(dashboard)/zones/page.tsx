@@ -14,6 +14,7 @@ import { ZoneFormDrawer, type ZoneFormValues } from '@/components/zones/ZoneForm
 import { useI18n } from '@/i18n/I18nProvider';
 import { zonesApi } from '@/lib/api';
 import type { Zone, ZonePoint } from '@/types';
+import { logger } from '@/lib/logger';
 
 type FormMode = { kind: 'closed' } | { kind: 'add' } | { kind: 'edit'; zone: Zone };
 
@@ -36,6 +37,7 @@ export default function ZonesPage() {
   const [formMode, setFormMode] = useState<FormMode>({ kind: 'closed' });
   const [zoneToDelete, setZoneToDelete] = useState<Zone | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
   const [successDialog, setSuccessDialog] = useState<
     | { kind: 'added' }
     | { kind: 'updated' }
@@ -51,7 +53,7 @@ export default function ZonesPage() {
         const data = await zonesApi.list();
         if (!cancelled) setZones(data);
       } catch (err) {
-        console.error('[Zones] Failed to load zones:', err);
+        logger.error('[Zones] Failed to load zones:', err);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -64,7 +66,9 @@ export default function ZonesPage() {
   const filteredZones = useMemo(() => {
     if (!query) return zones;
     const q = query.toLowerCase();
-    return zones.filter((z) => z.name.toLowerCase().includes(q));
+    return zones.filter(
+      (z) => z.name_en.toLowerCase().includes(q) || z.name_ar.includes(q),
+    );
   }, [zones, query]);
 
   // ----- Drawing flow -------------------------------------------------------
@@ -89,31 +93,41 @@ export default function ZonesPage() {
   // ----- CRUD handlers ------------------------------------------------------
 
   const handleAdd = async (values: ZoneFormValues) => {
-    const created = await zonesApi.create({
-      name: values.name,
-      type: values.type,
-      speedLimitKmh: values.speedLimitKmh,
-      active: values.active,
-      polygon: drawingPoints,
-    });
-    setZones((prev) => [created, ...prev]);
-    setDrawingPoints([]);
-    setFormMode({ kind: 'closed' });
-    setSuccessDialog({ kind: 'added' });
+    try {
+      const created = await zonesApi.create({
+        name_en:       values.name_en,
+        name_ar:       values.name_ar,
+        type:          values.type,
+        speedLimitKmh: values.speedLimitKmh,
+        active:        values.active,
+        polygon:       drawingPoints,
+      });
+      setZones((prev) => [created, ...prev]);
+      setDrawingPoints([]);
+      setFormMode({ kind: 'closed' });
+      setSuccessDialog({ kind: 'added' });
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Failed to create zone');
+    }
   };
 
   const handleEdit = async (values: ZoneFormValues, zoneId?: string) => {
     if (!zoneId) return;
-    const updated = await zonesApi.update(zoneId, {
-      name: values.name,
-      type: values.type,
-      speedLimitKmh: values.speedLimitKmh,
-      active: values.active,
-    });
-    if (updated) {
-      setZones((prev) => prev.map((z) => (z.id === updated.id ? updated : z)));
-      setFormMode({ kind: 'closed' });
-      setSuccessDialog({ kind: 'updated' });
+    try {
+      const updated = await zonesApi.update(zoneId, {
+        name_en:       values.name_en,
+        name_ar:       values.name_ar,
+        type:          values.type,
+        speedLimitKmh: values.speedLimitKmh,
+        active:        values.active,
+      });
+      if (updated) {
+        setZones((prev) => prev.map((z) => (z.id === updated.id ? updated : z)));
+        setFormMode({ kind: 'closed' });
+        setSuccessDialog({ kind: 'updated' });
+      }
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Failed to update zone');
     }
   };
 
@@ -121,32 +135,45 @@ export default function ZonesPage() {
     if (!zoneToDelete) return;
     setDeleting(true);
     const position = zones.findIndex((z) => z.id === zoneToDelete.id);
-    const removed = await zonesApi.remove(zoneToDelete.id);
-    setDeleting(false);
-    if (removed) {
-      setZones((prev) => prev.filter((z) => z.id !== removed.id));
-      setSuccessDialog({ kind: 'deleted', zone: removed, position });
+    const deletedZone = zoneToDelete;
+    try {
+      await zonesApi.remove(zoneToDelete.id);
+      setZones((prev) => prev.filter((z) => z.id !== deletedZone.id));
+      setSuccessDialog({ kind: 'deleted', zone: deletedZone, position });
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Failed to delete zone');
+    } finally {
+      setDeleting(false);
+      setZoneToDelete(null);
     }
-    setZoneToDelete(null);
   };
 
   const handleUndoDelete = async () => {
     if (successDialog?.kind !== 'deleted') return;
     const { zone, position } = successDialog;
-    await zonesApi.restore(zone, position);
-    setZones((prev) => {
-      const next = [...prev];
-      next.splice(position, 0, zone);
-      return next;
-    });
+    try {
+      const restored = await zonesApi.restore(zone);
+      setZones((prev) => {
+        const next = [...prev];
+        next.splice(position, 0, restored);
+        return next;
+      });
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Failed to restore zone');
+    }
   };
 
   // ----- Inline mutations (toggle active / visible) -------------------------
 
   const handleToggleActive = async (zone: Zone, next: boolean) => {
-    // Optimistic update
     setZones((prev) => prev.map((z) => (z.id === zone.id ? { ...z, active: next } : z)));
-    await zonesApi.update(zone.id, { active: next });
+    try {
+      await zonesApi.update(zone.id, { active: next });
+    } catch (err) {
+      // Revert optimistic update on failure
+      setZones((prev) => prev.map((z) => (z.id === zone.id ? { ...z, active: zone.active } : z)));
+      setApiError(err instanceof Error ? err.message : 'Failed to update zone');
+    }
   };
 
   const handleToggleVisible = async (zone: Zone) => {
@@ -177,6 +204,21 @@ export default function ZonesPage() {
 
   return (
     <DashboardShell title={t('zones.title')} subtitle={t('zones.subtitle')} fullHeight>
+      {/* API error banner */}
+      {apiError && (
+        <div className="mb-3 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+          <span>{apiError}</span>
+          <button
+            type="button"
+            onClick={() => setApiError(null)}
+            className="ms-3 shrink-0 text-rose-400 hover:text-rose-600"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Two-column layout: list (left) | map (right) */}
       <div className="grid flex-1 gap-4 lg:grid-cols-[340px_1fr]" style={{ minHeight: 0 }}>
         {/* LEFT: Search + Zones list */}

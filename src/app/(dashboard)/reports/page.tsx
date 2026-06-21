@@ -19,6 +19,7 @@ import type {
   DashboardMetrics,
   RevenuePoint,
 } from '@/types';
+import { logger } from '@/lib/logger';
 
 type WeeklyTrip    = { day: string; trips: number; revenue: number };
 type TopDriver     = { name: string; earnings: number; swaps: number; charges: number; dropOff: number };
@@ -55,7 +56,7 @@ export default function ReportsPage() {
           setTopDrivers(td);
         }
       } catch (err) {
-        console.error('[Reports] Failed to load data:', err);
+        logger.error('[Reports] Failed to load data:', err);
       } finally {
         if (!cancelled) setLoading(false);
       }

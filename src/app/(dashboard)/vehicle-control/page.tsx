@@ -14,6 +14,7 @@ import { fleetApi, driversApi } from '@/lib/api';
 import type { Vehicle } from '@/types';
 import type { Driver } from '@/types';
 import type { MotorcycleBattery, MotorcycleStatistics } from '@/lib/api';
+import { logger } from '@/lib/logger';
 
 export default function VehicleControlPage() {
   const { t } = useI18n();
@@ -47,7 +48,7 @@ export default function VehicleControlPage() {
           setActiveDrivers(driverData.filter((d) => d.status === 'active'));
         }
       } catch (err) {
-        console.error('[VehicleControl] Failed to load initial data:', err);
+        logger.error('[VehicleControl] Failed to load initial data:', err);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -108,7 +109,7 @@ export default function VehicleControlPage() {
         }
         return false;
       } catch (err) {
-        console.error('[VehicleControl] assignDriver failed:', err);
+        logger.error('[VehicleControl] assignDriver failed:', err);
         return false;
       }
     },
@@ -131,7 +132,7 @@ export default function VehicleControlPage() {
         }
         return false;
       } catch (err) {
-        console.error('[VehicleControl] unassignDriver failed:', err);
+        logger.error('[VehicleControl] unassignDriver failed:', err);
         return false;
       }
     },

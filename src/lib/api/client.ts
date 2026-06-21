@@ -8,6 +8,8 @@
  *   NEXT_PUBLIC_API_URL=https://your-backend.com/api
  */
 
+import { logger } from '@/lib/logger';
+
 const BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '');
 
 // Lazily read the token so we never import the store at module-load time,
@@ -46,7 +48,7 @@ export class ApiNotConfiguredError extends Error {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!BASE_URL) {
-    console.warn('[apiClient] NEXT_PUBLIC_API_URL is not set — requests will fail.');
+    logger.warn('[apiClient] NEXT_PUBLIC_API_URL is not set — requests will fail.');
     throw new ApiNotConfiguredError();
   }
 

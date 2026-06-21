@@ -32,10 +32,9 @@ export function ZoneCard({
 
   // Speed limit display — color depends on zone type
   const speedColor = {
-    operational: 'text-emerald-600',
-    no_ride: 'text-rose-600',
-    slow: 'text-amber-600',
-    parking: 'text-blue-600',
+    normal:     'text-emerald-600',
+    slow:       'text-amber-600',
+    restricted: 'text-rose-600',
   }[zone.type];
 
   return (

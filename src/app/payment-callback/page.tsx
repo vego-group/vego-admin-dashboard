@@ -5,6 +5,7 @@ import { CheckCircle2, XCircle, Clock, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { walletApi } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
+import { logger } from '@/lib/logger';
 
 type Status = 'loading' | 'success' | 'failed' | 'pending';
 
@@ -47,7 +48,7 @@ export default function PaymentCallbackPage() {
         }
       })
       .catch((err) => {
-        console.error('[payment-callback] verifyTopUp error:', err);
+        logger.error('[payment-callback] verifyTopUp error:', err);
         setStatus('failed');
       });
   }, []);

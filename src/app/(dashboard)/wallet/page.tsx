@@ -17,6 +17,7 @@ import { cn } from '@/lib/cn';
 import { formatCurrency } from '@/lib/format';
 import { walletApi } from '@/lib/api';
 import type { TransactionType, TransactionStatus, WalletTransaction, WalletStats } from '@/types';
+import { logger } from '@/lib/logger';
 
 const PAGE_SIZE = 8;
 
@@ -190,7 +191,7 @@ export default function WalletPage() {
           setStats(walletStats);
         }
       } catch (err) {
-        console.error('[Wallet] Failed to load data:', err);
+        logger.error('[Wallet] Failed to load data:', err);
       } finally {
         if (!cancelled) setDataLoading(false);
       }

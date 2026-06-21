@@ -19,6 +19,7 @@ import { swappingApi, type SwapActivity } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import type { SwappingStation } from '@/types';
+import { logger } from '@/lib/logger';
 
 type ViewMode = 'map' | 'card';
 type FilterTab = 'all' | 'available' | 'charging' | 'empty';
@@ -49,7 +50,7 @@ export default function BatterySwappingPage() {
           if (activityData.status === 'fulfilled') setRecentActivity(activityData.value);
         }
       } catch (err) {
-        console.error('[BatterySwapping] Failed to load data:', err);
+        logger.error('[BatterySwapping] Failed to load data:', err);
       } finally {
         if (!cancelled) setLoading(false);
       }

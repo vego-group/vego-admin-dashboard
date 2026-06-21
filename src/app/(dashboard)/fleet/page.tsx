@@ -16,6 +16,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/i18n/I18nProvider';
 import { fleetApi } from '@/lib/api';
 import type { Vehicle, VehicleStatus } from '@/types';
+import { logger } from '@/lib/logger';
 
 type TabValue = 'all' | VehicleStatus;
 type ViewMode = 'list' | 'table';
@@ -38,7 +39,7 @@ export default function FleetPage() {
         const data = await fleetApi.list();
         if (!cancelled) setVehicles(data);
       } catch (err) {
-        console.error('[Fleet] Failed to load vehicles:', err);
+        logger.error('[Fleet] Failed to load vehicles:', err);
       } finally {
         if (!cancelled) setLoading(false);
       }

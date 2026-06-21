@@ -768,11 +768,66 @@ export const registrationRequestsApi = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Zones API  (no backend endpoint yet — keep local state)
+// Zones API  (/fleet-admin/zones)
 // ─────────────────────────────────────────────────────────────────────────────
 
+interface ApiZone {
+  id: number | string;
+  name_en: string;
+  name_ar: string;
+  type: string;
+  speed_limit: number | null;
+  coordinates: string; // WKT POLYGON
+  is_active: boolean;
+  created_at?: string;
+}
+
+interface ApiZoneListResponse {
+  success: boolean;
+  data: ApiZone[];
+  meta: { current_page: number; last_page: number; per_page: number; total: number };
+}
+
+interface ApiZoneSingleResponse {
+  success: boolean;
+  data: ApiZone;
+}
+
+function wktToPoints(wkt: string): ZonePoint[] {
+  const match = wkt.match(/POLYGON\s*\(\((.+)\)\)/i);
+  if (!match) return [];
+  const pairs = match[1].split(',').map((s) => s.trim().split(/\s+/));
+  // WKT uses (lng lat) order; drop the closing duplicate point
+  return pairs
+    .slice(0, -1)
+    .map(([lngStr, latStr]) => ({ lat: parseFloat(latStr), lng: parseFloat(lngStr) }));
+}
+
+function pointsToWkt(points: ZonePoint[]): string {
+  if (points.length === 0) return '';
+  const closed = [...points, points[0]];
+  return `POLYGON((${closed.map((p) => `${p.lng} ${p.lat}`).join(', ')}))`;
+}
+
+function mapApiZone(api: ApiZone): Zone {
+  const nameEn = api.name_en ?? '';
+  return {
+    id:           String(api.id),
+    name:         nameEn || api.name_ar || 'Unnamed',
+    name_en:      nameEn,
+    name_ar:      api.name_ar ?? '',
+    type:         (api.type as ZoneType) || 'operational',
+    speedLimitKmh: api.speed_limit ?? 0,
+    active:       api.is_active,
+    visible:      true,
+    polygon:      wktToPoints(api.coordinates ?? ''),
+    createdAt:    api.created_at ?? new Date().toISOString(),
+  };
+}
+
 export interface ZoneCreateInput {
-  name: string;
+  name_en: string;
+  name_ar: string;
   type: ZoneType;
   speedLimitKmh: number;
   active: boolean;
@@ -784,51 +839,53 @@ export type ZoneUpdateInput = Partial<Omit<ZoneCreateInput, 'polygon'>> & {
   visible?: boolean;
 };
 
-// In-memory store for zones (no backend zone management endpoint yet)
-const localZones: Zone[] = [];
-let zoneCounter = 0;
-
-function generateZoneId(): string {
-  return `ZN${String(++zoneCounter).padStart(3, '0')}`;
-}
-
 export const zonesApi = {
   async list(): Promise<Zone[]> {
-    return [...localZones];
+    const res = await apiClient.get<ApiZoneListResponse>('/fleet-admin/zones?limit=100');
+    return (res.data ?? []).map(mapApiZone);
   },
 
   async create(input: ZoneCreateInput): Promise<Zone> {
-    const zone: Zone = {
-      id:            generateZoneId(),
-      name:          input.name,
-      type:          input.type,
-      speedLimitKmh: input.speedLimitKmh,
-      active:        input.active,
-      visible:       true,
-      polygon:       input.polygon,
-      createdAt:     new Date().toISOString(),
-    };
-    localZones.unshift(zone);
-    return zone;
+    const res = await apiClient.post<ApiZoneSingleResponse>('/fleet-admin/zones', {
+      name_en:     input.name_en,
+      name_ar:     input.name_ar,
+      type:        input.type,
+      speed_limit: input.speedLimitKmh || null,
+      coordinates: pointsToWkt(input.polygon),
+      is_active:   input.active,
+    });
+    return mapApiZone(res.data);
   },
 
   async update(id: string, updates: ZoneUpdateInput): Promise<Zone | null> {
-    const index = localZones.findIndex((z) => z.id === id);
-    if (index === -1) return null;
-    localZones[index] = { ...localZones[index], ...updates };
-    return localZones[index];
+    const { visible: _visible, ...rest } = updates;
+    if (Object.keys(rest).length === 0) return null; // visible-only — no backend call
+
+    const body: Record<string, unknown> = {};
+    if (rest.name_en      !== undefined) body.name_en     = rest.name_en;
+    if (rest.name_ar      !== undefined) body.name_ar     = rest.name_ar;
+    if (rest.type         !== undefined) body.type        = rest.type;
+    if (rest.speedLimitKmh !== undefined) body.speed_limit = rest.speedLimitKmh || null;
+    if (rest.active       !== undefined) body.is_active   = rest.active;
+    if (rest.polygon      !== undefined) body.coordinates = pointsToWkt(rest.polygon);
+
+    const res = await apiClient.put<ApiZoneSingleResponse>(`/fleet-admin/zones/${id}`, body);
+    return mapApiZone(res.data);
   },
 
-  async remove(id: string): Promise<Zone | null> {
-    const index = localZones.findIndex((z) => z.id === id);
-    if (index === -1) return null;
-    const [removed] = localZones.splice(index, 1);
-    return removed;
+  async remove(id: string): Promise<void> {
+    await apiClient.delete(`/fleet-admin/zones/${id}`);
   },
 
-  async restore(zone: Zone, position: number): Promise<Zone> {
-    localZones.splice(position, 0, zone);
-    return zone;
+  async restore(zone: Zone): Promise<Zone> {
+    return zonesApi.create({
+      name_en:      zone.name_en,
+      name_ar:      zone.name_ar,
+      type:         zone.type,
+      speedLimitKmh: zone.speedLimitKmh,
+      active:       zone.active,
+      polygon:      zone.polygon,
+    });
   },
 };
 

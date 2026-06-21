@@ -4,7 +4,9 @@ export const mockZones: Zone[] = [
   {
     id: 'ZN001',
     name: 'Downtown District',
-    type: 'operational',
+    name_en: 'Downtown District',
+    name_ar: 'حي وسط المدينة',
+    type: 'normal',
     speedLimitKmh: 45,
     active: true,
     visible: true,
@@ -20,7 +22,9 @@ export const mockZones: Zone[] = [
   {
     id: 'ZN002',
     name: 'Airport No-Ride Zone',
-    type: 'no_ride',
+    name_en: 'Airport No-Ride Zone',
+    name_ar: 'منطقة المطار الممنوعة',
+    type: 'restricted',
     speedLimitKmh: 0,
     active: true,
     visible: true,
@@ -36,6 +40,8 @@ export const mockZones: Zone[] = [
   {
     id: 'ZN003',
     name: 'School Slow Zone',
+    name_en: 'School Slow Zone',
+    name_ar: 'منطقة المدرسة البطيئة',
     type: 'slow',
     speedLimitKmh: 15,
     active: true,
@@ -52,7 +58,9 @@ export const mockZones: Zone[] = [
   {
     id: 'ZN004',
     name: 'Central Parking Area',
-    type: 'parking',
+    name_en: 'Central Parking Area',
+    name_ar: 'منطقة الركن المركزية',
+    type: 'slow',
     speedLimitKmh: 10,
     active: true,
     visible: true,

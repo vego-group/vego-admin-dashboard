@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/i18n/I18nProvider';
 import { stationsApi } from '@/lib/api';
 import type { BatteryStation } from '@/types';
+import { logger } from '@/lib/logger';
 
 type ViewMode = 'map' | 'card';
 const PAGE_SIZE = 9;
@@ -40,7 +41,7 @@ export default function StationsPage() {
           setSelectedStation(data[0] ?? null);
         }
       } catch (err) {
-        console.error('[Stations] Failed to load stations:', err);
+        logger.error('[Stations] Failed to load stations:', err);
       } finally {
         if (!cancelled) setLoading(false);
       }

@@ -12,7 +12,8 @@ import { cn } from '@/lib/cn';
 import type { Zone, ZonePoint, ZoneType } from '@/types';
 
 export interface ZoneFormValues {
-  name: string;
+  name_en: string;
+  name_ar: string;
   type: ZoneType;
   speedLimitKmh: number;
   active: boolean;
@@ -41,12 +42,13 @@ export function ZoneFormDrawer({
   const isEdit = !!zone;
 
   const [values, setValues] = useState<ZoneFormValues>({
-    name: '',
-    type: 'operational',
+    name_en: '',
+    name_ar: '',
+    type: 'normal',
     speedLimitKmh: 25,
     active: true,
   });
-  const [errors, setErrors] = useState<{ name?: string }>({});
+  const [errors, setErrors] = useState<{ name_en?: string }>({});
   const [submitting, setSubmitting] = useState(false);
 
   // Hydrate form when opened
@@ -54,16 +56,17 @@ export function ZoneFormDrawer({
     if (!open) return;
     if (zone) {
       setValues({
-        name: zone.name,
+        name_en: zone.name_en,
+        name_ar: zone.name_ar,
         type: zone.type,
         speedLimitKmh: zone.speedLimitKmh,
         active: zone.active,
       });
     } else {
-      // New-zone defaults — start with operational type, default speed 25
       setValues({
-        name: '',
-        type: 'operational',
+        name_en: '',
+        name_ar: '',
+        type: 'normal',
         speedLimitKmh: 25,
         active: true,
       });
@@ -71,8 +74,6 @@ export function ZoneFormDrawer({
     setErrors({});
   }, [open, zone]);
 
-  // When type changes, snap speed to that type's default
-  // (only if the user hasn't typed in a custom value already? — for simplicity, always snap)
   const handleTypeChange = (next: ZoneType) => {
     const config = ZONE_TYPES[next];
     setValues((v) => ({ ...v, type: next, speedLimitKmh: config.defaultSpeedKmh }));
@@ -81,7 +82,7 @@ export function ZoneFormDrawer({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const nextErrors: typeof errors = {};
-    if (!values.name.trim()) nextErrors.name = t('zones.nameRequired');
+    if (!values.name_en.trim()) nextErrors.name_en = t('zones.nameRequired');
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
@@ -115,21 +116,33 @@ export function ZoneFormDrawer({
       <form onSubmit={handleSubmit} className="flex flex-1 flex-col overflow-hidden">
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
-          {/* Zone Name */}
+          {/* Zone Name (English) */}
           <Field
-            label={t('zones.zoneName')}
+            label={t('zones.zoneNameEn')}
             required
-            error={errors.name}
+            error={errors.name_en}
           >
             <Input
-              placeholder={t('zones.zoneNamePlaceholder')}
-              value={values.name}
+              placeholder={t('zones.zoneNameEnPlaceholder')}
+              value={values.name_en}
               onChange={(e) => {
-                setValues((v) => ({ ...v, name: e.target.value }));
-                if (errors.name) setErrors({});
+                setValues((v) => ({ ...v, name_en: e.target.value }));
+                if (errors.name_en) setErrors({});
               }}
             />
           </Field>
+
+          {/* Zone Name (Arabic) */}
+          <div className="mt-4">
+            <Field label={t('zones.zoneNameAr')}>
+              <Input
+                placeholder={t('zones.zoneNameArPlaceholder')}
+                value={values.name_ar}
+                onChange={(e) => setValues((v) => ({ ...v, name_ar: e.target.value }))}
+                dir="rtl"
+              />
+            </Field>
+          </div>
 
           {/* Zone Type */}
           <div className="mt-4">

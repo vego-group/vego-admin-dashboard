@@ -15,6 +15,7 @@ import { useI18n } from '@/i18n/I18nProvider';
 import { fastChargingApi } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import type { FastChargingCabinet, BatteryStation, FastChargingStatus } from '@/types';
+import { logger } from '@/lib/logger';
 
 type ViewMode = 'map' | 'card';
 type FilterTab = 'all' | 'available' | 'charging' | 'error';
@@ -55,7 +56,7 @@ export default function FastChargingPage() {
           })));
         }
       } catch (err) {
-        console.error('[FastCharging] Failed to load data:', err);
+        logger.error('[FastCharging] Failed to load data:', err);
       } finally {
         if (!cancelled) setLoading(false);
       }
