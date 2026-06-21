@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import {
   AlertTriangle, Battery, BatteryCharging, LayoutGrid,
   Map as MapIcon, RefreshCw, Search,
@@ -36,27 +36,26 @@ export default function BatterySwappingPage() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [recentActivity, setRecentActivity] = useState<SwapActivity[]>([]);
+  const [isSyncing, setIsSyncing] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const [stationsData, activityData] = await Promise.allSettled([
-          swappingApi.list(),
-          swappingApi.recentActivity(10),
-        ]);
-        if (!cancelled) {
-          if (stationsData.status === 'fulfilled') setStations(stationsData.value);
-          if (activityData.status === 'fulfilled') setRecentActivity(activityData.value);
-        }
-      } catch (err) {
-        logger.error('[BatterySwapping] Failed to load data:', err);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
+  const loadData = useCallback(async () => {
+    setIsSyncing(true);
+    try {
+      const [stationsData, activityData] = await Promise.allSettled([
+        swappingApi.list(),
+        swappingApi.recentActivity(10),
+      ]);
+      if (stationsData.status === 'fulfilled') setStations(stationsData.value);
+      if (activityData.status === 'fulfilled') setRecentActivity(activityData.value);
+    } catch (err) {
+      logger.error('[BatterySwapping] Failed to load data:', err);
+    } finally {
+      setIsSyncing(false);
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { void loadData(); }, [loadData]);
 
   const totals = useMemo(() => ({
     ready:    stations.reduce((s, x) => s + x.readyBatteries,    0),
@@ -127,9 +126,11 @@ export default function BatterySwappingPage() {
             />
             <button
               type="button"
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+              onClick={loadData}
+              disabled={isSyncing}
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
             >
-              <RefreshCw className="h-3.5 w-3.5" />
+              <RefreshCw className={cn('h-3.5 w-3.5', isSyncing && 'animate-spin')} />
               {t('batterySwapping.sync')}
             </button>
           </div>

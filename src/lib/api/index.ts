@@ -1058,7 +1058,11 @@ export const reportsApi = {
   },
 
   async getMonthlyRevenue(): Promise<RevenuePoint[]> {
-    const raw = await apiClient.get<unknown>('/fleet-admin/reports/monthly-revenue');
+    const now      = new Date();
+    const to       = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const fromDate = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+    const from     = `${fromDate.getFullYear()}-${String(fromDate.getMonth() + 1).padStart(2, '0')}`;
+    const raw = await apiClient.get<unknown>(`/fleet-admin/reports/monthly-revenue?from=${from}&to=${to}`);
     return extractList<ApiMonthlyRevenue>(raw).map((r) => ({
       date:    r.label ?? r.month ?? r.date ?? '',
       revenue: r.revenue_sar ?? r.revenue ?? 0,

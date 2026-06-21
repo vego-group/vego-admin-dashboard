@@ -31,6 +31,7 @@ export default function FastChargingPage() {
   const [tab, setTab] = useState<FilterTab>('all');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,6 +58,7 @@ export default function FastChargingPage() {
         }
       } catch (err) {
         logger.error('[FastCharging] Failed to load data:', err);
+        setApiError(err instanceof Error ? err.message : 'Failed to load fast charging data');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -105,6 +107,20 @@ export default function FastChargingPage() {
 
   return (
     <DashboardShell title={t('fastCharging.title')} subtitle={t('fastCharging.subtitle')}>
+      {apiError && (
+        <div className="mb-3 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+          <span>{apiError}</span>
+          <button
+            type="button"
+            onClick={() => setApiError(null)}
+            className="ms-3 shrink-0 text-rose-400 hover:text-rose-600"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* KPI cards */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <MetricCard label={t('fastCharging.availablePorts')} value={totals.available} icon={<Zap className="h-5 w-5" />}           iconColor="green"  />

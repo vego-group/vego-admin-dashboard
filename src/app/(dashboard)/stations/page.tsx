@@ -30,6 +30,7 @@ export default function StationsPage() {
   const [sort, setSort] = useState('newest');
   const [page, setPage] = useState(1);
   const [selectedStation, setSelectedStation] = useState<BatteryStation | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,6 +43,7 @@ export default function StationsPage() {
         }
       } catch (err) {
         logger.error('[Stations] Failed to load stations:', err);
+        setApiError(err instanceof Error ? err.message : 'Failed to load stations');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -77,6 +79,20 @@ export default function StationsPage() {
 
   return (
     <DashboardShell title={t('stations.title')} subtitle={t('stations.subtitle')}>
+      {apiError && (
+        <div className="mb-3 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+          <span>{apiError}</span>
+          <button
+            type="button"
+            onClick={() => setApiError(null)}
+            className="ms-3 shrink-0 text-rose-400 hover:text-rose-600"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <MetricCard
           label={t('stations.available')}

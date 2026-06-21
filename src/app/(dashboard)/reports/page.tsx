@@ -34,12 +34,13 @@ export default function ReportsPage() {
   const [batteryDist, setBatteryDist]       = useState<BatteryDistribution[]>([]);
   const [costAnalysis, setCostAnalysis]     = useState<CostBreakdown[]>([]);
   const [topDrivers, setTopDrivers]         = useState<TopDriver[]>([]);
+  const [apiError, setApiError]             = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [m, wt, mr, bd, ca, td] = await Promise.all([
+        const [mRes, wtRes, mrRes, bdRes, caRes, tdRes] = await Promise.allSettled([
           dashboardApi.getMetrics(),
           reportsApi.getWeeklyTrips(),
           reportsApi.getMonthlyRevenue(),
@@ -48,15 +49,23 @@ export default function ReportsPage() {
           reportsApi.getTopDrivers(),
         ]);
         if (!cancelled) {
-          setMetrics(m);
-          setWeeklyTrips(wt);
-          setMonthlyRevenue(mr);
-          setBatteryDist(bd);
-          setCostAnalysis(ca);
-          setTopDrivers(td);
+          if (mRes.status  === 'fulfilled') setMetrics(mRes.value);
+          if (wtRes.status === 'fulfilled') setWeeklyTrips(wtRes.value);
+          if (mrRes.status === 'fulfilled') setMonthlyRevenue(mrRes.value);
+          if (bdRes.status === 'fulfilled') setBatteryDist(bdRes.value);
+          if (caRes.status === 'fulfilled') setCostAnalysis(caRes.value);
+          if (tdRes.status === 'fulfilled') setTopDrivers(tdRes.value);
+
+          const rejected = [mRes, wtRes, mrRes, bdRes, caRes, tdRes]
+            .filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+          if (rejected.length > 0) {
+            const err = rejected[0].reason;
+            logger.error('[Reports] Failed to load some data:', err);
+            setApiError(err instanceof Error ? err.message : 'Failed to load reports data');
+          }
         }
       } catch (err) {
-        logger.error('[Reports] Failed to load data:', err);
+        logger.error('[Reports] Unexpected error:', err);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -66,6 +75,19 @@ export default function ReportsPage() {
 
   return (
     <DashboardShell title={t('reports.title')} subtitle={t('reports.subtitle')}>
+      {apiError && (
+        <div className="mb-3 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+          <span>{apiError}</span>
+          <button
+            type="button"
+            onClick={() => setApiError(null)}
+            className="ms-3 shrink-0 text-rose-400 hover:text-rose-600"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Top metrics */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
