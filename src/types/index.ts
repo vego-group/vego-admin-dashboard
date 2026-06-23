@@ -242,6 +242,20 @@ export interface WalletStats {
   activeDriversCount: number;
 }
 
+/**
+ * A tokenized card the fleet account has chosen to save for future top-ups.
+ * The raw PAN never reaches our servers — Moyasar tokenizes it and the backend
+ * stores only this non-sensitive descriptor plus an opaque token.
+ */
+export interface SavedCard {
+  id: string;          // backend record id (used to charge / delete)
+  brand: string;       // 'visa' | 'mastercard' | 'mada' | 'amex' | ...
+  last4: string;       // last four digits, e.g. '1121'
+  name?: string;       // name on card, if captured
+  expMonth?: number;   // 1-12
+  expYear?: number;    // 4-digit year
+}
+
 // ----- Battery Swapping -------------------------------------------------------
 
 export interface SwappingStation {

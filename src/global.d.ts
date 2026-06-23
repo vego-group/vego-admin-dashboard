@@ -21,6 +21,7 @@ interface MoyasarInitConfig {
   callback_url: string;
   methods?: string[];
   metadata?: Record<string, string>;
+  save_card?: boolean;        // when true, Moyasar renders a "save this card" option
   on_completed?: (payment: MoyasarPayment) => void | Promise<void>;
   on_failure?: (payment: MoyasarPayment) => void;
 }

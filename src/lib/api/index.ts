@@ -24,6 +24,7 @@ import type {
   Notification,
   NotificationType,
   RevenuePoint,
+  SavedCard,
   SwappingStation,
   UsagePoint,
   Vehicle,
@@ -1233,8 +1234,9 @@ export const walletApi = {
    * back to the wallet transaction.  Do NOT build your own metadata.
    */
   async initiateTopUp(params: {
-    driverId: string;
-    amount:   number;
+    driverId:  string;
+    amount:    number;
+    saveCard?: boolean;   // ask backend/Moyasar to tokenize this card for reuse
   }): Promise<{
     walletTransactionUuid: string;
     paymentData: {
@@ -1263,6 +1265,7 @@ export const walletApi = {
     }>('/fleet-admin/wallet/top-up/initiate', {
       driver_id: Number(params.driverId),
       amount:    params.amount,
+      save_card: params.saveCard ?? false,
     });
 
     if (res.success === false) throw new Error(res.message ?? 'Top-up initiation failed');
@@ -1298,6 +1301,92 @@ export const walletApi = {
       status:  res.data?.status  ?? 'failed',
       amount:  res.data?.amount,
       balance: res.data?.balance,
+    };
+  },
+
+  // ── Saved cards (Moyasar tokens) ───────────────────────────────────────────
+  //
+  // Cards are tokenized by Moyasar and stored against the fleet account, so they
+  // can be reused to top up any driver. The raw card number never reaches us.
+  //
+  // ⚠️ Backend not yet implemented — these call the agreed contracts below.
+  // Until the routes exist, `getSavedCards` resolves to [] (so the UI degrades
+  // to "add new card") and `chargeSavedCard` surfaces the backend error.
+
+  /** List cards the fleet account has saved. Endpoint: GET /fleet-admin/wallet/saved-cards */
+  async getSavedCards(): Promise<SavedCard[]> {
+    try {
+      const raw = await apiClient.get<unknown>('/fleet-admin/wallet/saved-cards');
+      return extractList<{
+        id?:         number | string;
+        brand?:      string;
+        company?:    string;
+        last_four?:  string;
+        last4?:      string;
+        name?:       string;
+        exp_month?:  number | string;
+        exp_year?:   number | string;
+      }>(raw).map((c) => ({
+        id:       String(c.id ?? ''),
+        brand:    (c.brand ?? c.company ?? 'card').toLowerCase(),
+        last4:    String(c.last_four ?? c.last4 ?? '••••'),
+        name:     c.name,
+        expMonth: c.exp_month != null ? Number(c.exp_month) : undefined,
+        expYear:  c.exp_year  != null ? Number(c.exp_year)  : undefined,
+      })).filter((c) => c.id);
+    } catch {
+      // Backend route may not exist yet — degrade gracefully to "no saved cards".
+      return [];
+    }
+  },
+
+  /** Forget a saved card. Endpoint: DELETE /fleet-admin/wallet/saved-cards/{id} */
+  async deleteSavedCard(cardId: string): Promise<void> {
+    await apiClient.delete(`/fleet-admin/wallet/saved-cards/${cardId}`);
+  },
+
+  /**
+   * Charge a previously-saved card. Charging a token MUST happen server-side
+   * (it needs the Moyasar secret key), so this hits a backend endpoint that
+   * performs the charge and may return a 3DS `transactionUrl` to redirect to.
+   * Endpoint: POST /fleet-admin/wallet/top-up/charge-saved
+   */
+  async chargeSavedCard(params: {
+    driverId: string;
+    amount:   number;
+    cardId:   string;
+  }): Promise<{
+    status:          string;
+    transactionUrl?: string;   // present when 3DS authentication is required
+    paymentId?:      string;
+    amount?:         number;
+    balance?:        number;
+  }> {
+    const res = await apiClient.post<{
+      success?: boolean;
+      message?: string;
+      data?: {
+        status?:          string;
+        transaction_url?: string;
+        payment_id?:      string;
+        amount?:          number;
+        balance?:         number;
+      };
+    }>('/fleet-admin/wallet/top-up/charge-saved', {
+      driver_id: Number(params.driverId),
+      amount:    params.amount,
+      card_id:   params.cardId,
+    });
+
+    if (res.success === false) throw new Error(res.message ?? 'Could not charge the saved card.');
+
+    const d = res.data ?? {};
+    return {
+      status:         d.status ?? 'failed',
+      transactionUrl: d.transaction_url || undefined,
+      paymentId:      d.payment_id,
+      amount:         d.amount,
+      balance:        d.balance,
     };
   },
 
