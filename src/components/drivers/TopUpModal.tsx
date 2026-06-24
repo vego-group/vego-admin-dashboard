@@ -124,7 +124,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
         publishable_api_key: paymentData.publishableKey,
         callback_url:        callbackUrl,
         methods:             ['creditcard'],
-        save_card:           true,                         // let the payer tick "save this card"
+        credit_card:         { save_card: true },          // renders the "save this card" checkbox
         metadata:            paymentData.metadata,        // ← MUST be passed unchanged
       });
     };

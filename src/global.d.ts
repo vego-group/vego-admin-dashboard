@@ -21,7 +21,8 @@ interface MoyasarInitConfig {
   callback_url: string;
   methods?: string[];
   metadata?: Record<string, string>;
-  save_card?: boolean;        // when true, Moyasar renders a "save this card" option
+  // Card-saving must be nested under credit_card — a top-level save_card is ignored.
+  credit_card?: { save_card?: boolean };
   on_completed?: (payment: MoyasarPayment) => void | Promise<void>;
   on_failure?: (payment: MoyasarPayment) => void;
 }
