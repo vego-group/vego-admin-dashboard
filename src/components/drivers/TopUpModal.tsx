@@ -185,15 +185,16 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     try {
       const res = await walletApi.chargeSavedCard({ driverId: driver.id, amount: numAmount, cardId: selectedCardId });
 
+      // 3DS authentication required — hand off to Moyasar, which returns to /payment-callback.
       if (res.transactionUrl) { window.location.href = res.transactionUrl; return; }
 
       const s = res.status.toLowerCase();
       if (s === 'paid' || s === 'completed' || s === 'captured') {
-        if (res.paymentId) {
-          window.location.href = `/payment-callback?id=${encodeURIComponent(res.paymentId)}&status=paid`;
-        } else {
-          window.location.href = '/drivers';
-        }
+        // Already settled server-side — show success without re-verifying (no double credit).
+        const q = new URLSearchParams({ status: 'paid', settled: '1' });
+        if (res.amount  != null) q.set('amount',  String(res.amount));
+        if (res.balance != null) q.set('balance', String(res.balance));
+        window.location.href = `/payment-callback?${q.toString()}`;
         return;
       }
       setApiError(t('drivers.chargeFailed'));

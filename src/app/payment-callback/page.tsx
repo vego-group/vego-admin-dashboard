@@ -21,6 +21,17 @@ export default function PaymentCallbackPage() {
     const urlStatus = params.get('status');
     const urlMsg    = params.get('message');
 
+    // Saved-card direct charge already settled server-side (wallet credited).
+    // Show the result straight away — re-verifying would risk a double credit.
+    if (params.get('settled') === '1' && urlStatus === 'paid') {
+      const a = parseFloat(params.get('amount')  ?? '');
+      const b = parseFloat(params.get('balance') ?? '');
+      setAmount(Number.isFinite(a) ? a : null);
+      setBalance(Number.isFinite(b) ? b : null);
+      setStatus('success');
+      return;
+    }
+
     if (!paymentId) {
       setStatus('failed');
       return;
