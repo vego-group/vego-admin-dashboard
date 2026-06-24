@@ -19,6 +19,7 @@ interface MoyasarInitConfig {
   description: string;
   publishable_api_key: string;
   callback_url: string;
+  language?: string;          // 'ar' | 'en' — localizes Moyasar's form strings
   methods?: string[];
   metadata?: Record<string, string>;
   // Card-saving must be nested under credit_card — a top-level save_card is ignored.

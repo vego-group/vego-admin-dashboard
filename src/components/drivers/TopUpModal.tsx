@@ -123,6 +123,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
         description:         paymentData.description,
         publishable_api_key: paymentData.publishableKey,
         callback_url:        callbackUrl,
+        language:            locale,                       // follow the app's language (ar/en)
         methods:             ['creditcard'],
         credit_card:         { save_card: true },          // renders the "save this card" checkbox
         metadata:            paymentData.metadata,        // ← MUST be passed unchanged
