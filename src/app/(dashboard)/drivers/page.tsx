@@ -17,7 +17,7 @@ import { Pagination } from '@/components/ui/Pagination';
 import { SuccessDialog } from '@/components/ui/SuccessDialog';
 import { useI18n } from '@/i18n/I18nProvider';
 import { driversApi } from '@/lib/api';
-import type { Driver, DriverStatus } from '@/types';
+import type { CancelledSessions, Driver, DriverStatus } from '@/types';
 import { logger } from '@/lib/logger';
 
 type TabValue = 'all' | DriverStatus;
@@ -42,6 +42,7 @@ export default function DriversPage() {
   const [successDialog, setSuccessDialog] = useState<
     | { kind: 'added' }
     | { kind: 'updated' }
+    | { kind: 'statusChanged'; title: string; description: string }
     | null
   >(null);
 
@@ -140,26 +141,61 @@ export default function DriversPage() {
     setDrivers((prev) => prev.map((d) => (d.id === updated.id ? { ...d, walletBalance: updated.walletBalance } : d)));
   };
 
+  /** Build a "N session(s) cancelled" line from the backend's cancelled_sessions. */
+  const cancelledSessionsText = (sessions?: CancelledSessions): string => {
+    if (!sessions) return '';
+    const swap = sessions.swap_sessions.length;
+    const charging = sessions.charging_sessions.length;
+    const parts: string[] = [];
+    if (swap > 0) {
+      parts.push(t(swap === 1 ? 'drivers.swapSessionCancelled' : 'drivers.swapSessionsCancelled', { count: swap }));
+    }
+    if (charging > 0) {
+      parts.push(t(charging === 1 ? 'drivers.chargingSessionCancelled' : 'drivers.chargingSessionsCancelled', { count: charging }));
+    }
+    return parts.join(' ');
+  };
+
   /** Toggle active ↔ inactive via /toggle-status */
   const handleToggleStatus = async (driver: Driver) => {
-    const newStatus = await driversApi.toggleStatus(driver.id);
-    if (newStatus) {
-      setDrivers((prev) =>
-        prev.map((d) => (d.id === driver.id ? { ...d, status: newStatus as Driver['status'] } : d))
-      );
+    const result = await driversApi.toggleStatus(driver.id);
+    if (!result) return;
+    setDrivers((prev) =>
+      prev.map((d) => (d.id === driver.id ? { ...d, status: result.status } : d))
+    );
+    // Only surface feedback in the destructive direction (→ inactive); reactivation is silent.
+    if (result.status === 'inactive') {
+      setSuccessDialog({
+        kind: 'statusChanged',
+        title: t('drivers.deactivatedSuccessTitle'),
+        description: cancelledSessionsText(result.cancelled_sessions),
+      });
     }
   };
 
   /** Block ↔ Unblock via /block or /unblock */
   const handleBlockToggle = async (driver: Driver) => {
-    const newStatus = driver.status === 'blocked'
-      ? await driversApi.unblock(driver.id)
-      : await driversApi.block(driver.id);
-    if (newStatus) {
-      setDrivers((prev) =>
-        prev.map((d) => (d.id === driver.id ? { ...d, status: newStatus as Driver['status'] } : d))
-      );
+    // Unblock — safe direction, no session feedback.
+    if (driver.status === 'blocked') {
+      const newStatus = await driversApi.unblock(driver.id);
+      if (newStatus) {
+        setDrivers((prev) =>
+          prev.map((d) => (d.id === driver.id ? { ...d, status: newStatus as Driver['status'] } : d))
+        );
+      }
+      return;
     }
+    // Block — surface which in-progress sessions were cancelled.
+    const result = await driversApi.block(driver.id);
+    if (!result) return;
+    setDrivers((prev) =>
+      prev.map((d) => (d.id === driver.id ? { ...d, status: result.status } : d))
+    );
+    setSuccessDialog({
+      kind: 'statusChanged',
+      title: t('drivers.blockedSuccessTitle'),
+      description: cancelledSessionsText(result.cancelled_sessions),
+    });
   };
 
   // ----- Render -------------------------------------------------------------
@@ -284,7 +320,9 @@ export default function DriversPage() {
       <SuccessDialog
         open={!!successDialog}
         onClose={() => setSuccessDialog(null)}
-        variant={successDialog?.kind ?? 'added'}
+        variant={successDialog?.kind === 'updated' || successDialog?.kind === 'statusChanged' ? 'updated' : 'added'}
+        title={successDialog?.kind === 'statusChanged' ? successDialog.title : undefined}
+        description={successDialog?.kind === 'statusChanged' ? successDialog.description : undefined}
       />
     </DashboardShell>
   );

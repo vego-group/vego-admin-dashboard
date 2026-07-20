@@ -224,6 +224,25 @@ const ar: Translations = {
     deactivate: 'إلغاء تفعيل السائق',
     block: 'حظر السائق',
     unblock: 'إلغاء حظر السائق',
+    // Block / deactivate confirmation dialogs
+    blockConfirmTitle: 'حظر هذا السائق؟',
+    blockConfirmDescription:
+      'سيؤدي هذا إلى تسجيل خروج السائق من التطبيق فورًا وإلغاء أي عملية تبديل بطارية أو شحن جارية حاليًا.',
+    deactivateConfirmTitle: 'تعيين هذا السائق كغير نشط؟',
+    deactivateConfirmDescription:
+      'سيؤدي تعيين السائق كغير نشط إلى تقييد وصوله فورًا بنفس طريقة الحظر، بما في ذلك إلغاء أي عملية تبديل بطارية أو شحن جارية حاليًا.',
+    // Status badge tooltips
+    inactiveTooltip:
+      'السائقون غير النشطين لا يمكنهم الوصول إلى التطبيق — يتم تقييد وصولهم بنفس طريقة السائقين المحظورين.',
+    blockedTooltip:
+      'يتم تسجيل خروج السائقين المحظورين فورًا ولا يمكنهم الوصول إلى التطبيق.',
+    // Block / deactivate success feedback
+    blockedSuccessTitle: 'تم حظر السائق',
+    deactivatedSuccessTitle: 'تم تعيين السائق كغير نشط',
+    swapSessionCancelled: 'تم إلغاء {{count}} عملية تبديل بطارية نشطة.',
+    swapSessionsCancelled: 'تم إلغاء {{count}} عمليات تبديل بطارية نشطة.',
+    chargingSessionCancelled: 'تم إلغاء {{count}} عملية شحن نشطة.',
+    chargingSessionsCancelled: 'تم إلغاء {{count}} عمليات شحن نشطة.',
     topUpWallet: 'شحن المحفظة',
     topUpWalletDescription: 'إضافة رصيد إلى محفظة السائق',
     currentBalance: 'الرصيد الحالي',

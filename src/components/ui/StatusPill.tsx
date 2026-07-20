@@ -41,8 +41,14 @@ export function StatusPill({ status, type = 'vehicle' }: StatusPillProps) {
 
   if (type === 'driver') {
     const s = status as DriverStatus;
+    // Both `inactive` and `blocked` now restrict the driver's app access — surface
+    // that on hover, since `inactive` previously had no real backend effect.
+    const tooltip =
+      s === 'blocked' ? t('drivers.blockedTooltip')
+      : s === 'inactive' ? t('drivers.inactiveTooltip')
+      : undefined;
     return (
-      <Badge tone={driverToneMap[s]} dot>
+      <Badge tone={driverToneMap[s]} dot title={tooltip}>
         {t(`status.${driverKeyMap[s]}`)}
       </Badge>
     );

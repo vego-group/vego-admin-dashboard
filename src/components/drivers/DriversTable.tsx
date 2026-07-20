@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Pencil, IdCard, FileText, Hash, Wallet, Loader2, ShieldX, ShieldCheck } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
+import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
@@ -75,20 +76,62 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
   const [togglingId, setTogglingId] = useState<string | null>(null);
   // Per-row loading state for block/unblock
   const [blockingId, setBlockingId] = useState<string | null>(null);
+  // Pending destructive action awaiting confirmation (block or deactivate)
+  const [confirmAction, setConfirmAction] = useState<
+    { driver: Driver; kind: 'block' | 'deactivate' } | null
+  >(null);
 
-  const handleToggle = async (driver: Driver) => {
+  const runToggle = async (driver: Driver) => {
     if (!onToggleStatus || togglingId) return;
     setTogglingId(driver.id);
     try { await onToggleStatus(driver); } finally { setTogglingId(null); }
   };
 
-  const handleBlockToggle = async (driver: Driver) => {
+  const runBlockToggle = async (driver: Driver) => {
     if (!onBlockToggle || blockingId) return;
     setBlockingId(driver.id);
     try { await onBlockToggle(driver); } finally { setBlockingId(null); }
   };
 
+  const handleToggle = (driver: Driver) => {
+    // Deactivating (active → inactive) now cancels any in-progress session, so confirm it.
+    // Activating (inactive → active) is safe — run immediately.
+    if (driver.status === 'active') {
+      setConfirmAction({ driver, kind: 'deactivate' });
+    } else {
+      void runToggle(driver);
+    }
+  };
+
+  const handleBlockToggle = (driver: Driver) => {
+    // Blocking cancels any in-progress session and logs the driver out, so confirm it.
+    // Unblocking is safe — run immediately.
+    if (driver.status === 'blocked') {
+      void runBlockToggle(driver);
+    } else {
+      setConfirmAction({ driver, kind: 'block' });
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (!confirmAction) return;
+    const { driver, kind } = confirmAction;
+    if (kind === 'deactivate') {
+      await runToggle(driver);
+    } else {
+      await runBlockToggle(driver);
+    }
+    setConfirmAction(null);
+  };
+
+  const confirmIsBusy = confirmAction
+    ? confirmAction.kind === 'deactivate'
+      ? togglingId === confirmAction.driver.id
+      : blockingId === confirmAction.driver.id
+    : false;
+
   return (
+    <>
     <Card className="overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -249,5 +292,28 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
         </table>
       </div>
     </Card>
+
+    <ConfirmDeleteDialog
+      open={!!confirmAction}
+      onClose={() => { if (!confirmIsBusy) setConfirmAction(null); }}
+      onConfirm={handleConfirm}
+      isLoading={confirmIsBusy}
+      title={
+        confirmAction?.kind === 'block'
+          ? t('drivers.blockConfirmTitle')
+          : t('drivers.deactivateConfirmTitle')
+      }
+      description={
+        confirmAction?.kind === 'block'
+          ? t('drivers.blockConfirmDescription')
+          : t('drivers.deactivateConfirmDescription')
+      }
+      confirmLabel={
+        confirmAction?.kind === 'block'
+          ? t('drivers.block')
+          : t('drivers.deactivate')
+      }
+    />
+    </>
   );
 }

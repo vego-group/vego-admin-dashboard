@@ -5,6 +5,22 @@
 export type VehicleStatus = 'active' | 'charging' | 'idle' | 'maintenance';
 export type StationStatus = 'available' | 'charging' | 'in_use';
 export type DriverStatus = 'active' | 'inactive' | 'pending' | 'blocked';
+
+/**
+ * Sessions cancelled as a side effect of blocking / deactivating a driver.
+ * Present on block and toggle-status→inactive responses; absent on unblock,
+ * reactivation, and older responses — always treat as optional.
+ */
+export interface CancelledSessions {
+  swap_sessions: number[];
+  charging_sessions: number[];
+}
+
+/** Result of a block / toggle-status status change. */
+export interface DriverStatusChangeResult {
+  status: DriverStatus;
+  cancelled_sessions?: CancelledSessions;
+}
 export type Theme = 'light' | 'dark' | 'system';
 export type Locale = 'en' | 'ar';
 export type Direction = 'ltr' | 'rtl';

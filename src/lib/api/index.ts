@@ -14,10 +14,12 @@ import type {
   BatteryDistribution,
   BatteryHealthPoint,
   BatteryStation,
+  CancelledSessions,
   CostBreakdown,
   DashboardMetrics,
   Driver,
   DriverDocuments,
+  DriverStatusChangeResult,
   DriverRegistrationRequest,
   FastChargingCabinet,
   FastChargingStatus,
@@ -247,6 +249,32 @@ function toDriverStatus(s?: string): Driver['status'] {
   if (s === 'blocked')  return 'blocked';
   // Legacy: on_leave → inactive
   return 'inactive';
+}
+
+/** Raw block / toggle-status response payload. `cancelled_sessions` is optional. */
+interface StatusChangeResponse {
+  data?: {
+    id: number | string;
+    status: string;
+    cancelled_sessions?: {
+      swap_sessions?: number[];
+      charging_sessions?: number[];
+    };
+  };
+}
+
+/**
+ * Coerce the raw `cancelled_sessions` field into a well-formed shape, or undefined
+ * when absent. Tolerates missing arrays so callers never crash on partial payloads.
+ */
+function normalizeCancelledSessions(
+  raw?: { swap_sessions?: number[]; charging_sessions?: number[] },
+): CancelledSessions | undefined {
+  if (!raw) return undefined;
+  return {
+    swap_sessions: raw.swap_sessions ?? [],
+    charging_sessions: raw.charging_sessions ?? [],
+  };
 }
 
 function toVehicleStatus(s?: string): VehicleStatus {
@@ -656,25 +684,39 @@ export const driversApi = {
     }
   },
 
-  /** Toggle active ↔ inactive. Returns the new status string, or null on error. */
-  async toggleStatus(id: string): Promise<string | null> {
+  /**
+   * Toggle active ↔ inactive. Returns the new status plus any sessions the
+   * backend cancelled (present only when the result is `inactive`), or null on error.
+   */
+  async toggleStatus(id: string): Promise<DriverStatusChangeResult | null> {
     try {
-      const res = await apiClient.patch<{ data?: { id: number | string; status: string } }>(
+      const res = await apiClient.patch<StatusChangeResponse>(
         `/fleet-admin/drivers/${id}/toggle-status`,
       );
-      return res.data?.status ?? null;
+      if (!res.data?.status) return null;
+      return {
+        status: toDriverStatus(res.data.status),
+        cancelled_sessions: normalizeCancelledSessions(res.data.cancelled_sessions),
+      };
     } catch {
       return null;
     }
   },
 
-  /** Block a driver. Returns the new status ('blocked') or null on error. */
-  async block(id: string): Promise<string | null> {
+  /**
+   * Block a driver. Returns the new status ('blocked') plus any sessions the
+   * backend cancelled, or null on error.
+   */
+  async block(id: string): Promise<DriverStatusChangeResult | null> {
     try {
-      const res = await apiClient.patch<{ data?: { id: number | string; status: string } }>(
+      const res = await apiClient.patch<StatusChangeResponse>(
         `/fleet-admin/drivers/${id}/block`,
       );
-      return res.data?.status ?? null;
+      if (!res.data?.status) return null;
+      return {
+        status: toDriverStatus(res.data.status),
+        cancelled_sessions: normalizeCancelledSessions(res.data.cancelled_sessions),
+      };
     } catch {
       return null;
     }

@@ -10,6 +10,10 @@ interface SuccessDialogProps {
   open: boolean;
   onClose: () => void;
   variant: 'added' | 'updated' | 'deleted';
+  /** Overrides the variant's default title when provided. */
+  title?: string;
+  /** Overrides the variant's default description when provided. */
+  description?: string;
   /** When variant is 'deleted', show an Undo button that calls this. */
   onUndo?: () => void;
   /** Auto-close delay in ms for the 'deleted' variant. Default: 5000. */
@@ -20,6 +24,8 @@ export function SuccessDialog({
   open,
   onClose,
   variant,
+  title: titleOverride,
+  description: descriptionOverride,
   onUndo,
   autoCloseMs = 5000,
 }: SuccessDialogProps) {
@@ -50,18 +56,20 @@ export function SuccessDialog({
   }, [open, isDelete, autoCloseMs, onClose]);
 
   const title =
-    variant === 'added'
+    titleOverride ??
+    (variant === 'added'
       ? t('drivers.userAddedSuccessfully')
       : variant === 'updated'
       ? t('drivers.userUpdatedSuccessfully')
-      : t('drivers.userDeletedSuccessfully');
+      : t('drivers.userDeletedSuccessfully'));
 
   const description =
-    variant === 'added'
+    descriptionOverride ??
+    (variant === 'added'
       ? t('drivers.userAddedDescription')
       : variant === 'updated'
       ? t('drivers.userUpdatedDescription')
-      : t('drivers.userDeletedDescription');
+      : t('drivers.userDeletedDescription'));
 
   const progress = isDelete ? (remaining / autoCloseMs) * 100 : 0;
   const secondsLeft = isDelete ? Math.ceil(remaining / 1000) : 0;
@@ -84,7 +92,9 @@ export function SuccessDialog({
         </div>
 
         <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-slate-50">{title}</h2>
-        <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">{description}</p>
+        {description && (
+          <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">{description}</p>
+        )}
 
         <div className="mt-6 flex items-center justify-center gap-3">
           <Button variant="secondary" onClick={onClose} className="min-w-[110px]">

@@ -222,6 +222,25 @@ const en = {
     deactivate: 'Deactivate Driver',
     block: 'Block Driver',
     unblock: 'Unblock Driver',
+    // Block / deactivate confirmation dialogs
+    blockConfirmTitle: 'Block this driver?',
+    blockConfirmDescription:
+      'This will immediately log the driver out of the app and cancel any battery swap or charging session currently in progress.',
+    deactivateConfirmTitle: 'Set this driver to inactive?',
+    deactivateConfirmDescription:
+      'Setting this driver to inactive will immediately restrict their access the same way blocking does, including cancelling any battery swap or charging session currently in progress.',
+    // Status badge tooltips
+    inactiveTooltip:
+      'Inactive drivers cannot access the app — access is restricted the same way as blocked drivers.',
+    blockedTooltip:
+      'Blocked drivers are logged out immediately and cannot access the app.',
+    // Block / deactivate success feedback
+    blockedSuccessTitle: 'Driver blocked',
+    deactivatedSuccessTitle: 'Driver set to inactive',
+    swapSessionCancelled: '{{count}} active swap session was cancelled.',
+    swapSessionsCancelled: '{{count}} active swap sessions were cancelled.',
+    chargingSessionCancelled: '{{count}} active charging session was cancelled.',
+    chargingSessionsCancelled: '{{count}} active charging sessions were cancelled.',
     topUpWallet: 'Top-Up Wallet',
     topUpWalletDescription: "Add funds to driver's wallet",
     currentBalance: 'Current Balance',
