@@ -1,5 +1,6 @@
 'use client';
 
+import { UserPlus, UserCog } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { useI18n } from '@/i18n/I18nProvider';
@@ -7,9 +8,11 @@ import type { Vehicle } from '@/types';
 
 interface FleetTableProps {
   vehicles: Vehicle[];
+  /** Opens the assign/change-driver flow for a vehicle. */
+  onAssignDriver?: (vehicle: Vehicle) => void;
 }
 
-export function FleetTable({ vehicles }: FleetTableProps) {
+export function FleetTable({ vehicles, onAssignDriver }: FleetTableProps) {
   const { t } = useI18n();
 
   return (
@@ -26,6 +29,7 @@ export function FleetTable({ vehicles }: FleetTableProps) {
               <th className="px-5 py-4 font-semibold">{t('fleet.location')}</th>
               <th className="px-5 py-4 font-semibold">{t('fleet.status')}</th>
               <th className="px-5 py-4 font-semibold">{t('fleet.soc')}</th>
+              {onAssignDriver && <th className="px-5 py-4 font-semibold">{t('fleet.actions')}</th>}
             </tr>
           </thead>
           <tbody>
@@ -50,6 +54,20 @@ export function FleetTable({ vehicles }: FleetTableProps) {
                 <td className="px-5 py-4 font-semibold tabular-nums text-slate-900 dark:text-slate-100">
                   {v.batteryLevel}%
                 </td>
+                {onAssignDriver && (
+                  <td className="px-5 py-4">
+                    <button
+                      type="button"
+                      onClick={() => onAssignDriver(v)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50/60 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-300 dark:hover:bg-indigo-500/20"
+                    >
+                      {v.assignedDriverName
+                        ? <UserCog className="h-3.5 w-3.5" />
+                        : <UserPlus className="h-3.5 w-3.5" />}
+                      {v.assignedDriverName ? t('fleet.changeDriver') : t('fleet.assignDriverAction')}
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

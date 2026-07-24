@@ -96,6 +96,17 @@ const en = {
     location: 'Location',
     status: 'Status',
     soc: 'SOC',
+    actions: 'Actions',
+    // Driver assignment (Fleet page)
+    assignDriverAction: 'Assign driver',
+    changeDriver: 'Change driver',
+    currentlyAssigned: 'Currently assigned',
+    searchDrivers: 'Search drivers by name or phone…',
+    noActiveDrivers: 'No active drivers available to assign.',
+    assignSuccessTitle: 'Driver assigned',
+    assignSuccessDescription: '{{driver}} is now assigned to {{vehicle}}.',
+    unassignSuccessTitle: 'Driver unassigned',
+    unassignSuccessDescription: '{{vehicle}} no longer has a driver assigned.',
   },
   stations: {
     title: 'Battery Stations',

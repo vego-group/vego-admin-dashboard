@@ -98,6 +98,17 @@ const ar: Translations = {
     location: 'الموقع',
     status: 'الحالة',
     soc: 'الشحن',
+    actions: 'إجراءات',
+    // تعيين السائق (صفحة الأسطول)
+    assignDriverAction: 'تعيين سائق',
+    changeDriver: 'تغيير السائق',
+    currentlyAssigned: 'المعيَّن حاليًا',
+    searchDrivers: 'ابحث عن سائق بالاسم أو الهاتف…',
+    noActiveDrivers: 'لا يوجد سائقون نشطون متاحون للتعيين.',
+    assignSuccessTitle: 'تم تعيين السائق',
+    assignSuccessDescription: 'تم تعيين {{driver}} للمركبة {{vehicle}}.',
+    unassignSuccessTitle: 'تم إلغاء تعيين السائق',
+    unassignSuccessDescription: 'لم يعد للمركبة {{vehicle}} سائق معيَّن.',
   },
   stations: {
     title: 'محطات البطاريات',

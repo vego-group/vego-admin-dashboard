@@ -6,6 +6,7 @@ import { DashboardShell } from '@/components/layout/DashboardShell';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { VehicleCard } from '@/components/fleet/VehicleCard';
 import { FleetTable } from '@/components/fleet/FleetTable';
+import { AssignDriverModal } from '@/components/fleet/AssignDriverModal';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -13,9 +14,10 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Pagination } from '@/components/ui/Pagination';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { SuccessDialog } from '@/components/ui/SuccessDialog';
 import { useI18n } from '@/i18n/I18nProvider';
-import { fleetApi } from '@/lib/api';
-import type { Vehicle, VehicleStatus } from '@/types';
+import { fleetApi, driversApi } from '@/lib/api';
+import type { Driver, Vehicle, VehicleStatus } from '@/types';
 import { logger } from '@/lib/logger';
 
 type TabValue = 'all' | VehicleStatus;
@@ -25,6 +27,7 @@ const PAGE_SIZE = 12;
 export default function FleetPage() {
   const { t } = useI18n();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TabValue>('all');
   const [view, setView] = useState<ViewMode>('list');
@@ -33,12 +36,26 @@ export default function FleetPage() {
   const [page, setPage] = useState(1);
   const [apiError, setApiError] = useState<string | null>(null);
 
+  // Driver-assignment modal + success feedback
+  const [assignVehicle, setAssignVehicle] = useState<Vehicle | null>(null);
+  const [successDialog, setSuccessDialog] = useState<{ title: string; description: string } | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const data = await fleetApi.list();
-        if (!cancelled) setVehicles(data);
+        // Drivers power the assignment picker; a failure there shouldn't hide the fleet.
+        const [vehicleData, driverData] = await Promise.all([
+          fleetApi.list(),
+          driversApi.list().catch((err) => {
+            logger.error('[Fleet] Failed to load drivers for assignment:', err);
+            return [] as Driver[];
+          }),
+        ]);
+        if (!cancelled) {
+          setVehicles(vehicleData);
+          setDrivers(driverData);
+        }
       } catch (err) {
         logger.error('[Fleet] Failed to load vehicles:', err);
         setApiError(err instanceof Error ? err.message : 'Failed to load vehicles');
@@ -50,6 +67,44 @@ export default function FleetPage() {
       cancelled = true;
     };
   }, []);
+
+  // ----- Driver assignment handlers -----------------------------------------
+
+  const handleAssignDriver = async (motorcycleId: string, driverId: string): Promise<boolean> => {
+    const ok = await fleetApi.assignDriver(motorcycleId, driverId);
+    if (!ok) return false;
+    const driver = drivers.find((d) => d.id === driverId);
+    const driverName = driver?.name ?? driverId;
+    setVehicles((prev) =>
+      prev.map((v) =>
+        v.id === motorcycleId
+          ? { ...v, assignedDriverId: driverId, assignedDriverName: driverName }
+          : v
+      )
+    );
+    setSuccessDialog({
+      title: t('fleet.assignSuccessTitle'),
+      description: t('fleet.assignSuccessDescription', { driver: driverName, vehicle: motorcycleId }),
+    });
+    return true;
+  };
+
+  const handleUnassignDriver = async (motorcycleId: string): Promise<boolean> => {
+    const ok = await fleetApi.unassignDriver(motorcycleId);
+    if (!ok) return false;
+    setVehicles((prev) =>
+      prev.map((v) =>
+        v.id === motorcycleId
+          ? { ...v, assignedDriverId: undefined, assignedDriverName: undefined }
+          : v
+      )
+    );
+    setSuccessDialog({
+      title: t('fleet.unassignSuccessTitle'),
+      description: t('fleet.unassignSuccessDescription', { vehicle: motorcycleId }),
+    });
+    return true;
+  };
 
   const counts = useMemo(
     () => ({
@@ -201,17 +256,35 @@ export default function FleetPage() {
         ) : view === 'list' ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {paginated.map((v) => (
-              <VehicleCard key={v.id} vehicle={v} />
+              <VehicleCard key={v.id} vehicle={v} onAssignDriver={() => setAssignVehicle(v)} />
             ))}
           </div>
         ) : (
-          <FleetTable vehicles={paginated} />
+          <FleetTable vehicles={paginated} onAssignDriver={(v) => setAssignVehicle(v)} />
         )}
       </div>
 
       {totalPages > 1 && (
         <Pagination currentPage={page} totalPages={totalPages} onChange={setPage} />
       )}
+
+      {/* Driver assignment */}
+      <AssignDriverModal
+        open={!!assignVehicle}
+        onClose={() => setAssignVehicle(null)}
+        vehicle={assignVehicle}
+        drivers={drivers}
+        onAssign={handleAssignDriver}
+        onUnassign={handleUnassignDriver}
+      />
+
+      <SuccessDialog
+        open={!!successDialog}
+        onClose={() => setSuccessDialog(null)}
+        variant="updated"
+        title={successDialog?.title}
+        description={successDialog?.description}
+      />
     </DashboardShell>
   );
 }
