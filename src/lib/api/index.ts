@@ -13,13 +13,21 @@ import { apiClient } from '@/lib/api/client';
 import type {
   BatteryDistribution,
   BatteryHealthPoint,
+  Alarm,
+  AlarmSeverity,
+  AlarmStatus,
   BatteryStation,
   CancelledSessions,
   CostBreakdown,
   DashboardMetrics,
+  DeviceStatus,
   Driver,
   DriverDocuments,
+  DriverSession,
   DriverStatusChangeResult,
+  IoTDevice,
+  SessionKind,
+  SessionStatus,
   DriverRegistrationRequest,
   FastChargingCabinet,
   FastChargingStatus,
@@ -1501,5 +1509,173 @@ export const notificationsApi = {
 
   async clearAll(): Promise<void> {
     await apiClient.delete('/fleet-admin/notifications');
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IoT Devices API
+//
+// NOTE: field names below are mapped DEFENSIVELY (multiple fallbacks) because the
+// exact backend response shape has not been confirmed yet. Once a real sample is
+// available, tighten these mappers. See docs/BACKEND_GAPS.md (A2).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Coerce a possibly-string number into a real number, or undefined. */
+function num(v: unknown): number | undefined {
+  if (v === null || v === undefined || v === '') return undefined;
+  const n = typeof v === 'string' ? parseFloat(v) : (v as number);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+type RawDevice = Record<string, any>;
+
+function mapDevice(d: RawDevice): IoTDevice {
+  const moto = d.motorcycle ?? d.assigned_motorcycle ?? {};
+  const isOnline =
+    typeof d.is_online === 'boolean' ? d.is_online
+    : (d.status ?? d.connection_status) === 'online';
+  const gps = (d.gps_signal ?? d.signal ?? 'strong') as IoTDevice['gpsSignal'];
+  return {
+    id:              String(d.id ?? d.device_id ?? d.imei ?? ''),
+    deviceId:        String(d.device_id ?? d.imei ?? d.serial ?? d.id ?? ''),
+    motorcycleId:    moto.id != null ? String(moto.id) : (d.motorcycle_id != null ? String(d.motorcycle_id) : undefined),
+    motorcyclePlate: moto.plate_number ?? moto.plate ?? d.plate_number ?? undefined,
+    status:          (isOnline ? 'online' : 'offline') as DeviceStatus,
+    batteryLevel:    num(d.battery_level ?? d.battery ?? d.soc ?? moto.battery_level),
+    gpsSignal:       (['strong', 'weak', 'none'].includes(gps) ? gps : 'strong') as IoTDevice['gpsSignal'],
+    latitude:        num(d.latitude ?? d.lat),
+    longitude:       num(d.longitude ?? d.lng ?? d.lon),
+    speedKmh:        num(d.speed_kmh ?? d.speed),
+    lastSeenAt:      d.last_seen_at ?? d.last_seen ?? d.updated_at ?? undefined,
+  };
+}
+
+export const iotDevicesApi = {
+  /** List devices. Optional status filter: 'online' | 'offline'. */
+  async list(status?: DeviceStatus, perPage = 50): Promise<IoTDevice[]> {
+    const qs = new URLSearchParams({ per_page: String(perPage) });
+    if (status) qs.set('status', status);
+    const raw = await apiClient.get<unknown>(`/fleet-admin/iot-devices?${qs.toString()}`);
+    return extractList<RawDevice>(raw).map(mapDevice);
+  },
+
+  async get(id: string): Promise<IoTDevice | null> {
+    try {
+      const res = await apiClient.get<{ data?: RawDevice } | RawDevice>(`/fleet-admin/iot-devices/${id}`);
+      const raw = (res as { data?: RawDevice }).data ?? (res as RawDevice);
+      return mapDevice(raw);
+    } catch {
+      return null;
+    }
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Alarms API  (defensive mapping — see docs/BACKEND_GAPS.md A3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+type RawAlarm = Record<string, any>;
+
+function toAlarmSeverity(s?: string): AlarmSeverity {
+  const v = (s ?? '').toLowerCase();
+  if (v === 'critical' || v === 'high' || v === 'error' || v === 'danger') return 'critical';
+  if (v === 'warning' || v === 'medium' || v === 'warn') return 'warning';
+  return 'info';
+}
+
+function mapAlarm(a: RawAlarm): Alarm {
+  const resolved =
+    a.status === 'resolved' || a.is_resolved === true || a.resolved === true || a.resolved_at != null;
+  const moto = a.motorcycle ?? {};
+  return {
+    id:           String(a.id ?? ''),
+    type:         String(a.type ?? a.alarm_type ?? a.code ?? 'unknown'),
+    title:        a.title ?? a.name ?? a.message ?? a.type ?? 'Alarm',
+    description:  a.description ?? a.details ?? a.message ?? undefined,
+    severity:     toAlarmSeverity(a.severity ?? a.level ?? a.priority),
+    status:       (resolved ? 'resolved' : 'unresolved') as AlarmStatus,
+    motorcycleId: moto.id != null ? String(moto.id) : (a.motorcycle_id != null ? String(a.motorcycle_id) : undefined),
+    deviceId:     a.device_id != null ? String(a.device_id) : undefined,
+    createdAt:    a.created_at ?? a.triggered_at ?? a.timestamp ?? new Date().toISOString(),
+    resolvedAt:   a.resolved_at ?? undefined,
+  };
+}
+
+export const alarmsApi = {
+  /** List alarms. Optional status filter: 'unresolved' | 'resolved'. */
+  async list(status?: AlarmStatus, perPage = 50): Promise<Alarm[]> {
+    const qs = new URLSearchParams({ per_page: String(perPage) });
+    if (status) qs.set('status', status);
+    const raw = await apiClient.get<unknown>(`/fleet-admin/alarms?${qs.toString()}`);
+    return extractList<RawAlarm>(raw).map(mapAlarm);
+  },
+
+  /** Mark an alarm resolved. Returns true on success. */
+  async resolve(id: string): Promise<boolean> {
+    try {
+      await apiClient.post(`/fleet-admin/alarms/${id}/resolve`);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sessions API — driver swap / charging activity (defensive; see BACKEND_GAPS A4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+type RawSession = Record<string, any>;
+
+function toSessionStatus(s?: string): SessionStatus {
+  const v = (s ?? '').toLowerCase();
+  if (v === 'completed' || v === 'success' || v === 'done' || v === 'finished') return 'completed';
+  if (v === 'cancelled' || v === 'canceled') return 'cancelled';
+  if (v === 'failed' || v === 'error') return 'failed';
+  return 'in_progress';
+}
+
+function mapSession(kind: SessionKind, s: RawSession): DriverSession {
+  const driver = s.driver ?? s.user ?? {};
+  const station = s.station ?? s.cabinet ?? s.pile ?? {};
+  return {
+    id:          String(s.id ?? ''),
+    kind,
+    driverId:    driver.id != null ? String(driver.id) : (s.driver_id != null ? String(s.driver_id) : undefined),
+    driverName:  driver.name ?? s.driver_name ?? undefined,
+    stationName: station.name ?? s.station_name ?? s.cabinet_name ?? undefined,
+    status:      toSessionStatus(s.status),
+    startedAt:   s.started_at ?? s.created_at ?? s.start_time ?? undefined,
+    endedAt:     s.ended_at ?? s.completed_at ?? s.end_time ?? undefined,
+    amount:      num(s.amount ?? s.cost ?? s.total ?? s.price),
+  };
+}
+
+interface SessionFilters {
+  status?: SessionStatus;
+  driverId?: string;
+  from?: string;
+  to?: string;
+  perPage?: number;
+}
+
+function sessionQuery(f?: SessionFilters): string {
+  const qs = new URLSearchParams({ per_page: String(f?.perPage ?? 50) });
+  if (f?.status)   qs.set('status', f.status);
+  if (f?.driverId) qs.set('driver_id', f.driverId);
+  if (f?.from)     qs.set('from', f.from);
+  if (f?.to)       qs.set('to', f.to);
+  return qs.toString();
+}
+
+export const sessionsApi = {
+  async swaps(filters?: SessionFilters): Promise<DriverSession[]> {
+    const raw = await apiClient.get<unknown>(`/fleet-admin/sessions/swaps?${sessionQuery(filters)}`);
+    return extractList<RawSession>(raw).map((s) => mapSession('swap', s));
+  },
+
+  async charging(filters?: SessionFilters): Promise<DriverSession[]> {
+    const raw = await apiClient.get<unknown>(`/fleet-admin/sessions/charging?${sessionQuery(filters)}`);
+    return extractList<RawSession>(raw).map((s) => mapSession('charging', s));
   },
 };

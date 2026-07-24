@@ -15,6 +15,9 @@ import {
   LogOut,
   Wallet,
   Zap,
+  Cpu,
+  AlarmClock,
+  Activity,
   X,
 } from 'lucide-react';
 import { Logo } from './Logo';
@@ -30,8 +33,11 @@ const navItems = [
   { href: '/battery-swapping', icon: BatteryCharging, key: 'nav.batterySwapping' },
   { href: '/fast-charging',    icon: Zap,             key: 'nav.fastCharging' },
   { href: '/drivers',          icon: Users,           key: 'nav.drivers' },
+  { href: '/sessions',         icon: Activity,        key: 'nav.sessions' },
   { href: '/vehicle-control',  icon: Settings2,       key: 'nav.vehicleControl' },
+  { href: '/iot-devices',      icon: Cpu,             key: 'nav.iotDevices' },
   { href: '/zones',            icon: Map,             key: 'nav.zones' },
+  { href: '/alarms',           icon: AlarmClock,      key: 'nav.alarms' },
   { href: '/notifications',    icon: Bell,            key: 'nav.notifications', showBadge: true },
   { href: '/reports',          icon: LineChart,       key: 'nav.reports' },
   { href: '/wallet',           icon: Wallet,          key: 'nav.wallet' },

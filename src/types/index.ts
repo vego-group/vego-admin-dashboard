@@ -230,6 +230,63 @@ export interface User {
   avatarUrl?: string;
 }
 
+// ----- IoT Devices ------------------------------------------------------------
+
+export type DeviceStatus = 'online' | 'offline';
+
+export interface IoTDevice {
+  id: string;
+  /** Hardware identifier (IMEI / serial), as reported by the backend. */
+  deviceId: string;
+  motorcycleId?: string;
+  motorcyclePlate?: string;
+  status: DeviceStatus;
+  /** Battery level of the paired motorcycle, 0–100. */
+  batteryLevel?: number;
+  gpsSignal: 'strong' | 'weak' | 'none';
+  latitude?: number;
+  longitude?: number;
+  speedKmh?: number;
+  lastSeenAt?: string;
+}
+
+// ----- Alarms -----------------------------------------------------------------
+
+export type AlarmStatus = 'unresolved' | 'resolved';
+export type AlarmSeverity = 'critical' | 'warning' | 'info';
+
+export interface Alarm {
+  id: string;
+  /** Raw backend type code, e.g. 'low_battery', 'geofence_breach'. */
+  type: string;
+  title: string;
+  description?: string;
+  severity: AlarmSeverity;
+  status: AlarmStatus;
+  motorcycleId?: string;
+  deviceId?: string;
+  createdAt: string;
+  resolvedAt?: string;
+}
+
+// ----- Driver Sessions (swap / charging activity) -----------------------------
+
+export type SessionKind = 'swap' | 'charging';
+export type SessionStatus = 'in_progress' | 'completed' | 'cancelled' | 'failed';
+
+export interface DriverSession {
+  id: string;
+  kind: SessionKind;
+  driverId?: string;
+  driverName?: string;
+  stationName?: string;
+  status: SessionStatus;
+  startedAt?: string;
+  endedAt?: string;
+  /** Cost of the session, when applicable. */
+  amount?: number;
+}
+
 // ----- Wallet ----------------------------------------------------------------
 
 export type TransactionType   = 'top_up' | 'fast_charge' | 'battery_swap' | 'refund';
