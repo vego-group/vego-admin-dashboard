@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Pencil, IdCard, FileText, Hash, Wallet, Loader2, ShieldX, ShieldCheck } from 'lucide-react';
+import { Pencil, IdCard, FileText, Hash, Wallet, Loader2, ShieldX, ShieldCheck, Bike } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
 import { StatusPill } from '@/components/ui/StatusPill';
@@ -16,6 +16,7 @@ interface DriversTableProps {
   onTopUp?: (driver: Driver) => void;
   onToggleStatus?: (driver: Driver) => Promise<void>;
   onBlockToggle?: (driver: Driver) => Promise<void>;
+  onAssignMotorcycle?: (driver: Driver) => void;
 }
 
 function walletBalanceColor(balance: number): string {
@@ -69,7 +70,7 @@ function DocsCount(driver: Driver) {
 
 // ── Table ──────────────────────────────────────────────────────────────────
 
-export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlockToggle }: DriversTableProps) {
+export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlockToggle, onAssignMotorcycle }: DriversTableProps) {
   const { t, locale } = useI18n();
 
   // Per-row loading state for toggle (active↔inactive)
@@ -168,7 +169,23 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
                   </td>
                   <td className="px-5 py-4 text-slate-900 dark:text-slate-100">{d.name}</td>
                   <td className="px-5 py-4 text-slate-600 dark:text-slate-300">{d.phone}</td>
-                  <td className="px-5 py-4 text-slate-600 dark:text-slate-300">{d.vehicleModel}</td>
+                  <td className="px-5 py-4 text-slate-600 dark:text-slate-300">
+                    {d.assignedMotorcyclePlate || d.assignedMotorcycleId || d.vehicleModel ? (
+                      <div className="flex items-center gap-1.5">
+                        <Bike className="h-3.5 w-3.5 text-slate-400" />
+                        <div className="min-w-0 leading-tight">
+                          <p className="truncate font-medium text-slate-700 dark:text-slate-200">
+                            {d.assignedMotorcyclePlate ?? (d.assignedMotorcycleId ? `#${d.assignedMotorcycleId}` : d.vehicleModel)}
+                          </p>
+                          {d.vehicleModel && (d.assignedMotorcyclePlate || d.assignedMotorcycleId) && (
+                            <p className="truncate text-[10px] text-slate-400">{d.vehicleModel}</p>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <span className="text-slate-400">{t('drivers.noMotorcycleAssigned')}</span>
+                    )}
+                  </td>
                   <td className="px-5 py-4">
                     <StatusPill status={d.status} type="driver" />
                   </td>
@@ -245,6 +262,19 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
                       >
                         <Pencil className="h-4 w-4" />
                       </button>
+
+                      {/* Assign / change motorcycle */}
+                      {onAssignMotorcycle && (
+                        <button
+                          type="button"
+                          onClick={() => onAssignMotorcycle(d)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-indigo-600 transition-colors hover:bg-indigo-50 dark:hover:bg-indigo-500/10"
+                          aria-label={d.assignedMotorcycleId ? t('drivers.changeMotorcycleAction') : t('drivers.assignMotorcycleAction')}
+                          title={d.assignedMotorcycleId ? t('drivers.changeMotorcycleAction') : t('drivers.assignMotorcycleAction')}
+                        >
+                          <Bike className="h-4 w-4" />
+                        </button>
+                      )}
 
                       {/* Top-up wallet */}
                       <button

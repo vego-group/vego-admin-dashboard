@@ -100,6 +100,10 @@ export interface Driver {
   address?: string;
   city?: string;
   vehicleModel: string;
+  /** Id of the motorcycle currently assigned to this driver, if any. */
+  assignedMotorcycleId?: string;
+  /** Plate number of the assigned motorcycle, for display. */
+  assignedMotorcyclePlate?: string;
   status: DriverStatus;
   trips: number;
   totalCost: number;

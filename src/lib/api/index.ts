@@ -72,7 +72,7 @@ interface ApiDriver {
   has_license?: boolean;
   // Motorcycle — list returns assigned_motorcycle, show returns motorcycle
   assigned_motorcycle?: { id?: number; model_name?: string; model?: string; plate_number?: string } | null;
-  motorcycle?: { model_name?: string; model?: string; plate_number?: string } | null;
+  motorcycle?: { id?: number; model_name?: string; model?: string; plate_number?: string } | null;
   // Stats — not present in list/show response yet; will be 0 until backend adds them
   trips_count?: number;
   total_cost?: number;
@@ -352,6 +352,8 @@ function mapDriver(d: ApiDriver): Driver {
     address:      d.address  ?? undefined,
     city:         d.city     ?? undefined,
     vehicleModel: moto?.model_name ?? moto?.model ?? '',
+    assignedMotorcycleId:    moto?.id != null ? String(moto.id) : undefined,
+    assignedMotorcyclePlate: moto?.plate_number ?? undefined,
     status:       toDriverStatus(d.status),
     trips:        d.trips_count ?? 0,
     totalCost:    d.total_cost ?? 0,

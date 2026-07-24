@@ -7,6 +7,7 @@ import { MetricCard } from '@/components/dashboard/MetricCard';
 import { DriversTable } from '@/components/drivers/DriversTable';
 import { DriverFormModal, type DriverFormValues } from '@/components/drivers/DriverFormModal';
 import { TopUpModal } from '@/components/drivers/TopUpModal';
+import { AssignMotorcycleModal } from '@/components/drivers/AssignMotorcycleModal';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -16,8 +17,8 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Pagination } from '@/components/ui/Pagination';
 import { SuccessDialog } from '@/components/ui/SuccessDialog';
 import { useI18n } from '@/i18n/I18nProvider';
-import { driversApi } from '@/lib/api';
-import type { CancelledSessions, Driver, DriverStatus } from '@/types';
+import { driversApi, fleetApi } from '@/lib/api';
+import type { CancelledSessions, Driver, DriverStatus, Vehicle } from '@/types';
 import { logger } from '@/lib/logger';
 
 type TabValue = 'all' | DriverStatus;
@@ -28,6 +29,7 @@ export default function DriversPage() {
 
   // Data
   const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [motorcycles, setMotorcycles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -39,6 +41,7 @@ export default function DriversPage() {
   // Modals
   const [formMode, setFormMode] = useState<FormMode>({ kind: 'closed' });
   const [driverToTopUp, setDriverToTopUp] = useState<Driver | null>(null);
+  const [driverToAssign, setDriverToAssign] = useState<Driver | null>(null);
   const [successDialog, setSuccessDialog] = useState<
     | { kind: 'added' }
     | { kind: 'updated' }
@@ -51,8 +54,18 @@ export default function DriversPage() {
     let cancelled = false;
     (async () => {
       try {
-        const driverData = await driversApi.list();
-        if (!cancelled) setDrivers(driverData);
+        // Motorcycles power the assignment picker; a failure there shouldn't hide drivers.
+        const [driverData, motorcycleData] = await Promise.all([
+          driversApi.list(),
+          fleetApi.list().catch((err) => {
+            logger.error('[Drivers] Failed to load motorcycles for assignment:', err);
+            return [] as Vehicle[];
+          }),
+        ]);
+        if (!cancelled) {
+          setDrivers(driverData);
+          setMotorcycles(motorcycleData);
+        }
       } catch (err) {
         logger.error('[Drivers] Failed to load data:', err);
       } finally {
@@ -198,6 +211,61 @@ export default function DriversPage() {
     });
   };
 
+  /** Assign / change the motorcycle for a driver (calls the motorcycle endpoint). */
+  const handleAssignMotorcycle = async (motorcycleId: string, driverId: string): Promise<boolean> => {
+    const ok = await fleetApi.assignDriver(motorcycleId, driverId);
+    if (!ok) return false;
+    const moto = motorcycles.find((m) => m.id === motorcycleId);
+    const driver = drivers.find((d) => d.id === driverId);
+    const plate = moto?.plateNumber ?? `#${motorcycleId}`;
+    const previousMotorcycleId = driver?.assignedMotorcycleId;
+
+    setDrivers((prev) =>
+      prev.map((d) =>
+        d.id === driverId
+          ? { ...d, assignedMotorcycleId: motorcycleId, assignedMotorcyclePlate: moto?.plateNumber, vehicleModel: moto?.model ?? d.vehicleModel }
+          : d
+      )
+    );
+    // Keep the local motorcycle list consistent: the new one is now taken, the old one freed.
+    setMotorcycles((prev) =>
+      prev.map((m) => {
+        if (m.id === motorcycleId) return { ...m, assignedDriverId: driverId, assignedDriverName: driver?.name };
+        if (m.id === previousMotorcycleId) return { ...m, assignedDriverId: undefined, assignedDriverName: undefined };
+        return m;
+      })
+    );
+    setSuccessDialog({
+      kind: 'statusChanged',
+      title: t('drivers.motorcycleAssignedTitle'),
+      description: t('drivers.motorcycleAssignedDescription', { motorcycle: plate, driver: driver?.name ?? driverId }),
+    });
+    return true;
+  };
+
+  /** Clear a driver's motorcycle assignment. */
+  const handleUnassignMotorcycle = async (motorcycleId: string, driverId: string): Promise<boolean> => {
+    const ok = await fleetApi.unassignDriver(motorcycleId);
+    if (!ok) return false;
+    const driver = drivers.find((d) => d.id === driverId);
+    setDrivers((prev) =>
+      prev.map((d) =>
+        d.id === driverId
+          ? { ...d, assignedMotorcycleId: undefined, assignedMotorcyclePlate: undefined, vehicleModel: '' }
+          : d
+      )
+    );
+    setMotorcycles((prev) =>
+      prev.map((m) => (m.id === motorcycleId ? { ...m, assignedDriverId: undefined, assignedDriverName: undefined } : m))
+    );
+    setSuccessDialog({
+      kind: 'statusChanged',
+      title: t('drivers.motorcycleUnassignedTitle'),
+      description: t('drivers.motorcycleUnassignedDescription', { driver: driver?.name ?? driverId }),
+    });
+    return true;
+  };
+
   // ----- Render -------------------------------------------------------------
 
   const tabOptions = [
@@ -290,6 +358,7 @@ export default function DriversPage() {
             onTopUp={(d) => setDriverToTopUp(d)}
             onToggleStatus={handleToggleStatus}
             onBlockToggle={handleBlockToggle}
+            onAssignMotorcycle={(d) => setDriverToAssign(d)}
           />
         )}
       </div>
@@ -315,6 +384,15 @@ export default function DriversPage() {
         onClose={() => setDriverToTopUp(null)}
         driver={driverToTopUp}
         onSuccess={handleTopUpSuccess}
+      />
+
+      <AssignMotorcycleModal
+        open={!!driverToAssign}
+        onClose={() => setDriverToAssign(null)}
+        driver={driverToAssign}
+        motorcycles={motorcycles}
+        onAssign={handleAssignMotorcycle}
+        onUnassign={handleUnassignMotorcycle}
       />
 
       <SuccessDialog
