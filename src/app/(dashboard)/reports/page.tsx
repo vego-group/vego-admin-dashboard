@@ -34,54 +34,63 @@ export default function ReportsPage() {
   const [batteryDist, setBatteryDist]       = useState<BatteryDistribution[]>([]);
   const [costAnalysis, setCostAnalysis]     = useState<CostBreakdown[]>([]);
   const [topDrivers, setTopDrivers]         = useState<TopDriver[]>([]);
-  const [apiError, setApiError]             = useState<string | null>(null);
+  const [failedSections, setFailedSections] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const [mRes, wtRes, mrRes, bdRes, caRes, tdRes] = await Promise.allSettled([
-          dashboardApi.getMetrics(),
-          reportsApi.getWeeklyTrips(),
-          reportsApi.getMonthlyRevenue(),
-          reportsApi.getBatteryDistribution(),
-          reportsApi.getCostAnalysis(),
-          reportsApi.getTopDrivers(),
-        ]);
-        if (!cancelled) {
-          if (mRes.status  === 'fulfilled') setMetrics(mRes.value);
-          if (wtRes.status === 'fulfilled') setWeeklyTrips(wtRes.value);
-          if (mrRes.status === 'fulfilled') setMonthlyRevenue(mrRes.value);
-          if (bdRes.status === 'fulfilled') setBatteryDist(bdRes.value);
-          if (caRes.status === 'fulfilled') setCostAnalysis(caRes.value);
-          if (tdRes.status === 'fulfilled') setTopDrivers(tdRes.value);
+      // Each report widget loads independently so one missing backend route
+      // (e.g. reports/weekly-trips) degrades only its own card, not the page.
+      const [mRes, wtRes, mrRes, bdRes, caRes, tdRes] = await Promise.allSettled([
+        dashboardApi.getMetrics(),
+        reportsApi.getWeeklyTrips(),
+        reportsApi.getMonthlyRevenue(),
+        reportsApi.getBatteryDistribution(),
+        reportsApi.getCostAnalysis(),
+        reportsApi.getTopDrivers(),
+      ]);
+      if (cancelled) return;
 
-          const rejected = [mRes, wtRes, mrRes, bdRes, caRes, tdRes]
-            .filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-          if (rejected.length > 0) {
-            const err = rejected[0].reason;
-            logger.error('[Reports] Failed to load some data:', err);
-            setApiError(err instanceof Error ? err.message : 'Failed to load reports data');
-          }
-        }
-      } catch (err) {
-        logger.error('[Reports] Unexpected error:', err);
-      } finally {
-        if (!cancelled) setLoading(false);
+      if (mRes.status  === 'fulfilled') setMetrics(mRes.value);
+      if (wtRes.status === 'fulfilled') setWeeklyTrips(wtRes.value);
+      if (mrRes.status === 'fulfilled') setMonthlyRevenue(mrRes.value);
+      if (bdRes.status === 'fulfilled') setBatteryDist(bdRes.value);
+      if (caRes.status === 'fulfilled') setCostAnalysis(caRes.value);
+      if (tdRes.status === 'fulfilled') setTopDrivers(tdRes.value);
+
+      // Collect the label of every section whose endpoint failed, so the user
+      // sees exactly what's unavailable instead of a single raw error string.
+      const sections: [PromiseSettledResult<unknown>, string][] = [
+        [mRes,  t('reports.sectionMetrics')],
+        [wtRes, t('reports.sectionWeeklyTrips')],
+        [mrRes, t('reports.sectionMonthlyRevenue')],
+        [bdRes, t('reports.sectionBatteryDistribution')],
+        [caRes, t('reports.sectionCostAnalysis')],
+        [tdRes, t('reports.sectionTopDrivers')],
+      ];
+      const failed = sections.filter(([r]) => r.status === 'rejected').map(([, label]) => label);
+      if (failed.length > 0) {
+        logger.error('[Reports] Failed sections:', failed,
+          sections.filter(([r]) => r.status === 'rejected').map(([r]) => (r as PromiseRejectedResult).reason));
+        setFailedSections(failed);
       }
+      setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [t]);
 
   return (
     <DashboardShell title={t('reports.title')} subtitle={t('reports.subtitle')}>
-      {apiError && (
-        <div className="mb-3 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
-          <span>{apiError}</span>
+      {failedSections.length > 0 && (
+        <div className="mb-3 flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+          <span>
+            {t('reports.partialLoad')}{' '}
+            <span className="font-semibold">{failedSections.join('، ')}</span>
+          </span>
           <button
             type="button"
-            onClick={() => setApiError(null)}
-            className="ms-3 shrink-0 text-rose-400 hover:text-rose-600"
+            onClick={() => setFailedSections([])}
+            className="shrink-0 text-amber-400 hover:text-amber-600"
             aria-label="Dismiss"
           >
             ✕

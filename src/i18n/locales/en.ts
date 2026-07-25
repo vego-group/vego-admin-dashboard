@@ -507,6 +507,13 @@ const en = {
   reports: {
     title: 'Report Management',
     subtitle: 'Monitor and manage your entire electric moped fleet',
+    partialLoad: 'Some report data could not be loaded:',
+    sectionMetrics: 'Key metrics',
+    sectionWeeklyTrips: 'Weekly trips',
+    sectionMonthlyRevenue: 'Monthly revenue',
+    sectionBatteryDistribution: 'Battery distribution',
+    sectionCostAnalysis: 'Cost analysis',
+    sectionTopDrivers: 'Top drivers',
     totalTripsToday: 'Total Trips Today',
     dailyRevenue: 'Daily Revenue',
     averageBattery: 'Average Battery',

@@ -505,6 +505,13 @@ const ar: Translations = {
   reports: {
     title: 'إدارة التقارير',
     subtitle: 'راقب وأدر أسطول الدراجات الكهربائية بالكامل',
+    partialLoad: 'تعذّر تحميل بعض بيانات التقارير:',
+    sectionMetrics: 'المؤشرات الرئيسية',
+    sectionWeeklyTrips: 'الرحلات الأسبوعية',
+    sectionMonthlyRevenue: 'الإيرادات الشهرية',
+    sectionBatteryDistribution: 'توزيع البطارية',
+    sectionCostAnalysis: 'تحليل التكاليف',
+    sectionTopDrivers: 'أفضل السائقين',
     totalTripsToday: 'إجمالي الرحلات اليوم',
     dailyRevenue: 'الإيرادات اليومية',
     averageBattery: 'متوسط البطارية',
