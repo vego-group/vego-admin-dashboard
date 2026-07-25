@@ -1,18 +1,21 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { AlertTriangle, Lock, Power, Unlock, UserPlus, UserMinus, Loader2 } from 'lucide-react';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import type { Vehicle } from '@/types';
 import type { Driver } from '@/types';
+import type { VehicleCommand, VehicleControlState } from '@/lib/api';
 
 interface ControlPanelProps {
   vehicle: Vehicle;
   drivers?: Driver[];
   onAssignDriver?: (motorcycleId: string, driverId: string) => Promise<boolean>;
   onUnassignDriver?: (motorcycleId: string) => Promise<boolean>;
+  /** Sends a real control command; returns the authoritative state or null on failure. */
+  onCommand?: (motorcycleId: string, action: VehicleCommand, speedLimit?: number) => Promise<VehicleControlState | null>;
 }
 
 export function ControlPanel({
@@ -20,13 +23,40 @@ export function ControlPanel({
   drivers = [],
   onAssignDriver,
   onUnassignDriver,
+  onCommand,
 }: ControlPanelProps) {
   const { t } = useI18n();
 
-  // Local UI-only controls (no backend endpoint for engine/lock/speed)
+  // Control state — mirrors the backend, updated from each command's response.
   const [isLocked,   setIsLocked]   = useState(vehicle.isLocked);
   const [isRunning,  setIsRunning]  = useState(vehicle.isEngineRunning);
   const [speedLimit, setSpeedLimit] = useState(vehicle.speedLimitKmh);
+  const [pending,      setPending]      = useState<VehicleCommand | null>(null);
+  const [commandError, setCommandError] = useState<string | null>(null);
+
+  // Re-sync when a different vehicle is selected (component instance is reused).
+  useEffect(() => {
+    setIsLocked(vehicle.isLocked);
+    setIsRunning(vehicle.isEngineRunning);
+    setSpeedLimit(vehicle.speedLimitKmh);
+    setPending(null);
+    setCommandError(null);
+    // Only resync on vehicle switch, not on every optimistic prop update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vehicle.id]);
+
+  /** Run a command; on success adopt the backend's authoritative state. */
+  const runCommand = async (action: VehicleCommand, nextSpeed?: number) => {
+    if (!onCommand || pending) return;
+    setPending(action);
+    setCommandError(null);
+    const state = await onCommand(vehicle.id, action, nextSpeed);
+    setPending(null);
+    if (!state) { setCommandError(t('vehicleControl.commandFailed')); return; }
+    setIsLocked(state.isLocked);
+    setIsRunning(state.isEngineRunning);
+    setSpeedLimit(state.speedLimitKmh);
+  };
 
   // Driver assignment
   const [selectedDriverId, setSelectedDriverId] = useState('');
@@ -72,15 +102,18 @@ export function ControlPanel({
           </p>
           <button
             type="button"
-            onClick={() => setIsRunning((v) => !v)}
+            onClick={() => runCommand(isRunning ? 'stop' : 'start')}
+            disabled={!!pending}
             className={cn(
-              'mt-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold text-white shadow-sm transition-all active:scale-[0.99]',
+              'mt-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold text-white shadow-sm transition-all active:scale-[0.99] disabled:opacity-60',
               isRunning
                 ? 'bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600'
                 : 'bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700'
             )}
           >
-            <Power className="h-4 w-4" />
+            {pending === 'start' || pending === 'stop'
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Power className="h-4 w-4" />}
             {isRunning ? t('vehicleControl.stopEngine') : t('vehicleControl.startEngine')}
           </button>
         </div>
@@ -92,15 +125,18 @@ export function ControlPanel({
           </p>
           <button
             type="button"
-            onClick={() => setIsLocked((v) => !v)}
+            onClick={() => runCommand(isLocked ? 'unlock' : 'lock')}
+            disabled={!!pending}
             className={cn(
-              'mt-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border text-sm font-semibold transition-all active:scale-[0.99]',
+              'mt-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border text-sm font-semibold transition-all active:scale-[0.99] disabled:opacity-60',
               isLocked
                 ? 'border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
                 : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400'
             )}
           >
-            {isLocked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+            {pending === 'lock' || pending === 'unlock'
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : isLocked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
             {isLocked ? t('vehicleControl.locked') : t('vehicleControl.unlocked')}
           </button>
         </div>
@@ -120,8 +156,12 @@ export function ControlPanel({
             min={0}
             max={45}
             value={speedLimit}
+            disabled={!!pending}
             onChange={(e) => setSpeedLimit(Number(e.target.value))}
-            className="mt-2 w-full accent-brand-600"
+            // Commit to the backend only when the user releases the slider.
+            onPointerUp={() => runCommand('set_speed_limit', speedLimit)}
+            onKeyUp={() => runCommand('set_speed_limit', speedLimit)}
+            className="mt-2 w-full accent-brand-600 disabled:opacity-60"
           />
           <div className="mt-1 flex justify-between text-[10px] text-slate-400">
             <span>0</span>
@@ -156,12 +196,20 @@ export function ControlPanel({
           </p>
           <button
             type="button"
-            className="mt-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 text-sm font-bold text-white shadow-sm transition-all hover:from-rose-700 hover:to-red-700 active:scale-[0.99]"
+            onClick={() => runCommand('emergency_stop')}
+            disabled={!!pending}
+            className="mt-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 text-sm font-bold text-white shadow-sm transition-all hover:from-rose-700 hover:to-red-700 active:scale-[0.99] disabled:opacity-60"
           >
-            <AlertTriangle className="h-4 w-4" />
+            {pending === 'emergency_stop'
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <AlertTriangle className="h-4 w-4" />}
             {t('vehicleControl.emergencyStop')}
           </button>
         </div>
+
+        {commandError && (
+          <p className="mt-3 text-xs text-rose-600">{commandError}</p>
+        )}
       </Card>
 
       {/* Driver Assignment */}

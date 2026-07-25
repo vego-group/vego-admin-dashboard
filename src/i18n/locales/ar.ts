@@ -407,6 +407,7 @@ const ar: Translations = {
     unassignDriver: 'إلغاء تعيين السائق',
     assignFailed: 'فشل تعيين السائق. حاول مرة أخرى.',
     unassignFailed: 'فشل إلغاء تعيين السائق. حاول مرة أخرى.',
+    commandFailed: 'تعذّر إرسال الأمر إلى المركبة. حاول مرة أخرى.',
   },
   zones: {
     title: 'إدارة النطاقات',

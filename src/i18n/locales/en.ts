@@ -405,6 +405,7 @@ const en = {
     unassignDriver: 'Unassign Driver',
     assignFailed: 'Failed to assign driver. Please try again.',
     unassignFailed: 'Failed to unassign driver. Please try again.',
+    commandFailed: 'Command failed to reach the vehicle. Please try again.',
   },
   zones: {
     title: 'Zone Control',

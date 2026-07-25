@@ -550,6 +550,15 @@ export interface MotorcycleStatistics {
   totalDistanceKm: number;
 }
 
+// Vehicle control commands (POST /fleet-admin/motorcycles/{id}/command)
+export type VehicleCommand = 'lock' | 'unlock' | 'start' | 'stop' | 'emergency_stop' | 'set_speed_limit';
+
+export interface VehicleControlState {
+  isLocked: boolean;
+  isEngineRunning: boolean;
+  speedLimitKmh: number;
+}
+
 export const fleetApi = {
   async list(): Promise<Vehicle[]> {
     const raw = await apiClient.get<unknown>('/fleet-admin/motorcycles');
@@ -625,6 +634,34 @@ export const fleetApi = {
       return true;
     } catch {
       return false;
+    }
+  },
+
+  /**
+   * Send a control command to a motorcycle.
+   * Endpoint: POST /fleet-admin/motorcycles/{id}/command
+   * Returns the authoritative control state the backend persisted, or null on error.
+   */
+  async sendCommand(
+    motorcycleId: string,
+    action: VehicleCommand,
+    speedLimit?: number,
+  ): Promise<VehicleControlState | null> {
+    try {
+      const res = await apiClient.post<{
+        data?: { is_locked?: boolean; is_engine_running?: boolean; speed_limit_kmh?: number };
+      }>(`/fleet-admin/motorcycles/${motorcycleId}/command`, {
+        action,
+        ...(action === 'set_speed_limit' && speedLimit != null ? { speed_limit: speedLimit } : {}),
+      });
+      const d = res.data ?? {};
+      return {
+        isLocked:        d.is_locked ?? false,
+        isEngineRunning: d.is_engine_running ?? false,
+        speedLimitKmh:   d.speed_limit_kmh ?? speedLimit ?? 0,
+      };
+    } catch {
+      return null;
     }
   },
 };

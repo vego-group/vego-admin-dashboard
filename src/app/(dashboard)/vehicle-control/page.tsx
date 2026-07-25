@@ -13,7 +13,7 @@ import { useI18n } from '@/i18n/I18nProvider';
 import { fleetApi, driversApi } from '@/lib/api';
 import type { Vehicle } from '@/types';
 import type { Driver } from '@/types';
-import type { MotorcycleBattery, MotorcycleStatistics } from '@/lib/api';
+import type { MotorcycleBattery, MotorcycleStatistics, VehicleCommand, VehicleControlState } from '@/lib/api';
 import { logger } from '@/lib/logger';
 
 export default function VehicleControlPage() {
@@ -139,6 +139,29 @@ export default function VehicleControlPage() {
     []
   );
 
+  // ── Vehicle control commands ──────────────────────────────────────────────
+  const handleCommand = useCallback(
+    async (
+      motorcycleId: string,
+      action: VehicleCommand,
+      speedLimit?: number,
+    ): Promise<VehicleControlState | null> => {
+      const state = await fleetApi.sendCommand(motorcycleId, action, speedLimit);
+      if (state) {
+        // Persist the authoritative control state onto the vehicle in the list.
+        setVehicles((prev) =>
+          prev.map((v) =>
+            v.id === motorcycleId
+              ? { ...v, isLocked: state.isLocked, isEngineRunning: state.isEngineRunning, speedLimitKmh: state.speedLimitKmh }
+              : v
+          )
+        );
+      }
+      return state;
+    },
+    []
+  );
+
   // ── Derived ───────────────────────────────────────────────────────────────
   const selected = vehicles.find((v) => v.id === selectedId) ?? null;
 
@@ -196,6 +219,7 @@ export default function VehicleControlPage() {
                 drivers={activeDrivers}
                 onAssignDriver={handleAssignDriver}
                 onUnassignDriver={handleUnassignDriver}
+                onCommand={handleCommand}
               />
             )}
           </div>
