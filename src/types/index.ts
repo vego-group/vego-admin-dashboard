@@ -178,6 +178,7 @@ export interface DashboardMetrics {
   averageCostPerVehicle: number;
   successRate: number;
   fleetTrend: number;
+  driversTrend: number;
   batteriesTrend: number;
   tripsTrend: number;
   durationTrend: number;

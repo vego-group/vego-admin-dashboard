@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Bike, BatteryCharging, TrendingUp, Clock } from 'lucide-react';
+import { Bike, BatteryCharging, Users, Cpu } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { LiveFleetMap } from '@/components/dashboard/LiveFleetMap';
@@ -34,6 +34,7 @@ const EMPTY_METRICS: DashboardMetrics = {
   averageCostPerVehicle: 0,
   successRate: 0,
   fleetTrend: 0,
+  driversTrend: 0,
   batteriesTrend: 0,
   tripsTrend: 0,
   durationTrend: 0,
@@ -139,21 +140,17 @@ export default function DashboardPage() {
               iconColor="sky"
             />
             <MetricCard
-              label={t('dashboard.totalTripsToday')}
-              value={metrics.totalTripsToday}
-              trend={metrics.tripsTrend}
+              label={t('dashboard.totalDrivers')}
+              value={metrics.totalDrivers}
+              trend={metrics.driversTrend}
               trendLabel={t('common.fromYesterday')}
-              icon={<TrendingUp className="h-5 w-5" />}
+              icon={<Users className="h-5 w-5" />}
               iconColor="green"
             />
             <MetricCard
-              label={t('dashboard.avgTripDuration')}
-              value={metrics.avgTripDurationMinutes}
-              unit={t('common.minutes')}
-              trend={metrics.durationTrend}
-              trendLabel={t('common.minutes')}
-              invertTrendColor
-              icon={<Clock className="h-5 w-5" />}
+              label={t('dashboard.onlineDevices')}
+              value={metrics.onlineDevices}
+              icon={<Cpu className="h-5 w-5" />}
               iconColor="violet"
             />
           </>

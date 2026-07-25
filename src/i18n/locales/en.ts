@@ -514,6 +514,9 @@ const en = {
     sectionBatteryDistribution: 'Battery distribution',
     sectionCostAnalysis: 'Cost analysis',
     sectionTopDrivers: 'Top drivers',
+    sessions7d: 'Sessions (7 days)',
+    revenue7d: 'Revenue (7 days)',
+    onlineDevices: 'Online Devices',
     totalTripsToday: 'Total Trips Today',
     dailyRevenue: 'Daily Revenue',
     averageBattery: 'Average Battery',
@@ -533,6 +536,7 @@ const en = {
     swaps: 'swaps',
     charges: 'charges',
     dropOff: 'drop-off',
+    sessions: 'sessions',
     total: 'Total',
   },
   auth: {

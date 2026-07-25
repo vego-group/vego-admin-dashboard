@@ -3,15 +3,14 @@
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useI18n } from '@/i18n/I18nProvider';
-import { formatCurrency } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
 interface TopDriver {
   name: string;
-  earnings: number;
   swaps: number;
   charges: number;
-  dropOff: number;
+  /** Total sessions (swaps + charges) — the ranking metric. */
+  activity: number;
 }
 
 interface Props {
@@ -48,47 +47,51 @@ export function TopDriversLeaderboard({ data, loading }: Props) {
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
+      ) : data.length === 0 ? (
+        <p className="mt-6 py-6 text-center text-sm text-slate-400">{t('common.noData')}</p>
       ) : (
-        <ul className="mt-4 space-y-4">
-          {data.map((driver, idx) => (
-            <li key={driver.name}>
-              <div className="flex items-center gap-3">
-                <div
-                  className={cn(
-                    'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white shadow-sm',
-                    rankColors[idx % rankColors.length],
-                  )}
-                >
-                  {idx + 1}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                    {driver.name}
-                  </p>
-                  <p className="text-[11px] text-slate-500">
-                    {driver.swaps} {t('reports.swaps')} · {driver.charges} {t('reports.charges')}
-                  </p>
-                </div>
-                <div className="text-end">
-                  <p className="text-sm font-bold tabular-nums text-slate-900 dark:text-slate-100">
-                    {formatCurrency(driver.earnings, locale)}
-                  </p>
-                </div>
-              </div>
-              <div className="mt-2 ms-10 flex items-center gap-2">
-                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-                  <div
-                    className={cn('h-full rounded-full', barColors[idx % barColors.length])}
-                    style={{ width: `${driver.dropOff}%` }}
-                  />
-                </div>
-                <span className="text-[10px] font-medium tabular-nums text-slate-500">
-                  {driver.dropOff}% {t('reports.dropOff')}
-                </span>
-              </div>
-            </li>
-          ))}
-        </ul>
+        (() => {
+          // Bar length is each driver's activity relative to the busiest driver.
+          const maxActivity = Math.max(...data.map((d) => d.activity), 1);
+          return (
+            <ul className="mt-4 space-y-4">
+              {data.map((driver, idx) => (
+                <li key={`${driver.name}-${idx}`}>
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={cn(
+                        'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white shadow-sm',
+                        rankColors[idx % rankColors.length],
+                      )}
+                    >
+                      {idx + 1}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                        {driver.name}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        {driver.swaps} {t('reports.swaps')} · {driver.charges} {t('reports.charges')}
+                      </p>
+                    </div>
+                    <div className="text-end">
+                      <p className="text-sm font-bold tabular-nums text-slate-900 dark:text-slate-100">
+                        {driver.activity}
+                      </p>
+                      <p className="text-[10px] text-slate-500">{t('reports.sessions')}</p>
+                    </div>
+                  </div>
+                  <div className="mt-2 ms-10 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                    <div
+                      className={cn('h-full rounded-full', barColors[idx % barColors.length])}
+                      style={{ width: `${(driver.activity / maxActivity) * 100}%` }}
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          );
+        })()
       )}
     </Card>
   );

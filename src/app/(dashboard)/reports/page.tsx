@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Bike, DollarSign, Battery, Clock } from 'lucide-react';
+import { Repeat, DollarSign, Battery, Cpu } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { Card } from '@/components/ui/Card';
@@ -22,7 +22,7 @@ import type {
 import { logger } from '@/lib/logger';
 
 type WeeklyTrip    = { day: string; trips: number; revenue: number };
-type TopDriver     = { name: string; earnings: number; swaps: number; charges: number; dropOff: number };
+type TopDriver     = { name: string; swaps: number; charges: number; activity: number };
 
 export default function ReportsPage() {
   const { t } = useI18n();
@@ -111,16 +111,14 @@ export default function ReportsPage() {
         ) : (
           <>
             <MetricCard
-              label={t('reports.totalTripsToday')}
-              value={metrics.totalTripsToday}
-              trend={metrics.tripsTrend}
-              trendLabel={t('common.fromYesterday')}
-              icon={<Bike className="h-5 w-5" />}
+              label={t('reports.sessions7d')}
+              value={weeklyTrips.reduce((s, w) => s + w.trips, 0)}
+              icon={<Repeat className="h-5 w-5" />}
               iconColor="blue"
             />
             <MetricCard
-              label={t('reports.dailyRevenue')}
-              value={metrics.averageCostPerVehicle * metrics.activeFleet}
+              label={t('reports.revenue7d')}
+              value={weeklyTrips.reduce((s, w) => s + w.revenue, 0)}
               unit="SAR"
               icon={<DollarSign className="h-5 w-5" />}
               iconColor="green"
@@ -133,10 +131,9 @@ export default function ReportsPage() {
               iconColor="violet"
             />
             <MetricCard
-              label={t('reports.avgTripTime')}
-              value={metrics.avgTripDurationMinutes}
-              unit={t('common.minutes')}
-              icon={<Clock className="h-5 w-5" />}
+              label={t('reports.onlineDevices')}
+              value={metrics.onlineDevices}
+              icon={<Cpu className="h-5 w-5" />}
               iconColor="orange"
             />
           </>

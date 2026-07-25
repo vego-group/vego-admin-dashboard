@@ -512,6 +512,9 @@ const ar: Translations = {
     sectionBatteryDistribution: 'توزيع البطارية',
     sectionCostAnalysis: 'تحليل التكاليف',
     sectionTopDrivers: 'أفضل السائقين',
+    sessions7d: 'الجلسات (٧ أيام)',
+    revenue7d: 'الإيرادات (٧ أيام)',
+    onlineDevices: 'الأجهزة المتصلة',
     totalTripsToday: 'إجمالي الرحلات اليوم',
     dailyRevenue: 'الإيرادات اليومية',
     averageBattery: 'متوسط البطارية',
@@ -531,6 +534,7 @@ const ar: Translations = {
     swaps: 'تبديلات',
     charges: 'شحنات',
     dropOff: 'انخفاض',
+    sessions: 'جلسات',
     total: 'الإجمالي',
   },
   auth: {

@@ -18,6 +18,7 @@ export const mockMetrics: DashboardMetrics = {
   averageCostPerVehicle: 5,
   successRate: 98.5,
   fleetTrend: 12,
+  driversTrend: 0,
   batteriesTrend: 5,
   tripsTrend: 18,
   durationTrend: -2,

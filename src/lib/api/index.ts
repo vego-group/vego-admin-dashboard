@@ -95,17 +95,32 @@ interface ApiDriver {
 interface ApiMotorcycle {
   id: number | string;
   plate_number?: string;
+  // Real API returns brand + model separately ("VEGO" + "Pro 400")
+  brand?: string;
   model_name?: string;
   model?: string;
   status?: string;
-  battery?: { soc_pct?: number; soh_pct?: number };
+  city?: string;
+  // Real API: battery_percentage is the SOC; keep soc_pct as legacy fallback
+  battery?: { battery_percentage?: number; soc_pct?: number; soh?: number; soh_pct?: number; status?: string };
+  // Motorcycle-level telemetry snapshot (strings)
+  current_lat?: string | number;
+  current_lng?: string | number;
   iot_device?: {
+    id?: number | string;
+    is_online?: boolean;
+    last_seen_at?: string;
+    // Legacy flat telemetry
     latitude?: number;
     longitude?: number;
     speed_kmh?: number;
-    is_online?: boolean;
     gps_signal?: string;
+    // Real API nests the latest telemetry
+    latest_gps?: { latitude?: number | string; longitude?: number | string; speed?: number; gps_signal?: string };
+    latest_battery?: { soc?: number; relative_soc?: number; soh?: number; voltage?: number };
   };
+  // Real API: assigned_user; legacy: driver
+  assigned_user?: { id: number | string; name: string } | null;
   driver?: { id: number | string; name: string };
   last_trip_at?: string;
   total_distance_km?: number;
@@ -366,24 +381,32 @@ function mapDriver(d: ApiDriver): Driver {
 
 function mapMotorcycle(m: ApiMotorcycle): Vehicle {
   const iot = m.iot_device;
+  const gps = iot?.latest_gps;
+  // Real API returns brand + model separately ("VEGO" + "Pro 400"); combine them.
+  const model = [m.brand, m.model_name ?? m.model].filter(Boolean).join(' ').trim() || 'VegoMax Pro';
+  // Real API driver is `assigned_user`; older shape used `driver`.
+  const driver = m.assigned_user ?? m.driver ?? undefined;
+  const lat = num(gps?.latitude) ?? num(m.current_lat) ?? iot?.latitude ?? 24.7136;
+  const lng = num(gps?.longitude) ?? num(m.current_lng) ?? iot?.longitude ?? 46.6753;
   return {
     id:                 String(m.id),
     plateNumber:        m.plate_number ?? `VH-${m.id}`,
-    model:              (m.model_name ?? m.model ?? 'VegoMax Pro') as Vehicle['model'],
+    model:              model as Vehicle['model'],
     status:             toVehicleStatus(m.status),
-    batteryLevel:       m.battery?.soc_pct ?? 0,
-    location:           '',
-    coordinates:        { lat: iot?.latitude ?? 24.7136, lng: iot?.longitude ?? 46.6753 },
-    assignedDriverId:   m.driver ? String(m.driver.id) : undefined,
-    assignedDriverName: m.driver?.name,
+    // Real API: battery.battery_percentage is the SOC.
+    batteryLevel:       m.battery?.battery_percentage ?? m.battery?.soc_pct ?? 0,
+    location:           m.city ?? '',
+    coordinates:        { lat, lng },
+    assignedDriverId:   driver ? String(driver.id) : undefined,
+    assignedDriverName: driver?.name,
     lastTripAt:         m.last_trip_at ?? new Date().toISOString(),
     totalDistanceKm:    m.total_distance_km ?? 0,
-    currentSpeedKmh:    iot?.speed_kmh ?? 0,
+    currentSpeedKmh:    gps?.speed ?? iot?.speed_kmh ?? 0,
     estimatedRangeKm:   m.estimated_range_km ?? 0,
     speedLimitKmh:      m.speed_limit_kmh ?? 80,
     isLocked:           m.is_locked ?? false,
     isEngineRunning:    m.is_engine_running ?? false,
-    gpsSignal:          (iot?.gps_signal as Vehicle['gpsSignal']) ?? 'strong',
+    gpsSignal:          (gps?.gps_signal ?? iot?.gps_signal ?? 'strong') as Vehicle['gpsSignal'],
     isOnline:           iot?.is_online ?? false,
   };
 }
@@ -1010,6 +1033,7 @@ export const dashboardApi = {
       // Trend fields — backend uses short names (fleet_trend, batteries_trend…)
       // Fall back to legacy long names in case the API version changes
       fleetTrend:              res.fleet_trend     ?? res.total_motorcycles_trend         ?? 0,
+      driversTrend:            res.drivers_trend ?? 0,
       batteriesTrend:          res.batteries_trend ?? res.available_batteries_trend       ?? 0,
       tripsTrend:              res.trips_trend     ?? res.total_trips_today_trend         ?? 0,
       durationTrend:           res.duration_trend  ?? res.avg_trip_duration_minutes_trend ?? 0,
@@ -1093,9 +1117,7 @@ interface ApiTopDriver {
   swaps?: number;
   charges_count?: number;
   charges?: number;
-  drop_off?: number | null; // real field name from backend
-  drop_off_pct?: number;
-  dropOff?: number;
+  activity?: number;        // real field: swaps + charges, used for ranking
 }
 
 const COST_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
@@ -1141,17 +1163,21 @@ export const reportsApi = {
     }));
   },
 
+  // Backend ranks by `activity` (swaps + charges); there is no per-driver revenue.
   async getTopDrivers(): Promise<
-    { name: string; earnings: number; swaps: number; charges: number; dropOff: number }[]
+    { name: string; swaps: number; charges: number; activity: number }[]
   > {
     const raw = await apiClient.get<unknown>('/fleet-admin/reports/top-drivers?limit=10');
-    return extractList<ApiTopDriver>(raw).map((d) => ({
-      name:     d.name ?? 'Unknown',
-      earnings: d.earnings_sar ?? d.earnings ?? 0,
-      swaps:    d.swaps_count ?? d.swaps ?? 0,
-      charges:  d.charges_count ?? d.charges ?? 0,
-      dropOff:  d.drop_off ?? d.drop_off_pct ?? d.dropOff ?? 0,
-    }));
+    return extractList<ApiTopDriver>(raw).map((d) => {
+      const swaps   = d.swaps   ?? d.swaps_count   ?? 0;
+      const charges = d.charges ?? d.charges_count ?? 0;
+      return {
+        name:     d.name ?? 'Unknown',
+        swaps,
+        charges,
+        activity: d.activity ?? swaps + charges,
+      };
+    });
   },
 };
 
@@ -1532,22 +1558,25 @@ function num(v: unknown): number | undefined {
 type RawDevice = Record<string, any>;
 
 function mapDevice(d: RawDevice): IoTDevice {
-  const moto = d.motorcycle ?? d.assigned_motorcycle ?? {};
+  // Real API nests: assigned_motorcycle, latest_gps, latest_battery.
+  const moto = d.assigned_motorcycle ?? d.motorcycle ?? {};
+  const gps = d.latest_gps ?? {};
+  const battery = d.latest_battery ?? {};
   const isOnline =
     typeof d.is_online === 'boolean' ? d.is_online
     : (d.status ?? d.connection_status) === 'online';
-  const gps = (d.gps_signal ?? d.signal ?? 'strong') as IoTDevice['gpsSignal'];
+  const gpsSignal = (gps.gps_signal ?? d.gps_signal ?? d.signal ?? 'strong') as IoTDevice['gpsSignal'];
   return {
     id:              String(d.id ?? d.device_id ?? d.imei ?? ''),
     deviceId:        String(d.device_id ?? d.imei ?? d.serial ?? d.id ?? ''),
     motorcycleId:    moto.id != null ? String(moto.id) : (d.motorcycle_id != null ? String(d.motorcycle_id) : undefined),
     motorcyclePlate: moto.plate_number ?? moto.plate ?? d.plate_number ?? undefined,
     status:          (isOnline ? 'online' : 'offline') as DeviceStatus,
-    batteryLevel:    num(d.battery_level ?? d.battery ?? d.soc ?? moto.battery_level),
-    gpsSignal:       (['strong', 'weak', 'none'].includes(gps) ? gps : 'strong') as IoTDevice['gpsSignal'],
-    latitude:        num(d.latitude ?? d.lat),
-    longitude:       num(d.longitude ?? d.lng ?? d.lon),
-    speedKmh:        num(d.speed_kmh ?? d.speed),
+    batteryLevel:    num(battery.soc ?? battery.relative_soc ?? d.battery_level ?? d.battery ?? d.soc ?? moto.battery_level),
+    gpsSignal:       (['strong', 'weak', 'none'].includes(gpsSignal) ? gpsSignal : 'strong') as IoTDevice['gpsSignal'],
+    latitude:        num(gps.latitude ?? d.latitude ?? d.lat),
+    longitude:       num(gps.longitude ?? d.longitude ?? d.lng ?? d.lon),
+    speedKmh:        num(gps.speed ?? d.speed_kmh ?? d.speed),
     lastSeenAt:      d.last_seen_at ?? d.last_seen ?? d.updated_at ?? undefined,
   };
 }
@@ -1588,7 +1617,8 @@ function toAlarmSeverity(s?: string): AlarmSeverity {
 function mapAlarm(a: RawAlarm): Alarm {
   const resolved =
     a.status === 'resolved' || a.is_resolved === true || a.resolved === true || a.resolved_at != null;
-  const moto = a.motorcycle ?? {};
+  // Real API nests the bike under iot_device.assigned_motorcycle.
+  const moto = a.iot_device?.assigned_motorcycle ?? a.motorcycle ?? {};
   return {
     id:           String(a.id ?? ''),
     type:         String(a.type ?? a.alarm_type ?? a.code ?? 'unknown'),
@@ -1597,8 +1627,9 @@ function mapAlarm(a: RawAlarm): Alarm {
     severity:     toAlarmSeverity(a.severity ?? a.level ?? a.priority),
     status:       (resolved ? 'resolved' : 'unresolved') as AlarmStatus,
     motorcycleId: moto.id != null ? String(moto.id) : (a.motorcycle_id != null ? String(a.motorcycle_id) : undefined),
-    deviceId:     a.device_id != null ? String(a.device_id) : undefined,
-    createdAt:    a.created_at ?? a.triggered_at ?? a.timestamp ?? new Date().toISOString(),
+    deviceId:     a.iot_device?.id != null ? String(a.iot_device.id) : (a.device_id != null ? String(a.device_id) : undefined),
+    // Real API timestamp is `recorded_at`.
+    createdAt:    a.recorded_at ?? a.created_at ?? a.triggered_at ?? a.timestamp ?? new Date().toISOString(),
     resolvedAt:   a.resolved_at ?? undefined,
   };
 }
@@ -1638,8 +1669,9 @@ function toSessionStatus(s?: string): SessionStatus {
 }
 
 function mapSession(kind: SessionKind, s: RawSession): DriverSession {
-  const driver = s.driver ?? s.user ?? {};
-  const station = s.station ?? s.cabinet ?? s.pile ?? {};
+  // Real API: driver is `user`; station is `station` (swaps) or `pile` (charging).
+  const driver = s.user ?? s.driver ?? {};
+  const station = s.station ?? s.pile ?? s.cabinet ?? {};
   return {
     id:          String(s.id ?? ''),
     kind,
@@ -1648,8 +1680,10 @@ function mapSession(kind: SessionKind, s: RawSession): DriverSession {
     stationName: station.name ?? s.station_name ?? s.cabinet_name ?? undefined,
     status:      toSessionStatus(s.status),
     startedAt:   s.started_at ?? s.created_at ?? s.start_time ?? undefined,
-    endedAt:     s.ended_at ?? s.completed_at ?? s.end_time ?? undefined,
-    amount:      num(s.amount ?? s.cost ?? s.total ?? s.price),
+    // Real API: `completed_at`.
+    endedAt:     s.completed_at ?? s.ended_at ?? s.end_time ?? undefined,
+    // Real API: swaps use `swap_fee`, charging uses `final_amount`.
+    amount:      num(s.swap_fee ?? s.final_amount ?? s.amount ?? s.cost ?? s.total ?? s.price),
   };
 }
 
