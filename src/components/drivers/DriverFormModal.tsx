@@ -27,6 +27,10 @@ export interface DriverFormValues {
   licenseExpiry: string;
   plateImageName: string;
   plateNumber: string;
+  // Actual files to upload (null when unchanged / not selected)
+  licenseFrontFile: File | null;
+  licenseBackFile: File | null;
+  plateImageFile: File | null;
 }
 
 const emptyForm: DriverFormValues = {
@@ -44,6 +48,9 @@ const emptyForm: DriverFormValues = {
   licenseExpiry: '',
   plateImageName: '',
   plateNumber: '',
+  licenseFrontFile: null,
+  licenseBackFile: null,
+  plateImageFile: null,
 };
 
 // ── Component props ───────────────────────────────────────────────────────────
@@ -93,6 +100,9 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
         licenseExpiry: driver.documents.license.expiryDate ?? '',
         plateImageName: driver.documents.plate.status !== 'not_uploaded' ? 'existing-plate.jpg' : '',
         plateNumber: driver.documents.plate.number ?? '',
+        licenseFrontFile: null,
+        licenseBackFile: null,
+        plateImageFile: null,
       });
     } else {
       setValues(emptyForm);
@@ -103,6 +113,15 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
   const update = <K extends keyof DriverFormValues>(key: K, val: DriverFormValues[K]) => {
     setValues((v) => ({ ...v, [key]: val }));
     if (errors[key]) setErrors((e) => ({ ...e, [key]: undefined }));
+  };
+
+  // Capture both the File (for upload) and its name (for display).
+  const selectFile = (
+    fileKey: 'licenseFrontFile' | 'licenseBackFile' | 'plateImageFile',
+    nameKey: 'licenseFrontName' | 'licenseBackName' | 'plateImageName',
+    file: File,
+  ) => {
+    setValues((v) => ({ ...v, [fileKey]: file, [nameKey]: file.name }));
   };
 
   const validate = (): boolean => {
@@ -295,13 +314,13 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
                   <FileUploadBox
                     label={t('drivers.licenseFront')}
                     fileName={values.licenseFrontName}
-                    onFileSelect={(n) => update('licenseFrontName', n)}
+                    onFileSelect={(f) => selectFile('licenseFrontFile', 'licenseFrontName', f)}
                     accept="image/*"
                   />
                   <FileUploadBox
                     label={`${t('drivers.licenseBack')} (${t('common.optional')})`}
                     fileName={values.licenseBackName}
-                    onFileSelect={(n) => update('licenseBackName', n)}
+                    onFileSelect={(f) => selectFile('licenseBackFile', 'licenseBackName', f)}
                     accept="image/*"
                   />
                 </div>
@@ -339,7 +358,7 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
               <FileUploadBox
                 label={`${t('common.optional')}`}
                 fileName={values.plateImageName}
-                onFileSelect={(n) => update('plateImageName', n)}
+                onFileSelect={(f) => selectFile('plateImageFile', 'plateImageName', f)}
                 accept="image/*"
               />
               <Field label={`${t('drivers.plateNumber')} (${t('common.optional')})`}>
@@ -443,7 +462,7 @@ function ToggleButton({ active, onClick, label }: { active: boolean; onClick: ()
 function FileUploadBox({
   label, fileName, onFileSelect, accept = 'image/*,.pdf',
 }: {
-  label: string; fileName: string; onFileSelect: (name: string) => void; accept?: string;
+  label: string; fileName: string; onFileSelect: (file: File) => void; accept?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const hasFile = !!fileName;
@@ -457,7 +476,7 @@ function FileUploadBox({
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) onFileSelect(file.name);
+          if (file) onFileSelect(file);
           e.target.value = '';
         }}
       />

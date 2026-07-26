@@ -70,6 +70,9 @@ export interface DriverDocuments {
     hasLicense: boolean;
     number?: string;
     expiryDate?: string;
+    fileUrl?: string;
+    backFileUrl?: string;
+    rejectionReason?: string;
   };
   customsCard: {
     status: DocumentStatus;
@@ -77,6 +80,8 @@ export interface DriverDocuments {
   plate: {
     status: DocumentStatus;
     number?: string;
+    fileUrl?: string;
+    rejectionReason?: string;
   };
 }
 

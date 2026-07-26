@@ -70,6 +70,9 @@ interface ApiDriver {
   driving_license_number?: string | null;
   driving_license_file?: string | null;
   has_license?: boolean;
+  // Document status on list rows (added with the upload feature)
+  driving_license_status?: string | null;
+  plate_status?: string | null;
   // Motorcycle — list returns assigned_motorcycle, show returns motorcycle
   assigned_motorcycle?: { id?: number; model_name?: string; model?: string; plate_number?: string } | null;
   motorcycle?: { id?: number; model_name?: string; model?: string; plate_number?: string } | null;
@@ -81,14 +84,19 @@ interface ApiDriver {
   // Wallet balance — list response includes flat wallet_balance (SAR)
   wallet_balance?: number;
   wallet?: { balance_sar?: number; balance?: number };
-  // Legacy nested shapes (older API / show endpoint)
+  // Document objects — real API (show endpoint) returns these with the upload feature.
   driving_license?: {
     status?: string;
+    // real: number; legacy: license_number
+    number?: string;
     license_number?: string;
     expiry_date?: string;
     has_license?: boolean;
+    file_url?: string;
+    back_file_url?: string;
+    rejection_reason?: string | null;
   };
-  plate?: { status?: string; plate_number?: string };
+  plate?: { status?: string; number?: string; plate_number?: string; file_url?: string; rejection_reason?: string | null };
   customs_card?: { status?: string };
 }
 
@@ -324,18 +332,18 @@ function toNotificationType(s?: string): NotificationType {
 }
 
 function mapDriver(d: ApiDriver): Driver {
-  // Real API returns flat fields; older/show endpoint may use nested shapes
+  // Real API returns flat fields; the show endpoint returns nested document objects.
   const license = d.driving_license;
   const plate   = d.plate;
   const customs = d.customs_card;
 
-  // License status: prefer nested object; fall back to flat fields
   const hasLicense   = d.has_license ?? license?.has_license ?? !!license;
-  const licenseNum   = license?.license_number ?? d.driving_license_number ?? undefined;
+  const licenseNum   = license?.number ?? license?.license_number ?? d.driving_license_number ?? undefined;
   const licenseFile  = d.driving_license_file;
+  // Prefer the explicit status (nested object or flat list field); else infer.
   const licenseStatus =
-    license?.status
-      ? toDocStatus(license.status)
+    license?.status ?? d.driving_license_status
+      ? toDocStatus(license?.status ?? d.driving_license_status ?? undefined)
       : licenseNum || licenseFile
         ? 'verified'
         : hasLicense
@@ -344,15 +352,20 @@ function mapDriver(d: ApiDriver): Driver {
 
   const documents: DriverDocuments = {
     license: {
-      status:     licenseStatus,
+      status:          licenseStatus,
       hasLicense,
-      number:     licenseNum,
-      expiryDate: license?.expiry_date,
+      number:          licenseNum,
+      expiryDate:      license?.expiry_date,
+      fileUrl:         license?.file_url,
+      backFileUrl:     license?.back_file_url,
+      rejectionReason: license?.rejection_reason ?? undefined,
     },
     customsCard: { status: toDocStatus(customs?.status) },
     plate: {
-      status: toDocStatus(plate?.status),
-      number: plate?.plate_number,
+      status:          toDocStatus(plate?.status ?? d.plate_status ?? undefined),
+      number:          plate?.number ?? plate?.plate_number,
+      fileUrl:         plate?.file_url,
+      rejectionReason: plate?.rejection_reason ?? undefined,
     },
   };
 
@@ -711,6 +724,16 @@ export interface DriverCreateInput {
 
 export type DriverUpdateInput = Partial<DriverCreateInput>;
 
+/** Files + fields for POST /fleet-admin/drivers/{id}/documents (any subset). */
+export interface DriverDocumentUploadInput {
+  licenseFront?: File | null;
+  licenseBack?: File | null;
+  licenseNumber?: string;
+  licenseExpiry?: string;
+  plateImage?: File | null;
+  plateNumber?: string;
+}
+
 export const driversApi = {
   async list(): Promise<Driver[]> {
     const raw = await apiClient.get<unknown>('/fleet-admin/drivers');
@@ -749,6 +772,60 @@ export const driversApi = {
       const res = await apiClient.put<{ data: ApiDriver } | ApiDriver>(`/fleet-admin/drivers/${id}`, body);
       const raw = (res as { data?: ApiDriver }).data ?? (res as ApiDriver);
       return mapDriver(raw);
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Upload a driver's licence / plate documents (multipart).
+   * Endpoint: POST /fleet-admin/drivers/{id}/documents
+   * Returns the updated license + plate document state, or null on error / nothing to send.
+   */
+  async uploadDocuments(
+    id: string,
+    input: DriverDocumentUploadInput,
+  ): Promise<Pick<DriverDocuments, 'license' | 'plate'> | null> {
+    const fd = new FormData();
+    if (input.licenseFront)  fd.append('driving_license_front', input.licenseFront);
+    if (input.licenseBack)   fd.append('driving_license_back', input.licenseBack);
+    if (input.licenseNumber) fd.append('driving_license_number', input.licenseNumber);
+    if (input.licenseExpiry) fd.append('driving_license_expiry', input.licenseExpiry);
+    if (input.plateImage)    fd.append('plate_image', input.plateImage);
+    if (input.plateNumber)   fd.append('plate_number', input.plateNumber);
+
+    let hasAny = false;
+    fd.forEach(() => { hasAny = true; });
+    if (!hasAny) return null;
+
+    try {
+      const res = await apiClient.postForm<{
+        data?: {
+          driving_license?: { status?: string; number?: string; expiry_date?: string; file_url?: string; back_file_url?: string; rejection_reason?: string | null };
+          plate?: { status?: string; number?: string; file_url?: string; rejection_reason?: string | null };
+        };
+      }>(`/fleet-admin/drivers/${id}/documents`, fd);
+
+      const lic = res.data?.driving_license;
+      const pl  = res.data?.plate;
+      const licStatus = toDocStatus(lic?.status);
+      return {
+        license: {
+          status:          licStatus,
+          hasLicense:      licStatus !== 'not_uploaded',
+          number:          lic?.number,
+          expiryDate:      lic?.expiry_date,
+          fileUrl:         lic?.file_url,
+          backFileUrl:     lic?.back_file_url,
+          rejectionReason: lic?.rejection_reason ?? undefined,
+        },
+        plate: {
+          status:          toDocStatus(pl?.status),
+          number:          pl?.number,
+          fileUrl:         pl?.file_url,
+          rejectionReason: pl?.rejection_reason ?? undefined,
+        },
+      };
     } catch {
       return null;
     }

@@ -94,6 +94,19 @@ export default function DriversPage() {
 
   // ----- Handlers -----------------------------------------------------------
 
+  /** Upload licence/plate images if the form selected any; returns updated docs. */
+  const uploadDocsIfAny = async (driverId: string, values: DriverFormValues) => {
+    if (!values.licenseFrontFile && !values.licenseBackFile && !values.plateImageFile) return null;
+    return driversApi.uploadDocuments(driverId, {
+      licenseFront:  values.licenseFrontFile,
+      licenseBack:   values.licenseBackFile,
+      licenseNumber: values.licenseNumber || undefined,
+      licenseExpiry: values.licenseExpiry || undefined,
+      plateImage:    values.plateImageFile,
+      plateNumber:   values.plateNumber || undefined,
+    });
+  };
+
   const handleAddSubmit = async (values: DriverFormValues) => {
     const created = await driversApi.create({
       name: values.fullName,
@@ -117,7 +130,11 @@ export default function DriversPage() {
         },
       },
     });
-    setDrivers((prev) => [created, ...prev]);
+    const docs = await uploadDocsIfAny(created.id, values);
+    const withDocs = docs
+      ? { ...created, documents: { ...created.documents, license: docs.license, plate: docs.plate } }
+      : created;
+    setDrivers((prev) => [withDocs, ...prev]);
     setSuccessDialog({ kind: 'added' });
   };
 
@@ -134,6 +151,7 @@ export default function DriversPage() {
     });
 
     if (updated) {
+      const docs = await uploadDocsIfAny(driverId, values);
       setDrivers((prev) => prev.map((d) => {
         if (d.id !== updated.id) return d;
         return {
@@ -144,6 +162,7 @@ export default function DriversPage() {
           totalCost:     d.totalCost,
           charges:       d.charges,
           swaps:         d.swaps,
+          documents:     docs ? { ...updated.documents, license: docs.license, plate: docs.plate } : updated.documents,
         };
       }));
       setSuccessDialog({ kind: 'updated' });

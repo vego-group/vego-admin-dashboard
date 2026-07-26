@@ -54,9 +54,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   const token = getToken();
 
+  // For FormData, let the browser set Content-Type (with the multipart boundary).
+  const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData;
+
   const headers: Record<string, string> = {
     Accept: 'application/json',
-    ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+    ...(init.body !== undefined && !isFormData ? { 'Content-Type': 'application/json' } : {}),
     ...(init.headers as Record<string, string> | undefined),
   };
 
@@ -93,6 +96,9 @@ export const apiClient = {
   get:    <T>(path: string)               => request<T>(path),
   post:   <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST',   body: body !== undefined ? JSON.stringify(body) : undefined }),
+  /** POST multipart/form-data — pass a FormData; the browser sets the boundary header. */
+  postForm: <T>(path: string, form: FormData) =>
+    request<T>(path, { method: 'POST', body: form }),
   patch:  <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PATCH',  body: body !== undefined ? JSON.stringify(body) : undefined }),
   put:    <T>(path: string, body?: unknown) =>
