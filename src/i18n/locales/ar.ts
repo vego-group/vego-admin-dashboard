@@ -311,6 +311,9 @@ const ar: Translations = {
     // تعيين الموتوسيكل (من ناحية السائق)
     assignMotorcycle: 'تعيين موتوسيكل',
     changeMotorcycle: 'تغيير الموتوسيكل',
+    viewCurrentImage: 'عرض الصورة الحالية',
+    viewBackImage: 'عرض صورة الخلف',
+    rejectionReason: 'سبب الرفض',
     assignMotorcycleAction: 'تعيين موتوسيكل',
     changeMotorcycleAction: 'تغيير الموتوسيكل',
     unassignMotorcycle: 'إلغاء التعيين',

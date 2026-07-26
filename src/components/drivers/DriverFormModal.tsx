@@ -1,13 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Info, User, Car, FileText, Upload, Check, X, AlertTriangle, Clock } from 'lucide-react';
+import { Info, User, Car, FileText, Upload, Check, X, AlertTriangle, Clock, Image as ImageIcon } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/i18n/I18nProvider';
+import { driversApi } from '@/lib/api';
 import { cn } from '@/lib/cn';
-import type { Driver, DriverStatus, DocumentStatus } from '@/types';
+import type { Driver, DriverStatus, DocumentStatus, DriverDocuments } from '@/types';
 
 // ── Form value shape ──────────────────────────────────────────────────────────
 
@@ -74,6 +75,8 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
   const [errors, setErrors] = useState<Partial<Record<keyof DriverFormValues, string>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Document detail (file_url + rejection_reason) — only the detail endpoint returns these.
+  const [docDetail, setDocDetail] = useState<DriverDocuments | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -108,6 +111,19 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
       setValues(emptyForm);
     }
     setErrors({});
+  }, [open, driver]);
+
+  // On edit, fetch the driver's document detail (image URLs + rejection reasons)
+  // which the list endpoint doesn't include.
+  useEffect(() => {
+    setDocDetail(null);
+    if (!open || !driver) return;
+    let cancelled = false;
+    (async () => {
+      const detail = await driversApi.get(driver.id);
+      if (!cancelled && detail) setDocDetail(detail.documents);
+    })();
+    return () => { cancelled = true; };
   }, [open, driver]);
 
   const update = <K extends keyof DriverFormValues>(key: K, val: DriverFormValues[K]) => {
@@ -340,6 +356,14 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
                     />
                   </Field>
                 </div>
+                {docDetail?.license && (
+                  <DocPreviewNote
+                    status={docDetail.license.status}
+                    fileUrl={docDetail.license.fileUrl}
+                    backFileUrl={docDetail.license.backFileUrl}
+                    rejectionReason={docDetail.license.rejectionReason}
+                  />
+                )}
               </div>
             )}
           </div>
@@ -369,6 +393,13 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
                 />
               </Field>
             </div>
+            {docDetail?.plate && (
+              <DocPreviewNote
+                status={docDetail.plate.status}
+                fileUrl={docDetail.plate.fileUrl}
+                rejectionReason={docDetail.plate.rejectionReason}
+              />
+            )}
           </div>
 
           {/* Hint banner */}
@@ -456,6 +487,55 @@ function ToggleButton({ active, onClick, label }: { active: boolean; onClick: ()
     >
       {label}
     </button>
+  );
+}
+
+/** Shows the currently-stored document image link(s) and any rejection reason. */
+function DocPreviewNote({
+  status, fileUrl, backFileUrl, rejectionReason,
+}: {
+  status: DocumentStatus;
+  fileUrl?: string;
+  backFileUrl?: string;
+  rejectionReason?: string;
+}) {
+  const { t } = useI18n();
+  if (!fileUrl && !backFileUrl && !(status === 'rejected' && rejectionReason)) return null;
+
+  return (
+    <div className="mt-3 space-y-2">
+      {(fileUrl || backFileUrl) && (
+        <div className="flex flex-wrap items-center gap-3">
+          {fileUrl && (
+            <a
+              href={fileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+            >
+              <ImageIcon className="h-3.5 w-3.5" />
+              {t('drivers.viewCurrentImage')}
+            </a>
+          )}
+          {backFileUrl && (
+            <a
+              href={backFileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+            >
+              <ImageIcon className="h-3.5 w-3.5" />
+              {t('drivers.viewBackImage')}
+            </a>
+          )}
+        </div>
+      )}
+      {status === 'rejected' && rejectionReason && (
+        <p className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+          <span className="font-semibold">{t('drivers.rejectionReason')}:</span> {rejectionReason}
+        </p>
+      )}
+    </div>
   );
 }
 

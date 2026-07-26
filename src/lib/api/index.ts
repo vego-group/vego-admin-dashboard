@@ -740,6 +740,17 @@ export const driversApi = {
     return extractList<ApiDriver>(raw).map(mapDriver);
   },
 
+  /** Full driver detail — includes document file_url / rejection_reason the list omits. */
+  async get(id: string): Promise<Driver | null> {
+    try {
+      const res = await apiClient.get<{ data?: ApiDriver } | ApiDriver>(`/fleet-admin/drivers/${id}`);
+      const raw = (res as { data?: ApiDriver }).data ?? (res as ApiDriver);
+      return mapDriver(raw);
+    } catch {
+      return null;
+    }
+  },
+
   async create(input: DriverCreateInput): Promise<Driver> {
     // POST /fleet-admin/drivers — only send fields the backend accepts
     const body: Record<string, string | undefined> = {

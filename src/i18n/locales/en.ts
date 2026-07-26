@@ -309,6 +309,9 @@ const en = {
     // Motorcycle assignment (driver side)
     assignMotorcycle: 'Assign Motorcycle',
     changeMotorcycle: 'Change Motorcycle',
+    viewCurrentImage: 'View current image',
+    viewBackImage: 'View back image',
+    rejectionReason: 'Rejection reason',
     assignMotorcycleAction: 'Assign motorcycle',
     changeMotorcycleAction: 'Change motorcycle',
     unassignMotorcycle: 'Unassign',
