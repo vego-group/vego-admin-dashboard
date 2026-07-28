@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Search, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, Plus, Search, Sparkles, X } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -13,6 +13,11 @@ import { ZoneMap } from '@/components/zones/ZoneMap';
 import { ZoneFormDrawer, type ZoneFormValues } from '@/components/zones/ZoneFormDrawer';
 import { useI18n } from '@/i18n/I18nProvider';
 import { zonesApi } from '@/lib/api';
+import {
+  findOverlappingZones,
+  findZoneAtPoint,
+  findZoneCrossedByEdge,
+} from '@/lib/zone-geometry';
 import type { Zone, ZonePoint } from '@/types';
 import { logger } from '@/lib/logger';
 
@@ -22,7 +27,7 @@ type FormMode = { kind: 'closed' } | { kind: 'add' } | { kind: 'edit'; zone: Zon
 type SuccessKind = 'added' | 'updated' | 'deleted';
 
 export default function ZonesPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
 
   const [zones, setZones] = useState<Zone[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,6 +37,8 @@ export default function ZonesPage() {
   // Drawing state
   const [drawingMode, setDrawingMode] = useState(false);
   const [drawingPoints, setDrawingPoints] = useState<ZonePoint[]>([]);
+  /** Overlap feedback while drawing — zones are not allowed to intersect. */
+  const [drawError, setDrawError] = useState<string | null>(null);
 
   // Modals
   const [formMode, setFormMode] = useState<FormMode>({ kind: 'closed' });
@@ -73,26 +80,80 @@ export default function ZonesPage() {
 
   // ----- Drawing flow -------------------------------------------------------
 
+  /** Zone label in the active locale, for overlap messages. */
+  const zoneLabel = (zone: Zone) =>
+    (locale === 'ar' ? zone.name_ar || zone.name_en : zone.name_en || zone.name_ar) || zone.name;
+
+  /**
+   * Zones the shape being drawn currently overlaps. Recomputed on every point so
+   * the Finish button and the map preview react live — the per-point guards below
+   * cannot catch a closing edge that cuts through a zone, or a shape drawn fully
+   * around an existing one.
+   */
+  const drawingConflicts = useMemo(
+    () => (drawingMode ? findOverlappingZones(drawingPoints, zones) : []),
+    [drawingMode, drawingPoints, zones],
+  );
+
+  const listZones = (list: Zone[]) => list.map(zoneLabel).join(locale === 'ar' ? '، ' : ', ');
+
+  /** Rejected-point message, or the live overlap of the shape as a whole. */
+  const drawWarning =
+    drawError ??
+    (drawingConflicts.length > 0
+      ? t('zones.overlapWithZones', { zones: listZones(drawingConflicts) })
+      : null);
+
   const startDrawing = () => {
     setDrawingMode(true);
     setDrawingPoints([]);
+    setDrawError(null);
     setSelectedZoneId(null);
   };
 
   const cancelDrawing = () => {
     setDrawingMode(false);
     setDrawingPoints([]);
+    setDrawError(null);
+  };
+
+  /** Reject points that would make the new zone overlap an existing one. */
+  const handleDrawingPointAdd = (point: ZonePoint) => {
+    const containingZone = findZoneAtPoint(point, zones);
+    if (containingZone) {
+      setDrawError(t('zones.overlapPointInsideZone', { zone: zoneLabel(containingZone) }));
+      return;
+    }
+
+    const lastPoint = drawingPoints[drawingPoints.length - 1];
+    if (lastPoint) {
+      const crossedZone = findZoneCrossedByEdge(lastPoint, point, zones);
+      if (crossedZone) {
+        setDrawError(t('zones.overlapEdgeCrossesZone', { zone: zoneLabel(crossedZone) }));
+        return;
+      }
+    }
+
+    setDrawError(null);
+    setDrawingPoints((prev) => [...prev, point]);
   };
 
   const finishDrawing = () => {
-    if (drawingPoints.length < 3) return;
+    if (drawingPoints.length < 3 || drawingConflicts.length > 0) return;
     setDrawingMode(false);
+    setDrawError(null);
     setFormMode({ kind: 'add' });
   };
 
   // ----- CRUD handlers ------------------------------------------------------
 
   const handleAdd = async (values: ZoneFormValues) => {
+    // Last line of defence — the drawing guards should have caught this already.
+    const conflicts = findOverlappingZones(drawingPoints, zones);
+    if (conflicts.length > 0) {
+      setApiError(t('zones.overlapWithZones', { zones: listZones(conflicts) }));
+      return;
+    }
     try {
       const created = await zonesApi.create({
         name_en:       values.name_en,
@@ -260,6 +321,14 @@ export default function ZonesPage() {
 
         {/* RIGHT: Map + toolbar */}
         <div className="flex h-full flex-col gap-3">
+          {/* Overlap warning */}
+          {drawWarning && (
+            <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{drawWarning}</span>
+            </div>
+          )}
+
           {/* Map toolbar */}
           <div className="flex items-center justify-end gap-2">
             {drawingMode ? (
@@ -274,7 +343,7 @@ export default function ZonesPage() {
                 <Button
                   variant="primary"
                   onClick={finishDrawing}
-                  disabled={drawingPoints.length < 3}
+                  disabled={drawingPoints.length < 3 || drawingConflicts.length > 0}
                   leftIcon={<Sparkles className="h-4 w-4" />}
                 >
                   {t('zones.finishDrawing')}
@@ -299,7 +368,8 @@ export default function ZonesPage() {
               onZoneClick={(z) => setSelectedZoneId(z.id)}
               drawingMode={drawingMode}
               drawingPoints={drawingPoints}
-              onDrawingPointAdd={(p) => setDrawingPoints((prev) => [...prev, p])}
+              drawingConflict={drawingConflicts.length > 0}
+              onDrawingPointAdd={handleDrawingPointAdd}
             />
           </div>
         </div>

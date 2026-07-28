@@ -471,6 +471,13 @@ const en = {
     // Validation
     nameRequired: 'Zone name is required',
     polygonRequired: 'Please draw at least 3 points on the map',
+    overlapPointInsideZone:
+      'This point falls inside “{{zone}}”. Zones cannot overlap — place it outside the existing zone.',
+    overlapEdgeCrossesZone:
+      'This line crosses “{{zone}}”. Zones cannot overlap — draw around the existing zone.',
+    overlapWithZones:
+      'The drawn zone overlaps: {{zones}}. Adjust the boundaries so the zones do not overlap.',
+    overlapHint: 'The current shape overlaps an existing zone — adjust the boundaries.',
 
     // Actions / dialogs
     showOnMap: 'Show on map',

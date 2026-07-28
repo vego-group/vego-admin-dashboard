@@ -2,7 +2,7 @@
 
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useRef, useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import { AlertTriangle, Sparkles } from 'lucide-react';
 import { ZONE_TYPES, ZONE_TYPE_LIST } from '@/lib/zone-types';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
@@ -15,6 +15,8 @@ export interface ZoneMapProps {
   onZoneClick?: (zone: Zone) => void;
   drawingMode?: boolean;
   drawingPoints?: ZonePoint[];
+  /** True when the shape being drawn overlaps an existing zone. */
+  drawingConflict?: boolean;
   onDrawingPointAdd?: (point: ZonePoint) => void;
 }
 
@@ -74,6 +76,7 @@ export default function ZoneMapInner({
   onZoneClick,
   drawingMode = false,
   drawingPoints = [],
+  drawingConflict = false,
   onDrawingPointAdd,
 }: ZoneMapProps) {
   const { t } = useI18n();
@@ -267,11 +270,14 @@ export default function ZoneMapInner({
 
       if (!drawingMode || drawingPoints.length === 0) return;
 
+      // Turns red while the shape overlaps an existing zone
+      const previewColor = drawingConflict ? '#ef4444' : '#6366f1';
+
       // Preview polygon (dashed)
       if (drawingPoints.length >= 2) {
         previewPoly.current = L.polygon(toLLArr(drawingPoints), {
-          color:       '#6366f1',
-          fillColor:   '#6366f1',
+          color:       previewColor,
+          fillColor:   previewColor,
           fillOpacity: 0.15,
           weight:      2,
           dashArray:   '6 4',
@@ -282,15 +288,15 @@ export default function ZoneMapInner({
       for (const p of drawingPoints) {
         const dot = L.circleMarker([p.lat, p.lng], {
           radius:      5,
-          color:       '#6366f1',
-          fillColor:   '#6366f1',
+          color:       previewColor,
+          fillColor:   previewColor,
           fillOpacity: 1,
           weight:      2,
         }).addTo(map);
         previewDots.current.push(dot);
       }
     })();
-  }, [mapReady, drawingMode, drawingPoints]);
+  }, [mapReady, drawingMode, drawingPoints, drawingConflict]);
 
   /* ── Render ──────────────────────────────────────────────── */
   return (
@@ -313,17 +319,39 @@ export default function ZoneMapInner({
       {/* Drawing hint */}
       {drawingMode && (
         <div className="pointer-events-none absolute start-1/2 top-14 z-[1001] -translate-x-1/2">
-          <div className="rounded-2xl border-2 border-brand-400 bg-white px-5 py-3 shadow-elevated dark:bg-slate-900" style={{ minWidth: 280 }}>
+          <div
+            className={cn(
+              'rounded-2xl border-2 bg-white px-5 py-3 shadow-elevated dark:bg-slate-900',
+              drawingConflict ? 'border-rose-400' : 'border-brand-400'
+            )}
+            style={{ minWidth: 280 }}
+          >
             <div className="flex items-start gap-2.5">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 text-white">
-                <Sparkles className="h-4 w-4" />
+              <div
+                className={cn(
+                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br text-white',
+                  drawingConflict
+                    ? 'from-rose-500 to-rose-600'
+                    : 'from-indigo-500 to-violet-600'
+                )}
+              >
+                {drawingConflict ? <AlertTriangle className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-bold text-slate-900 dark:text-slate-50">
                   {t('zones.drawingModeActive')}
                 </p>
-                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                  {drawingPoints.length === 0
+                <p
+                  className={cn(
+                    'mt-0.5 text-xs',
+                    drawingConflict
+                      ? 'font-semibold text-rose-600 dark:text-rose-400'
+                      : 'text-slate-500 dark:text-slate-400'
+                  )}
+                >
+                  {drawingConflict
+                    ? t('zones.overlapHint')
+                    : drawingPoints.length === 0
                     ? t('zones.drawingModeHint')
                     : drawingPoints.length < 3
                     ? t('zones.drawingNeedMorePoints')
