@@ -470,6 +470,8 @@ const en = {
 
     // Validation
     nameRequired: 'Zone name is required',
+    nameEnMustBeEnglish: 'This field accepts English letters only',
+    nameArMustBeArabic: 'This field accepts Arabic letters only',
     polygonRequired: 'Please draw at least 3 points on the map',
     overlapPointInsideZone:
       'This point falls inside “{{zone}}”. Zones cannot overlap — place it outside the existing zone.',

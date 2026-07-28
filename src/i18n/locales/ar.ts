@@ -469,6 +469,8 @@ const ar: Translations = {
     },
 
     nameRequired: 'اسم النطاق مطلوب',
+    nameEnMustBeEnglish: 'هذا الحقل يقبل حروفاً إنجليزية فقط',
+    nameArMustBeArabic: 'هذا الحقل يقبل حروفاً عربية فقط',
     polygonRequired: 'الرجاء رسم 3 نقاط على الأقل على الخريطة',
     overlapPointInsideZone:
       'هذه النقطة تقع داخل نطاق «{{zone}}». لا يمكن تداخل النطاقات — ضع النقطة خارج النطاق الموجود.',

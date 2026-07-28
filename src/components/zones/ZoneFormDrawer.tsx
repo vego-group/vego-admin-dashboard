@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
 import { useI18n } from '@/i18n/I18nProvider';
 import { ZONE_TYPES, ZONE_TYPE_LIST } from '@/lib/zone-types';
+import { isArabicOnly, isEnglishOnly } from '@/lib/text-script';
 import { cn } from '@/lib/cn';
 import type { Zone, ZonePoint, ZoneType } from '@/types';
 
@@ -48,8 +49,28 @@ export function ZoneFormDrawer({
     speedLimitKmh: 25,
     active: true,
   });
-  const [errors, setErrors] = useState<{ name_en?: string }>({});
+  const [errors, setErrors] = useState<{ name_en?: string; name_ar?: string }>({});
   const [submitting, setSubmitting] = useState(false);
+
+  /** Each name field only accepts letters from its own script. */
+  const scriptError = (field: 'name_en' | 'name_ar', value: string) => {
+    if (!value.trim()) return undefined;
+    if (field === 'name_en') {
+      return isEnglishOnly(value) ? undefined : t('zones.nameEnMustBeEnglish');
+    }
+    return isArabicOnly(value) ? undefined : t('zones.nameArMustBeArabic');
+  };
+
+  const validateNames = (next: Pick<ZoneFormValues, 'name_en' | 'name_ar'>) => {
+    const found: typeof errors = {};
+    const nameEnError = next.name_en.trim()
+      ? scriptError('name_en', next.name_en)
+      : t('zones.nameRequired');
+    if (nameEnError) found.name_en = nameEnError;
+    const nameArError = scriptError('name_ar', next.name_ar);
+    if (nameArError) found.name_ar = nameArError;
+    return found;
+  };
 
   // Hydrate form when opened
   useEffect(() => {
@@ -74,6 +95,15 @@ export function ZoneFormDrawer({
     setErrors({});
   }, [open, zone]);
 
+  /**
+   * Flags the wrong script live as the user types. "Required" is deliberately
+   * left to submit — nagging about an empty field mid-typing is noise.
+   */
+  const handleNameChange = (field: 'name_en' | 'name_ar', value: string) => {
+    setValues((v) => ({ ...v, [field]: value }));
+    setErrors((prev) => ({ ...prev, [field]: scriptError(field, value) }));
+  };
+
   const handleTypeChange = (next: ZoneType) => {
     const config = ZONE_TYPES[next];
     setValues((v) => ({ ...v, type: next, speedLimitKmh: config.defaultSpeedKmh }));
@@ -81,8 +111,7 @@ export function ZoneFormDrawer({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const nextErrors: typeof errors = {};
-    if (!values.name_en.trim()) nextErrors.name_en = t('zones.nameRequired');
+    const nextErrors = validateNames(values);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
@@ -125,21 +154,25 @@ export function ZoneFormDrawer({
             <Input
               placeholder={t('zones.zoneNameEnPlaceholder')}
               value={values.name_en}
-              onChange={(e) => {
-                setValues((v) => ({ ...v, name_en: e.target.value }));
-                if (errors.name_en) setErrors({});
-              }}
+              onChange={(e) => handleNameChange('name_en', e.target.value)}
+              dir="ltr"
+              lang="en"
+              aria-invalid={!!errors.name_en}
+              style={errors.name_en ? { borderColor: '#f43f5e' } : undefined}
             />
           </Field>
 
           {/* Zone Name (Arabic) */}
           <div className="mt-4">
-            <Field label={t('zones.zoneNameAr')}>
+            <Field label={t('zones.zoneNameAr')} error={errors.name_ar}>
               <Input
                 placeholder={t('zones.zoneNameArPlaceholder')}
                 value={values.name_ar}
-                onChange={(e) => setValues((v) => ({ ...v, name_ar: e.target.value }))}
+                onChange={(e) => handleNameChange('name_ar', e.target.value)}
                 dir="rtl"
+                lang="ar"
+                aria-invalid={!!errors.name_ar}
+                style={errors.name_ar ? { borderColor: '#f43f5e' } : undefined}
               />
             </Field>
           </div>
