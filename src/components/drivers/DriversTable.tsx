@@ -8,7 +8,7 @@ import { StatusPill } from '@/components/ui/StatusPill';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import type { Driver, DocumentStatus } from '@/types';
-import { formatCurrency } from '@/lib/format';
+import { useFleetContext } from '@/hooks/useFleetContext';
 
 interface DriversTableProps {
   drivers: Driver[];
@@ -72,6 +72,7 @@ function DocsCount(driver: Driver) {
 
 export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlockToggle, onAssignMotorcycle }: DriversTableProps) {
   const { t, locale } = useI18n();
+  const { formatMoney, currencyStatus } = useFleetContext();
 
   // Per-row loading state for toggle (active↔inactive)
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -206,8 +207,15 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
 
                   {/* Wallet balance column */}
                   <td className="px-5 py-4">
-                    <span className={cn('font-bold tabular-nums text-sm', walletBalanceColor(d.walletBalance))}>
-                      {formatCurrency(d.walletBalance, locale)}
+                    <span className={cn(
+                      'font-bold tabular-nums text-sm',
+                      // No balance on screen yet — a red/green tint would imply a
+                      // judgment about a value we are not showing.
+                      currencyStatus === 'pending'
+                        ? 'text-slate-400 dark:text-slate-500'
+                        : walletBalanceColor(d.walletBalance),
+                    )}>
+                      {formatMoney(d.walletBalance, locale)}
                     </span>
                   </td>
 
@@ -215,7 +223,7 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
                     {d.trips}
                   </td>
                   <td className="px-5 py-4 font-semibold tabular-nums text-slate-700 dark:text-slate-200">
-                    {formatCurrency(d.totalCost, locale)}
+                    {formatMoney(d.totalCost, locale)}
                   </td>
 
                   {/* Actions column */}

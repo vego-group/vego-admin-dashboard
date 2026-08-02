@@ -12,7 +12,8 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Pagination } from '@/components/ui/Pagination';
 import { useI18n } from '@/i18n/I18nProvider';
 import { sessionsApi } from '@/lib/api';
-import { formatCurrency, formatRelativeTime } from '@/lib/format';
+import { formatRelativeTime } from '@/lib/format';
+import { useFleetContext } from '@/hooks/useFleetContext';
 import type { DriverSession, SessionKind, SessionStatus } from '@/types';
 import { logger } from '@/lib/logger';
 
@@ -27,6 +28,7 @@ const STATUS_TONE: Record<SessionStatus, { tone: 'success' | 'info' | 'warning' 
 
 export default function SessionsPage() {
   const { t, locale } = useI18n();
+  const { formatMoney } = useFleetContext();
   const [kind, setKind] = useState<SessionKind>('swap');
   const [sessions, setSessions] = useState<DriverSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -147,7 +149,7 @@ export default function SessionsPage() {
                           {s.endedAt ? formatRelativeTime(s.endedAt, locale) : '—'}
                         </td>
                         <td className="px-5 py-4 font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-                          {s.amount != null ? formatCurrency(s.amount, locale) : '—'}
+                          {s.amount != null ? formatMoney(s.amount, locale) : '—'}
                         </td>
                       </tr>
                     );

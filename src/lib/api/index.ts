@@ -10,6 +10,15 @@
  */
 
 import { apiClient } from '@/lib/api/client';
+import { seededCurrencyFor, toDialCode, toIsoCountryCode } from '@/lib/country';
+import {
+  decimalsForCurrency,
+  fractionDigitsOf,
+  moneyToNumber,
+  parseAmount,
+  readMoney,
+  type ApiMoneyFields,
+} from '@/lib/money';
 import type {
   BatteryDistribution,
   BatteryHealthPoint,
@@ -25,6 +34,7 @@ import type {
   DriverDocuments,
   DriverSession,
   DriverStatusChangeResult,
+  FleetProfile,
   IoTDevice,
   SessionKind,
   SessionStatus,
@@ -55,6 +65,10 @@ interface ApiDriver {
   id: number | string;
   name: string;
   phone: string;
+  /** Dial prefix, e.g. "+966" — despite the name this is NOT a country. */
+  country_code?: string | null;
+  /** ISO 3166-1 alpha-2, e.g. "SA" | "JO" — this is the country. */
+  iso_country_code?: string | null;
   email?: string | null;
   address?: string | null;
   city?: string | null;
@@ -81,9 +95,10 @@ interface ApiDriver {
   total_cost?: number;
   charges_count?: number;
   swaps_count?: number;
-  // Wallet balance — list response includes flat wallet_balance (SAR)
-  wallet_balance?: number;
-  wallet?: { balance_sar?: number; balance?: number };
+  // Wallet balance — the show endpoint returns the money object; the list
+  // response still carries a flat scalar in the fleet's own currency.
+  wallet_balance?: string | number;
+  wallet?: ApiMoneyFields;
   // Document objects — real API (show endpoint) returns these with the upload feature.
   driving_license?: {
     status?: string;
@@ -214,9 +229,14 @@ interface ApiTransaction {
   created_at?: string;
   /** Backend sends "credit" | "debit" (or legacy "top_up" | "charging" | "swap") */
   type?: string;
-  amount_sar?: number;
-  /** Backend returns amount as a string e.g. "100.00" */
+  /**
+   * Money object: amount is a fixed-precision string ("100.000") accompanied by
+   * currency / minor_units / decimals.
+   */
   amount?: number | string;
+  currency?: string | null;
+  minor_units?: number | null;
+  decimals?: number | null;
   status?: string;
   description?: string;
   note?: string;
@@ -387,7 +407,9 @@ function mapDriver(d: ApiDriver): Driver {
     totalCost:    d.total_cost ?? 0,
     charges:      d.charges_count ?? 0,
     swaps:        d.swaps_count ?? 0,
-    walletBalance: d.wallet_balance ?? d.wallet?.balance_sar ?? d.wallet?.balance ?? 0,
+    walletBalance: moneyToNumber(readMoney(d.wallet, { amount: d.wallet_balance })),
+    dialCode:       toDialCode(d.country_code),
+    isoCountryCode: toIsoCountryCode(d.iso_country_code),
     documents,
   };
 }
@@ -499,16 +521,16 @@ function mapTransaction(tx: ApiTransaction): WalletTransaction {
   // Driver may be nested under wallet.user, or directly on tx.user / tx.driver
   const driver = tx.wallet?.user ?? tx.user ?? tx.driver;
 
-  // Backend sends amount as string "100.00" — always parse to number
-  const rawAmount = tx.amount_sar ?? tx.amount ?? 0;
-  const amount = typeof rawAmount === 'string' ? parseFloat(rawAmount) : rawAmount;
+  // Fixed-precision money object — resolved through integer minor units.
+  const money = readMoney(tx);
 
   return {
     id:            String(tx.id),
     createdAt:     tx.created_at ?? new Date().toISOString(),
     driverId:      String(driver?.id ?? ''),
     driverName:    driver?.name ?? '',
-    amount,
+    amount:        moneyToNumber(money),
+    money,
     type,
     paymentMethod: tx.payment_method,
     note:          tx.note ?? tx.description,
@@ -527,6 +549,75 @@ function mapNotification(n: ApiNotification): Notification {
     read:        !!n.read_at,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fleet self-profile — GET /fleet-admin/me
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ApiFleetMe {
+  fleet?: {
+    id?: number | string;
+    name?: string;
+    iso_country_code?: string | null;
+    /** Dial prefix — present for display, never used to resolve the country. */
+    country_code?: string | null;
+    currency?: string | null;
+    currency_decimals?: number | null;
+    money_format?: string | null;
+    max_drivers?: number | null;
+    status?: string | null;
+  };
+  user?: {
+    id?: number | string;
+    name?: string;
+    email?: string | null;
+  };
+}
+
+export const fleetAdminApi = {
+  /**
+   * The fleet's own profile: which country it belongs to and which currency its
+   * money is denominated in.
+   *
+   * This is the single source of truth for both. A fleet's country lives on its
+   * fleet record and is not client-selectable — the Fleet Admin realm rejects a
+   * `?country=` parameter with a 422, so never send one.
+   */
+  async getMe(): Promise<FleetProfile> {
+    const raw = await apiClient.get<{ data?: ApiFleetMe } & ApiFleetMe>('/fleet-admin/me');
+    const body = (raw.data && typeof raw.data === 'object') ? raw.data : raw;
+    const fleet = body.fleet ?? {};
+
+    const isoCountryCode = toIsoCountryCode(fleet.iso_country_code) ?? null;
+    // Prefer the fleet's declared currency; fall back to the country seed only
+    // when the payload omits it entirely.
+    const seeded   = seededCurrencyFor(isoCountryCode);
+    const currency = fleet.currency ?? seeded?.currency;
+    const decimals = fleet.currency_decimals
+      ?? seeded?.currencyDecimals
+      ?? decimalsForCurrency(currency);
+
+    // A profile without a currency is not a profile we can format money against.
+    // Fail loudly rather than substituting a default — callers treat the throw as
+    // "unresolved" and render amounts unlabelled, which is the honest outcome.
+    if (!currency || decimals == null) {
+      throw new Error(
+        'GET /fleet-admin/me returned no currency for this fleet ' +
+        `(currency=${String(fleet.currency)}, iso_country_code=${String(fleet.iso_country_code)}).`,
+      );
+    }
+
+    return {
+      id:               String(fleet.id ?? ''),
+      name:             fleet.name ?? '',
+      isoCountryCode,
+      currency,
+      currencyDecimals: decimals,
+      maxDrivers:       fleet.max_drivers ?? undefined,
+      status:           fleet.status ?? undefined,
+    };
+  },
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fleet API
@@ -1200,16 +1291,20 @@ interface ApiWeeklyTrip {
   label?: string;
   trips_count?: number;
   trips?: number;
-  revenue_sar?: number;
-  revenue?: number;
+  /** Fixed-precision string in the fleet's currency. */
+  revenue?: string | number;
+  currency?: string | null;
+  decimals?: number | null;
 }
 
 interface ApiMonthlyRevenue {
   month?: string;
   date?: string;
   label?: string;
-  revenue_sar?: number;
-  revenue?: number;
+  /** Fixed-precision string in the fleet's currency. */
+  revenue?: string | number;
+  currency?: string | null;
+  decimals?: number | null;
   trips_count?: number;
   trips?: number;
 }
@@ -1225,8 +1320,11 @@ interface ApiBatteryBucket {
 interface ApiCostItem {
   category?: string;
   label?: string;
-  amount_sar?: number;
-  value?: number;
+  /** Fixed-precision string in the fleet's currency. */
+  amount?: string | number;
+  value?: string | number;
+  currency?: string | null;
+  decimals?: number | null;
   color?: string;
 }
 
@@ -1236,8 +1334,6 @@ interface ApiTopDriver {
   name?: string;
   trips_count?: number;
   trips?: number;
-  earnings_sar?: number;
-  earnings?: number;
   swaps_count?: number;
   swaps?: number;
   charges_count?: number;
@@ -1253,7 +1349,7 @@ export const reportsApi = {
     return extractList<ApiWeeklyTrip>(raw).map((r) => ({
       day:     r.label ?? r.day ?? '',
       trips:   r.trips_count ?? r.trips ?? 0,
-      revenue: r.revenue_sar ?? r.revenue ?? 0,
+      revenue: moneyToNumber(readMoney({ amount: r.revenue, currency: r.currency, decimals: r.decimals })),
     }));
   },
 
@@ -1265,7 +1361,7 @@ export const reportsApi = {
     const raw = await apiClient.get<unknown>(`/fleet-admin/reports/monthly-revenue?from=${from}&to=${to}`);
     return extractList<ApiMonthlyRevenue>(raw).map((r) => ({
       date:    r.label ?? r.month ?? r.date ?? '',
-      revenue: r.revenue_sar ?? r.revenue ?? 0,
+      revenue: moneyToNumber(readMoney({ amount: r.revenue, currency: r.currency, decimals: r.decimals })),
       trips:   r.trips_count ?? r.trips ?? 0,
     }));
   },
@@ -1283,7 +1379,7 @@ export const reportsApi = {
     const raw = await apiClient.get<unknown>('/fleet-admin/reports/cost-analysis');
     return extractList<ApiCostItem>(raw).map((c, i) => ({
       category: c.label ?? c.category ?? `Category ${i + 1}`,
-      value:    c.amount_sar ?? c.value ?? 0,
+      value:    moneyToNumber(readMoney({ amount: c.amount ?? c.value, currency: c.currency, decimals: c.decimals })),
       color:    c.color ?? COST_COLORS[i % COST_COLORS.length],
     }));
   },
@@ -1420,14 +1516,13 @@ export const walletApi = {
   },
 
   async getBalance(driverId: string): Promise<number> {
-    const res = await apiClient.get<{
-      data?: { balance?: number; balance_sar?: number };
-      balance_sar?: number;
-      balance?: number;
-    }>(`/fleet-admin/wallet/balance/${driverId}`);
-    // Backend wraps response: { success, data: { driver_id, name, balance, currency } }
+    const res = await apiClient.get<{ data?: ApiMoneyFields } & ApiMoneyFields>(
+      `/fleet-admin/wallet/balance/${driverId}`,
+    );
+    // Backend wraps response:
+    // { success, data: { driver_id, name, balance, currency, minor_units, decimals } }
     const inner = (res.data && typeof res.data === 'object') ? res.data : res;
-    return inner.balance_sar ?? inner.balance ?? 0;
+    return moneyToNumber(readMoney(inner));
   },
 
   /**
@@ -1476,11 +1571,21 @@ export const walletApi = {
     const d  = res.data ?? {};
     const pd = d.payment_data ?? {};
 
+    // A payment must never proceed on a guessed currency. Defaulting to SAR here
+    // would hand the gateway "SAR" for a JOD charge — an actual mischarge, not a
+    // rendering bug — so fail before any payment is attempted.
+    if (!pd.currency) {
+      throw new Error(
+        'Top-up initiation returned no currency (data.payment_data.currency is missing). ' +
+        'Refusing to start a payment without one.',
+      );
+    }
+
     return {
       walletTransactionUuid: d.wallet_transaction_uuid ?? '',
       paymentData: {
         amount:         pd.amount         ?? 0,
-        currency:       pd.currency       ?? 'SAR',
+        currency:       pd.currency,
         description:    pd.description    ?? 'Driver wallet top-up',
         publishableKey: pd.publishable_key ?? '',
         callbackUrl:    pd.callback_url   ?? '',
@@ -1600,12 +1705,21 @@ export const walletApi = {
     note?: string,
   ): Promise<Driver> {
     const res = await apiClient.post<{
-      data?: { driver_id?: number | string; balance?: number; balance_sar?: number };
+      data?: { driver_id?: number | string } & ApiMoneyFields;
     }>('/fleet-admin/wallet/top-up', { driver_id: Number(driverId), amount, note });
-    // Response: { success, data: { driver_id, name, amount, balance, currency, note } }
+    // Response: { success, data: { driver_id, name, amount, balance, currency,
+    //                              minor_units, decimals, note } }
     // No full driver object — extract the new balance and return a stub for merging
     const data = (res.data && typeof res.data === 'object') ? res.data : {};
-    const newBalance = data.balance ?? data.balance_sar ?? amount;
+    // `balance` is the post-top-up total; fall back to the amount we just sent.
+    // `minor_units` on this payload describes the top-up amount, not the balance,
+    // so it is deliberately not forwarded here.
+    const newBalance = data.balance != null
+      ? parseAmount(
+          data.balance,
+          data.decimals ?? decimalsForCurrency(data.currency) ?? fractionDigitsOf(data.balance),
+        )
+      : amount;
     return {
       id:           String(data.driver_id ?? driverId),
       name:         '',

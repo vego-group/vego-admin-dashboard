@@ -12,6 +12,7 @@ import { MonthlyRevenueChart } from '@/components/reports/MonthlyRevenueChart';
 import { CostAnalysisChart } from '@/components/reports/CostAnalysisChart';
 import { TopDriversLeaderboard } from '@/components/reports/TopDriversLeaderboard';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useFleetContext } from '@/hooks/useFleetContext';
 import { reportsApi, dashboardApi } from '@/lib/api';
 import type {
   BatteryDistribution,
@@ -25,7 +26,8 @@ type WeeklyTrip    = { day: string; trips: number; revenue: number };
 type TopDriver     = { name: string; swaps: number; charges: number; activity: number };
 
 export default function ReportsPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const { formatMoney } = useFleetContext();
 
   const [loading, setLoading]               = useState(true);
   const [metrics, setMetrics]               = useState<DashboardMetrics | null>(null);
@@ -118,8 +120,7 @@ export default function ReportsPage() {
             />
             <MetricCard
               label={t('reports.revenue7d')}
-              value={weeklyTrips.reduce((s, w) => s + w.revenue, 0)}
-              unit="SAR"
+              value={formatMoney(weeklyTrips.reduce((s, w) => s + w.revenue, 0), locale)}
               icon={<DollarSign className="h-5 w-5" />}
               iconColor="green"
             />

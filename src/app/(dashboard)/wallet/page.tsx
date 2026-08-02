@@ -14,7 +14,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Pagination } from '@/components/ui/Pagination';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
-import { formatCurrency } from '@/lib/format';
+import { useFleetContext } from '@/hooks/useFleetContext';
 import { walletApi } from '@/lib/api';
 import type { TransactionType, TransactionStatus, WalletTransaction, WalletStats } from '@/types';
 import { logger } from '@/lib/logger';
@@ -165,6 +165,7 @@ function StatCard({
 
 export default function WalletPage() {
   const { t, locale } = useI18n();
+  const { formatMoney } = useFleetContext();
 
   // Data
   const [allTransactions, setAllTransactions] = useState<WalletTransaction[]>([]);
@@ -237,7 +238,7 @@ export default function WalletPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard
           label={t('wallet.totalTopUps')}
-          value={stats ? formatCurrency(stats.totalTopUps, locale) : '—'}
+          value={stats ? formatMoney(stats.totalTopUps, locale) : '—'}
           iconBg="bg-gradient-to-br from-emerald-400 to-emerald-600"
           Icon={TrendingUp}
           trend={stats?.topUpTrend}
@@ -245,7 +246,7 @@ export default function WalletPage() {
         />
         <StatCard
           label={t('wallet.totalSpent')}
-          value={stats ? formatCurrency(stats.totalSpent, locale) : '—'}
+          value={stats ? formatMoney(stats.totalSpent, locale) : '—'}
           iconBg="bg-gradient-to-br from-rose-400 to-rose-600"
           Icon={ShoppingCart}
           subtitle={stats ? t('wallet.ofBudget', { percent: stats.budgetUsedPercent }) : undefined}
@@ -253,7 +254,7 @@ export default function WalletPage() {
         />
         <StatCard
           label={t('wallet.avgPerDriver')}
-          value={stats ? formatCurrency(stats.avgPerDriver, locale) : '—'}
+          value={stats ? formatMoney(stats.avgPerDriver, locale) : '—'}
           iconBg="bg-gradient-to-br from-indigo-500 to-violet-600"
           Icon={Users2}
           subtitle={stats ? t('wallet.acrossDrivers', { count: stats.activeDriversCount }) : undefined}
@@ -414,7 +415,7 @@ export default function WalletPage() {
                         isCredit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400',
                       )}>
                         {isCredit ? '+' : ''}
-                        {formatCurrency(tx.amount, locale)}
+                        {formatMoney(tx.amount, locale)}
                       </td>
                       <td className="px-5 py-4">
                         <span className={cn(

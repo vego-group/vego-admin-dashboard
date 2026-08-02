@@ -2,6 +2,64 @@
 // Domain Types — central contract for the entire application
 // ============================================================================
 
+// ----- Country & money primitives ---------------------------------------------
+
+/**
+ * Phone dial prefix, e.g. '+966'. The API calls this `country_code`, which is a
+ * misnomer — it identifies a numbering plan, not a country. Display use only.
+ *
+ * Branded so it can never be passed where an {@link IsoCountryCode} is expected.
+ * Mint one with `toDialCode()` from @/lib/country.
+ */
+export type DialCode = string & { readonly __brand: 'DialCode' };
+
+/**
+ * ISO 3166-1 alpha-2 country code, e.g. 'SA' | 'JO'. The API calls this
+ * `iso_country_code`. This is the field that resolves a country — currency,
+ * phone rules, vehicle terminology.
+ *
+ * Branded so it can never be passed where a {@link DialCode} is expected.
+ * Mint one with `toIsoCountryCode()` from @/lib/country.
+ */
+export type IsoCountryCode = string & { readonly __brand: 'IsoCountryCode' };
+
+/** ISO 4217 currency code, e.g. 'SAR' | 'JOD'. */
+export type CurrencyCode = string;
+
+/**
+ * A fixed-precision monetary value.
+ *
+ * Mirrors the backend's money object
+ * `{ amount|balance: "120.500", currency, minor_units, decimals }`.
+ * Build one with `readMoney()` from @/lib/money — never with parseFloat.
+ */
+export interface Money {
+  /** Exact fixed-precision decimal string, e.g. '120.500'. */
+  amount: string;
+  /** Integer minor units — the only representation safe for arithmetic. */
+  minorUnits: number;
+  /** ISO 4217 code as sent by the backend; null when the payload omitted it. */
+  currency: CurrencyCode | null;
+  /** Minor-unit exponent. SAR = 2, JOD = 3. */
+  decimals: number;
+}
+
+/**
+ * The fleet's own profile, from `GET /fleet-admin/me`.
+ *
+ * This is the single source for the fleet's country and currency. A fleet's
+ * country is fixed on its fleet record and is never client-selectable.
+ */
+export interface FleetProfile {
+  id: string;
+  name: string;
+  isoCountryCode: IsoCountryCode | null;
+  currency: CurrencyCode;
+  currencyDecimals: number;
+  maxDrivers?: number;
+  status?: string;
+}
+
 export type VehicleStatus = 'active' | 'charging' | 'idle' | 'maintenance';
 export type StationStatus = 'available' | 'charging' | 'in_use';
 export type DriverStatus = 'active' | 'inactive' | 'pending' | 'blocked';
@@ -101,6 +159,10 @@ export interface Driver {
   id: string;
   name: string;
   phone: string;
+  /** Dial prefix from the API's `country_code`, e.g. '+966'. Display only. */
+  dialCode?: DialCode;
+  /** ISO 3166-1 alpha-2 from the API's `iso_country_code`. Resolves the country. */
+  isoCountryCode?: IsoCountryCode;
   email?: string;
   address?: string;
   city?: string;
@@ -309,6 +371,12 @@ export interface WalletTransaction {
   driverId: string;
   /** Positive = top-up credit, negative = debit (charge / swap) */
   amount: number;
+  /**
+   * The exact fixed-precision value behind `amount`, as the backend sent it.
+   * Use this for sums, CSV export and anything that must not drift; `amount` is
+   * the lossy convenience view. Absent on locally-constructed fixtures.
+   */
+  money?: Money;
   type: TransactionType;
   paymentMethod?: string;
   note?: string;

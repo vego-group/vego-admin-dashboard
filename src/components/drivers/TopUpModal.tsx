@@ -6,7 +6,8 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
-import { formatCurrency } from '@/lib/format';
+import { amountStep, fractionDigitsOf, toMinorUnits } from '@/lib/money';
+import { useFleetContext } from '@/hooks/useFleetContext';
 import { walletApi } from '@/lib/api';
 import type { Driver, SavedCard } from '@/types';
 
@@ -41,6 +42,7 @@ type PaymentData = Awaited<ReturnType<typeof walletApi.initiateTopUp>>['paymentD
 
 export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const { t, locale } = useI18n();
+  const { formatMoney, currencyDecimals, currencyStatus } = useFleetContext();
 
   const [step, setStep]               = useState<Step>('amount');
 
@@ -137,16 +139,28 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
 
   if (!driver) return null;
 
-  const numAmount      = parseFloat(amount) || 0;
   const currentBalance = fetchedBalance ?? driver.walletBalance ?? 0;
-  const newBalance     = currentBalance + numAmount;
+
+  // Amounts are held as the raw input string and converted through integer minor
+  // units — never parseFloat, so a three-decimal JOD total does not drift.
+  //
+  // Until the fleet's currency resolves we do not know its precision, so we scale
+  // to whatever the values themselves carry rather than assuming two decimals.
+  // That keeps both operands exact without inventing a currency.
+  const scaleDecimals = currencyDecimals
+    ?? Math.max(fractionDigitsOf(amount), fractionDigitsOf(currentBalance));
+  const scale            = 10 ** scaleDecimals;
+  const amountMinorUnits = toMinorUnits(amount, scaleDecimals);
+  const numAmount        = amountMinorUnits / scale;
+  const newBalance       = (toMinorUnits(currentBalance, scaleDecimals) + amountMinorUnits) / scale;
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   const validateAmount = (): boolean => {
-    const parsed = parseFloat(amount);
-    if (!amount.trim() || isNaN(parsed)) { setAmountError(t('drivers.topUpAmountRequired')); return false; }
-    if (parsed <= 0)                      { setAmountError(t('drivers.topUpAmountInvalid'));  return false; }
+    const trimmed = amount.trim();
+    const wellFormed = /^\d*(?:[.,]\d*)?$/.test(trimmed) && /\d/.test(trimmed);
+    if (!trimmed || !wellFormed)  { setAmountError(t('drivers.topUpAmountRequired')); return false; }
+    if (amountMinorUnits <= 0)    { setAmountError(t('drivers.topUpAmountInvalid'));  return false; }
     return true;
   };
 
@@ -269,7 +283,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                   <div className="h-4 w-16 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
                 ) : (
                   <p className={cn('text-sm font-bold tabular-nums', balanceColor(currentBalance))}>
-                    {formatCurrency(currentBalance, locale)}
+                    {formatMoney(currentBalance, locale)}
                   </p>
                 )}
               </div>
@@ -288,7 +302,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                   value={amount}
                   onChange={(e) => { setAmount(e.target.value); if (amountError) setAmountError(''); if (apiError) setApiError(''); }}
                   min="0"
-                  step="0.01"
+                  step={currencyDecimals != null ? amountStep(currencyDecimals) : 'any'}
                   className={cn(
                     'h-11 w-full appearance-none rounded-xl border bg-white ps-14 pe-3.5 text-sm text-slate-700 transition-colors',
                     'focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20',
@@ -349,20 +363,20 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500 dark:text-slate-400">{t('drivers.currentBalance')}</span>
                     <span className={cn('font-semibold tabular-nums', balanceColor(currentBalance))}>
-                      {formatCurrency(currentBalance, locale)}
+                      {formatMoney(currentBalance, locale)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500 dark:text-slate-400">+ {t('drivers.topUp')}</span>
                     <span className="font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
-                      +{formatCurrency(numAmount, locale)}
+                      +{formatMoney(numAmount, locale)}
                     </span>
                   </div>
                   <div className="border-t pt-2" style={{ borderColor: 'rgb(var(--border))' }}>
                     <div className="flex items-center justify-between">
                       <span className="font-semibold text-slate-700 dark:text-slate-200">{t('drivers.newBalance')}</span>
                       <span className={cn('text-base font-bold tabular-nums', balanceColor(newBalance))}>
-                        {formatCurrency(newBalance, locale)}
+                        {formatMoney(newBalance, locale)}
                       </span>
                     </div>
                   </div>
@@ -391,7 +405,9 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                 className="min-w-[160px]"
                 leftIcon={!initiating ? <CreditCard className="h-4 w-4" /> : undefined}
               >
-                {numAmount > 0 ? `Pay ${formatCurrency(numAmount, locale)}` : t('drivers.confirmTopUp')}
+                {numAmount > 0 && currencyStatus !== 'pending'
+                  ? `Pay ${formatMoney(numAmount, locale)}`
+                  : t('drivers.confirmTopUp')}
               </Button>
             </div>
           </div>
@@ -421,7 +437,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                 {cardMode === 'list' ? t('drivers.savedCards') : t('drivers.addNewCardTitle')}
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {formatCurrency(numAmount, locale)} will be charged
+                {formatMoney(numAmount, locale)} will be charged
               </p>
             </div>
           </div>
@@ -515,7 +531,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                 className="mt-5 w-full"
                 leftIcon={!charging ? <CreditCard className="h-4 w-4" /> : undefined}
               >
-                {t('drivers.payWithCard').replace('{{amount}}', formatCurrency(numAmount, locale))}
+                {t('drivers.payWithCard').replace('{{amount}}', formatMoney(numAmount, locale))}
               </Button>
 
               <div className="mt-3 flex items-center justify-center gap-2 text-xs text-slate-400">
