@@ -1,14 +1,18 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Info, User, Car, FileText, Upload, Check, X, AlertTriangle, Clock, Image as ImageIcon } from 'lucide-react';
+import { Info, User, Car, FileText, Upload, Check, X, AlertTriangle, Clock, Lock, Image as ImageIcon } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useCountries } from '@/hooks/useCountries';
+import { useFleetContext } from '@/hooks/useFleetContext';
 import { driversApi } from '@/lib/api';
+import { fieldErrorFrom } from '@/lib/api-errors';
+import { flagEmoji, matchesPhoneRegex, toNationalNumber } from '@/lib/country';
 import { cn } from '@/lib/cn';
-import type { Driver, DriverStatus, DocumentStatus, DriverDocuments } from '@/types';
+import type { Country, Driver, DriverStatus, DocumentStatus, DriverDocuments } from '@/types';
 
 // ── Form value shape ──────────────────────────────────────────────────────────
 
@@ -68,11 +72,20 @@ const VEHICLE_OPTIONS = ['', 'VEGO Pro 400', 'VEGO Cargo 500', 'VegoMax Pro', 'V
 // ── Main modal ────────────────────────────────────────────────────────────────
 
 export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormModalProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const isEdit = !!driver;
+
+  // A fleet does not span countries, so the driver's country is the fleet's and
+  // is not a choice. It is shown, read-only, because it decides which phone rule
+  // the number below is validated against.
+  const { isoCountryCode: fleetIso, currencyStatus } = useFleetContext();
+  const { byIso, isLoading: countriesLoading } = useCountries();
+  const country = byIso(fleetIso);
+  const countryPending = currencyStatus === 'pending' || countriesLoading;
 
   const [values, setValues] = useState<DriverFormValues>(emptyForm);
   const [errors, setErrors] = useState<Partial<Record<keyof DriverFormValues, string>>>({});
+  const [countryError, setCountryError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   // Document detail (file_url + rejection_reason) — only the detail endpoint returns these.
@@ -81,13 +94,14 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
   useEffect(() => {
     if (!open) return;
     setSubmitError(null);
+    setCountryError(null);
     if (driver) {
-      // Normalise stored phone to 9-digit local format (strip +966 / 00966 / leading 0)
-      const rawPhone = driver.phone
-        .replace(/^\+?(?:00)?966/, '')
-        .replace(/^0/, '')
-        .replace(/\D/g, '')
-        .slice(0, 9);
+      // Reduce the stored number to its national form. The driver's own dial code
+      // leads, because an existing record knows its country synchronously while
+      // the fleet profile is still in flight; without one, toNationalNumber
+      // sweeps every seeded prefix. Either way "+962…", "00962…", "0…" and the
+      // Saudi equivalents all land on the same digits.
+      const rawPhone = toNationalNumber(driver.phone, driver.dialCode);
       setValues({
         fullName: driver.name,
         phone: rawPhone,
@@ -140,14 +154,37 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
     setValues((v) => ({ ...v, [fileKey]: file, [nameKey]: file.name }));
   };
 
+  /** "Enter a valid Jordan mobile number (e.g. 791234567)" — from the country's own facts. */
+  const invalidPhoneMessage = (c: Country): string => {
+    const name    = locale === 'ar' ? c.nameAr : c.nameEn;
+    const example = c.phoneExampleNational || c.phonePlaceholder;
+    return example
+      ? t('drivers.phoneInvalidForCountry', { country: name, example })
+      : t('drivers.phoneInvalidForCountryShort', { country: name });
+  };
+
   const validate = (): boolean => {
     const next: typeof errors = {};
     if (!values.fullName.trim()) next.fullName = t('drivers.fullNameRequired');
     if (!values.phone.trim()) next.phone = t('drivers.phoneRequired');
-    else if (!/^5\d{8}$/.test(values.phone.trim())) next.phone = t('drivers.phoneInvalidSaudi');
+    // The rule is the country's, from GET /countries — never a regex written here.
+    else if (country && !matchesPhoneRegex(values.phone.trim(), country.phoneRegex)) {
+      next.phone = invalidPhoneMessage(country);
+    }
     if (values.email && !/^\S+@\S+\.\S+$/.test(values.email)) next.email = t('drivers.emailInvalid');
+
+    // Without a country there is no dial code, and a number sent without one is
+    // the exact defect this change removes. Say so rather than posting a bare
+    // national number that only resolves correctly in Saudi Arabia.
+    const countryProblem = country
+      ? null
+      : countryPending
+        ? t('common.loading')
+        : t('drivers.countryUnresolved');
+    setCountryError(countryProblem);
+
     setErrors(next);
-    return Object.keys(next).length === 0;
+    return Object.keys(next).length === 0 && countryProblem === null;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -155,11 +192,23 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
     if (!validate()) return;
     setSubmitting(true);
     setSubmitError(null);
+    setCountryError(null);
     try {
       await onSubmit(values, driver?.id);
       onClose();
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'An unexpected error occurred. Please try again.');
+      // country_not_supported / phone_invalid_for_country are input mistakes, not
+      // failures of the request: they belong beside the field the operator has to
+      // fix, never in the form-wide banner.
+      const fieldError = fieldErrorFrom(err);
+      if (fieldError) {
+        const detail  = fieldError.expectedFormat ?? fieldError.example;
+        const message = detail ? `${fieldError.message} (${detail})` : fieldError.message;
+        if (fieldError.field === 'country') setCountryError(message);
+        else setErrors((prev) => ({ ...prev, phone: message }));
+      } else {
+        setSubmitError(err instanceof Error ? err.message : 'An unexpected error occurred. Please try again.');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -210,6 +259,37 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
                 onChange={(e) => update('fullName', e.target.value)}
               />
             </Field>
+
+            {/* Country — the fleet's, read-only. Fleets do not span countries. */}
+            <Field
+              label={t('drivers.country')}
+              error={countryError ?? undefined}
+              hint={country ? t('drivers.countryFixedByFleet') : undefined}
+            >
+              <div
+                className={cn(
+                  'flex h-11 w-full items-center gap-2 rounded-xl border bg-slate-50 px-3.5 text-sm dark:bg-slate-800/60',
+                  countryError ? 'border-rose-400' : '',
+                )}
+                style={!countryError ? { borderColor: 'rgb(var(--border))' } : undefined}
+              >
+                {country ? (
+                  <>
+                    <span aria-hidden>{flagEmoji(country.isoCountryCode)}</span>
+                    <span className="truncate font-medium text-slate-700 dark:text-slate-200">
+                      {locale === 'ar' ? country.nameAr : country.nameEn}
+                    </span>
+                    <span className="text-xs text-slate-400" dir="ltr">{country.dialCode}</span>
+                    <Lock className="ms-auto h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+                  </>
+                ) : (
+                  <span className="text-slate-400">
+                    {countryPending ? t('common.loading') : t('drivers.countryUnresolved')}
+                  </span>
+                )}
+              </div>
+            </Field>
+
             <Field label={t('drivers.phoneNumber')} required error={errors.phone}>
               <div
                 className={cn(
@@ -220,26 +300,30 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
                 )}
                 style={!errors.phone ? { borderColor: 'rgb(var(--border))' } : undefined}
               >
-                {/* Fixed country code prefix */}
+                {/* Dial prefix — the fleet's country, not a hardcoded +966 */}
                 <div
                   className="flex shrink-0 items-center gap-1.5 border-e bg-slate-50 px-3 text-xs font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400"
                   style={{ borderColor: 'rgb(var(--border))' }}
+                  dir="ltr"
                 >
-                  <span aria-hidden>🇸🇦</span>
-                  <span>+966</span>
+                  <span aria-hidden>{flagEmoji(country?.isoCountryCode)}</span>
+                  <span>{country?.dialCode ?? '—'}</span>
                 </div>
-                {/* 9-digit local number */}
+                {/* National number, sized and validated by the country */}
                 <input
                   type="tel"
                   inputMode="numeric"
-                  placeholder="5XXXXXXXX"
-                  maxLength={9}
+                  placeholder={country?.phonePlaceholder || ''}
                   value={values.phone}
+                  dir="ltr"
                   onChange={(e) => {
-                    // Strip non-digits, remove leading zero, limit to 9 chars
-                    let raw = e.target.value.replace(/\D/g, '');
-                    if (raw.startsWith('0')) raw = raw.slice(1);
-                    update('phone', raw.slice(0, 9));
+                    // Paste-tolerant: "+962 79 123 4567" reduces to its national
+                    // digits instead of being truncated mid-prefix. The length cap
+                    // lives here rather than in maxLength, which would clip the
+                    // pasted text before it could be normalised.
+                    const national = toNationalNumber(e.target.value, country?.dialCode);
+                    update('phone', national.slice(0, country?.nationalNumberLength || 15));
+                    if (countryError) setCountryError(null);
                   }}
                   className="h-full min-w-0 flex-1 bg-transparent px-3 text-sm text-slate-700 outline-none dark:text-slate-200"
                 />
@@ -441,9 +525,9 @@ function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }
 }
 
 function Field({
-  label, required, error, children,
+  label, required, error, hint, children,
 }: {
-  label: string; required?: boolean; error?: string; children: React.ReactNode;
+  label: string; required?: boolean; error?: string; hint?: string; children: React.ReactNode;
 }) {
   return (
     <div>
@@ -451,7 +535,11 @@ function Field({
         {label} {required && <span className="text-rose-500">*</span>}
       </label>
       {children}
-      {error && <p className="mt-1 text-xs text-rose-600">{error}</p>}
+      {error ? (
+        <p className="mt-1 text-xs text-rose-600">{error}</p>
+      ) : (
+        hint && <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">{hint}</p>
+      )}
     </div>
   );
 }

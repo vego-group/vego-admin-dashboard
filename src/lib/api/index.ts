@@ -10,7 +10,15 @@
  */
 
 import { apiClient } from '@/lib/api/client';
-import { seededCurrencyFor, toDialCode, toIsoCountryCode } from '@/lib/country';
+import { isFieldLevelError } from '@/lib/api-errors';
+import {
+  SEEDED_COUNTRIES,
+  seededCountries,
+  seededCurrencyFor,
+  toDialCode,
+  toIsoCountryCode,
+} from '@/lib/country';
+import { logger } from '@/lib/logger';
 import {
   decimalsForCurrency,
   fractionDigitsOf,
@@ -28,8 +36,10 @@ import type {
   BatteryStation,
   CancelledSessions,
   CostBreakdown,
+  Country,
   DashboardMetrics,
   DeviceStatus,
+  DialCode,
   Driver,
   DriverDocuments,
   DriverSession,
@@ -551,6 +561,125 @@ function mapNotification(n: ApiNotification): Notification {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Countries — GET /countries
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One country as the roster endpoint returns it.
+ *
+ * Field names are given generously because this payload is consumed by three
+ * clients and has already been renamed once: `phone_example` used to hold the
+ * mask that is now `phone_placeholder`, and an environment that has not picked
+ * up the reseed still sends the old meaning.
+ */
+interface ApiCountry {
+  code?: string | null;
+  iso_code?: string | null;
+  iso_country_code?: string | null;
+  name?: string | null;
+  name_en?: string | null;
+  name_ar?: string | null;
+  /** Dial prefix, e.g. "+962". On this payload `country_code` is an alias for it. */
+  dial_code?: string | null;
+  country_code?: string | null;
+  currency?: string | null;
+  currency_code?: string | null;
+  currency_decimals?: number | null;
+  decimals?: number | null;
+  phone_regex?: string | null;
+  phone_placeholder?: string | null;
+  /** Real E.164 number since the reseed; a format mask on older environments. */
+  phone_example?: string | null;
+  phone_example_national?: string | null;
+  national_number_length?: number | null;
+  is_active?: boolean | null;
+}
+
+/** Does this look like a format mask ("5X XXX XXXX") rather than a number? */
+function looksLikeMask(value: string): boolean {
+  return /[Xx#]/.test(value);
+}
+
+function mapCountry(c: ApiCountry): Country | null {
+  const isoCountryCode = toIsoCountryCode(c.code ?? c.iso_code ?? c.iso_country_code);
+  if (!isoCountryCode) return null;
+
+  // The seed is the backstop for any fact this environment omits — never a
+  // hardcoded assumption at the point of use.
+  const seed = SEEDED_COUNTRIES[isoCountryCode];
+
+  const dialCode = toDialCode(c.dial_code ?? c.country_code) ?? seed?.dialCode;
+  if (!dialCode) return null;
+
+  const rawExample = c.phone_example ?? '';
+  const currency   = c.currency ?? c.currency_code ?? seed?.currency ?? undefined;
+
+  return {
+    isoCountryCode,
+    dialCode,
+    nameEn: c.name_en ?? c.name ?? seed?.nameEn ?? isoCountryCode,
+    nameAr: c.name_ar ?? seed?.nameAr ?? c.name_en ?? isoCountryCode,
+    currency,
+    currencyDecimals:
+      c.currency_decimals ?? c.decimals ?? seed?.currencyDecimals ?? decimalsForCurrency(currency),
+    phoneRegex: c.phone_regex ?? seed?.phoneRegex ?? '',
+    // `phone_placeholder` is the mask; fall back to `phone_example` only while it
+    // still holds one, never once it holds a real number.
+    phonePlaceholder:
+      c.phone_placeholder ??
+      (rawExample && looksLikeMask(rawExample) ? rawExample : undefined) ??
+      seed?.phonePlaceholder ??
+      '',
+    phoneExampleNational: c.phone_example_national ?? seed?.phoneExampleNational ?? '',
+    nationalNumberLength:
+      c.national_number_length ??
+      seed?.nationalNumberLength ??
+      (c.phone_example_national ? c.phone_example_national.replace(/\D/g, '').length : 15),
+  };
+}
+
+export const countriesApi = {
+  /**
+   * The country roster: `GET /countries`, at the **API root** and with no token —
+   * it has to render on the login screen, before there is a session.
+   *
+   * Never throws. An unreachable backend and a successful-but-empty response are
+   * the same outcome for the caller — no roster — and both fall back to the
+   * offline seed. The shared environment currently returns zero countries, which
+   * is why the empty case is a warning and not an error: a login screen with no
+   * country to pick would be worse than one seeded with the two live markets.
+   */
+  async list(): Promise<Country[]> {
+    let mapped: Country[] = [];
+
+    try {
+      const raw = await apiClient.get<unknown>('/countries');
+      mapped = extractList<ApiCountry>(raw)
+        .filter((c) => c.is_active !== false)
+        .map(mapCountry)
+        .filter((c): c is Country => c !== null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        `[countriesApi] GET /countries failed (${message}) — falling back to the ` +
+        'seeded SA/JO roster.',
+      );
+      return seededCountries();
+    }
+
+    if (mapped.length === 0) {
+      logger.warn(
+        '[countriesApi] GET /countries returned no usable countries — falling back ' +
+        'to the seeded SA/JO roster.',
+      );
+      return seededCountries();
+    }
+
+    return mapped;
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Fleet self-profile — GET /fleet-admin/me
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -804,7 +933,16 @@ export const stationsApi = {
 
 export interface DriverCreateInput {
   name: string;
+  /** Full E.164, e.g. '+962791234567'. Build it with `toE164()`. */
   phone: string;
+  /**
+   * Dial prefix for `phone`, sent as the API's `country_code`.
+   *
+   * On a **user** `country_code` is the dial prefix, not an ISO code — the ISO
+   * code lives in `iso_country_code`. A fleet's drivers are always in the fleet's
+   * country, so this is the fleet's dial code, never a per-driver choice.
+   */
+  dialCode?: DialCode;
   email?: string;
   address?: string;
   city?: string;
@@ -848,6 +986,7 @@ export const driversApi = {
       name:  input.name,
       phone: input.phone,
     };
+    if (input.dialCode)                          body['country_code']           = input.dialCode;
     if (input.email)                             body['email']                  = input.email;
     if (input.address)                           body['address']                = input.address;
     if (input.city)                              body['city']                   = input.city;
@@ -865,7 +1004,9 @@ export const driversApi = {
     try {
       // PUT /fleet-admin/drivers/:id — send updatable fields only
       const body: Record<string, string | undefined> = {};
-      if (updates.name)    body['name']    = updates.name;
+      if (updates.name)     body['name']         = updates.name;
+      if (updates.phone)    body['phone']        = updates.phone;
+      if (updates.dialCode) body['country_code'] = updates.dialCode;
       if (updates.email)   body['email']   = updates.email;
       if (updates.address) body['address'] = updates.address;
       if (updates.city)    body['city']    = updates.city;
@@ -874,7 +1015,11 @@ export const driversApi = {
       const res = await apiClient.put<{ data: ApiDriver } | ApiDriver>(`/fleet-admin/drivers/${id}`, body);
       const raw = (res as { data?: ApiDriver }).data ?? (res as ApiDriver);
       return mapDriver(raw);
-    } catch {
+    } catch (err) {
+      // A rejected country or phone is the operator's to fix, and the form can
+      // only show it next to the field if it survives this catch. Everything else
+      // keeps the historical null-on-failure contract.
+      if (isFieldLevelError(err)) throw err;
       return null;
     }
   },
@@ -1197,7 +1342,8 @@ interface ApiDashboard {
   avg_trip_duration_minutes?: number;
   /** Backend returns null when no trips have occurred */
   success_rate?: number | null;
-  average_cost_per_motorcycle?: number;
+  /** Money: a scalar on older responses, a currency-aware object on current ones. */
+  average_cost_per_motorcycle?: number | string | ApiMoneyFields | null;
   // Confirmed new counters
   total_drivers?: number;
   active_trips?: number;
@@ -1236,6 +1382,17 @@ export const dashboardApi = {
     const raw = await apiClient.get<{ data?: ApiDashboard } & ApiDashboard>('/fleet-admin/dashboard');
     // Backend may wrap in { data: {...} } or return the flat object directly
     const res: ApiDashboard = (raw.data && typeof raw.data === 'object') ? raw.data : raw;
+
+    // Average cost per vehicle is money. It arrives either as a bare scalar or as
+    // the currency-aware object, and rendering the object would print
+    // "[object Object]" — resolve both through integer minor units.
+    const rawAvgCost = res.average_cost_per_motorcycle;
+    const avgCost = readMoney(
+      rawAvgCost !== null && typeof rawAvgCost === 'object'
+        ? rawAvgCost
+        : { amount: rawAvgCost ?? 0 },
+    );
+
     return {
       activeFleet:             res.total_motorcycles ?? 0,
       availableBatteries:      res.available_batteries ?? 0,
@@ -1245,7 +1402,7 @@ export const dashboardApi = {
       totalTripsToday:         res.total_trips_today ?? 0,
       avgTripDurationMinutes:  res.avg_trip_duration_minutes ?? 0,
       successRate:             res.success_rate ?? 0,
-      averageCostPerVehicle:   res.average_cost_per_motorcycle ?? 0,
+      averageCostPerVehicle:   moneyToNumber(avgCost),
       // Trend fields — backend uses short names (fleet_trend, batteries_trend…)
       // Fall back to legacy long names in case the API version changes
       fleetTrend:              res.fleet_trend     ?? res.total_motorcycles_trend         ?? 0,

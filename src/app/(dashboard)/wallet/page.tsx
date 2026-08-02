@@ -16,7 +16,10 @@ import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { walletApi } from '@/lib/api';
-import type { TransactionType, TransactionStatus, WalletTransaction, WalletStats } from '@/types';
+import { fractionDigitsOf, fromMinorUnits, toMinorUnits } from '@/lib/money';
+import type {
+  CurrencyCode, TransactionType, TransactionStatus, WalletTransaction, WalletStats,
+} from '@/types';
 import { logger } from '@/lib/logger';
 
 const PAGE_SIZE = 8;
@@ -85,12 +88,40 @@ function defaultTo(): string { return isoDate(new Date()); }
 
 // ── CSV export ────────────────────────────────────────────────────────────
 
-function exportCsv(rows: WalletTransaction[]) {
-  const headers = ['Date', 'Driver', 'Amount (SAR)', 'Type', 'Payment Method', 'Note', 'Status', 'Admin'];
+/**
+ * The signed amount, at the precision the value actually has.
+ *
+ * `toFixed(2)` was wrong twice over in Jordan: it labelled JOD as SAR and it
+ * truncated the third decimal, so an exported "1.234" became "1.23" and a
+ * reconciled total drifted. The exact decimal string the backend sent is
+ * preferred; the fleet's own decimals are the fallback for rows that predate the
+ * money object.
+ */
+function csvAmount(tx: WalletTransaction, fleetDecimals: number | null): string {
+  const decimals = tx.money?.decimals ?? fleetDecimals ?? fractionDigitsOf(tx.amount);
+  const exact    = tx.money?.amount ?? fromMinorUnits(toMinorUnits(tx.amount, decimals), decimals);
+  return exact.startsWith('-') ? exact : `+${exact}`;
+}
+
+function exportCsv(
+  rows: WalletTransaction[],
+  currency: CurrencyCode | null,
+  decimals: number | null,
+) {
+  // The header names the currency only when we actually know it — an unlabelled
+  // "Amount" is honest, "Amount (SAR)" on a Jordanian export is not. A per-row
+  // Currency column carries the value each transaction was settled in.
+  const headers = [
+    'Date', 'Driver',
+    currency ? `Amount (${currency})` : 'Amount',
+    'Currency',
+    'Type', 'Payment Method', 'Note', 'Status', 'Admin',
+  ];
   const lines = rows.map((r) => [
     formatDT(r.createdAt),
     r.driverName,
-    r.amount >= 0 ? `+${r.amount.toFixed(2)}` : `${r.amount.toFixed(2)}`,
+    csvAmount(r, decimals),
+    r.money?.currency ?? currency ?? '',
     r.type,
     r.paymentMethod ?? '',
     r.note ?? '',
@@ -165,7 +196,7 @@ function StatCard({
 
 export default function WalletPage() {
   const { t, locale } = useI18n();
-  const { formatMoney } = useFleetContext();
+  const { formatMoney, currency, currencyDecimals } = useFleetContext();
 
   // Data
   const [allTransactions, setAllTransactions] = useState<WalletTransaction[]>([]);
@@ -346,7 +377,7 @@ export default function WalletPage() {
             <Button
               variant="primary"
               leftIcon={<Download className="h-4 w-4" />}
-              onClick={() => exportCsv(filtered)}
+              onClick={() => exportCsv(filtered, currency, currencyDecimals)}
               className="w-full sm:w-auto"
             >
               {t('wallet.exportCsv')}

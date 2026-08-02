@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
 import { BrandPanel } from '@/components/auth/BrandPanel';
+import { toE164 } from '@/lib/country';
 import { cn } from '@/lib/cn';
 
 const OTP_LENGTH = 6;
@@ -12,7 +13,8 @@ const RESEND_COUNTDOWN = 60;
 
 export default function OtpPage() {
   const router = useRouter();
-  const { verifyOtp, sendOtp, isLoading, error, isAuthenticated, pendingPhone } = useAuthStore();
+  const { verifyOtp, sendOtp, isLoading, error, isAuthenticated, pendingPhone, loginCountry } =
+    useAuthStore();
 
   const [digits, setDigits] = useState<string[]>(Array(OTP_LENGTH).fill(''));
   const [countdown, setCountdown] = useState(RESEND_COUNTDOWN);
@@ -59,20 +61,22 @@ export default function OtpPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const ok = await verifyOtp(digits.join(''));
-    if (ok) router.replace('/dashboard');
+    const result = await verifyOtp(digits.join(''));
+    if (result.ok) router.replace('/dashboard');
   };
 
   const handleResend = useCallback(async () => {
-    if (!pendingPhone || !canResend) return;
+    if (!pendingPhone || !loginCountry || !canResend) return;
     setCountdown(RESEND_COUNTDOWN);
     setCanResend(false);
     setDigits(Array(OTP_LENGTH).fill(''));
-    await sendOtp(pendingPhone);
+    await sendOtp({ phone: pendingPhone, country: loginCountry });
     inputRefs.current[0]?.focus();
-  }, [pendingPhone, canResend, sendOtp]);
+  }, [pendingPhone, loginCountry, canResend, sendOtp]);
 
   const otp = digits.join('');
+  // The number the code actually went to, in the same E.164 form it was sent as.
+  const displayPhone = toE164(pendingPhone, loginCountry?.dialCode);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[#eeeef8] px-4 py-12">
@@ -94,7 +98,7 @@ export default function OtpPage() {
           <h1 className="mt-6 text-[28px] font-bold text-slate-900">Verify Your Number</h1>
           <p className="mt-2 text-base text-slate-500">Enter the 6-digit code sent to</p>
           <p className="mt-0.5 text-base font-semibold text-slate-800" dir="ltr">
-            +966 {pendingPhone ?? ''}
+            {displayPhone}
           </p>
 
           <form onSubmit={handleSubmit} className="mt-8">

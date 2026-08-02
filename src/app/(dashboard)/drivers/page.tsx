@@ -17,8 +17,11 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Pagination } from '@/components/ui/Pagination';
 import { SuccessDialog } from '@/components/ui/SuccessDialog';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useCountries } from '@/hooks/useCountries';
+import { useFleetContext } from '@/hooks/useFleetContext';
 import { driversApi, fleetApi } from '@/lib/api';
-import type { CancelledSessions, Driver, DriverStatus, Vehicle } from '@/types';
+import { toE164 } from '@/lib/country';
+import type { CancelledSessions, DialCode, Driver, DriverStatus, Vehicle } from '@/types';
 import { logger } from '@/lib/logger';
 
 type TabValue = 'all' | DriverStatus;
@@ -26,6 +29,12 @@ type FormMode = { kind: 'closed' } | { kind: 'add' } | { kind: 'edit'; driver: D
 
 export default function DriversPage() {
   const { t } = useI18n();
+
+  // A driver is created in the fleet's country — fleets do not span countries —
+  // so the dial code that builds the E.164 number comes from the fleet profile.
+  const { isoCountryCode: fleetIso } = useFleetContext();
+  const { byIso } = useCountries();
+  const fleetDialCode: DialCode | undefined = byIso(fleetIso)?.dialCode;
 
   // Data
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -110,7 +119,9 @@ export default function DriversPage() {
   const handleAddSubmit = async (values: DriverFormValues) => {
     const created = await driversApi.create({
       name: values.fullName,
-      phone: '966' + values.phone,
+      // Full E.164 plus the dial code, instead of the old hardcoded '966' + phone.
+      phone: toE164(values.phone, fleetDialCode),
+      dialCode: fleetDialCode,
       email: values.email || undefined,
       address: values.address || undefined,
       city: values.city || undefined,
@@ -143,7 +154,8 @@ export default function DriversPage() {
 
     const updated = await driversApi.update(driverId, {
       name: values.fullName,
-      phone: '966' + values.phone,
+      phone: toE164(values.phone, fleetDialCode),
+      dialCode: fleetDialCode,
       email: values.email || undefined,
       address: values.address || undefined,
       city: values.city || undefined,

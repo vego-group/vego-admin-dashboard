@@ -27,6 +27,35 @@ export type IsoCountryCode = string & { readonly __brand: 'IsoCountryCode' };
 export type CurrencyCode = string;
 
 /**
+ * A country as `GET /countries` describes it (API root, no token).
+ *
+ * The phone facts are the point of this record: the app must not carry its own
+ * idea of what a valid mobile number looks like. `phoneRegex` is the backend's
+ * rule for the **national** number — the digits after the dial code, with no
+ * trunk `0` — and it is the only validation the phone fields run.
+ *
+ * `currency` is optional here because a country is not a fleet: the fleet's own
+ * currency comes from `GET /fleet-admin/me` via `useFleetContext()`, and nothing
+ * may fall back to a country's currency to render a fleet's money.
+ */
+export interface Country {
+  isoCountryCode: IsoCountryCode;
+  dialCode: DialCode;
+  nameEn: string;
+  nameAr: string;
+  currency?: CurrencyCode;
+  currencyDecimals?: number;
+  /** Backend rule for the national number, e.g. '^5[0-9]{8}$'. */
+  phoneRegex: string;
+  /** Input mask for the national number, e.g. '5X XXX XXXX'. */
+  phonePlaceholder: string;
+  /** A national number that satisfies `phoneRegex`, e.g. '512345678'. */
+  phoneExampleNational: string;
+  /** Digit count of a national number — sizes and caps the input. */
+  nationalNumberLength: number;
+}
+
+/**
  * A fixed-precision monetary value.
  *
  * Mirrors the backend's money object
