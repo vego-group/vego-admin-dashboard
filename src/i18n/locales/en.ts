@@ -769,6 +769,7 @@ const en = {
     showing: 'Showing {{count}} of {{total}} transactions',
     resultTruncated:
       'Too many matching transactions to load in full — this view and the CSV export are incomplete. Narrow the date range.',
+    filterRejected: 'The server rejected this filter, so nothing could be loaded:',
     typeTopUp: 'Top-Up',
     typeFastCharge: 'Fast Charge',
     typeBatterySwap: 'Battery Swap',

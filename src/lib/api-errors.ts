@@ -1,27 +1,29 @@
 /**
  * Which failures belong on a form field rather than on the page.
  *
- * Two 422s are ordinary input mistakes and must be treated as such:
+ * Three 422s are ordinary input mistakes and must be treated as such:
  *
  *   country_not_supported      the selected country is not a live market
  *   phone_invalid_for_country  the number does not match that country's rule
+ *   a blank `name` or `phone`  neither is clearable — the backend refuses a
+ *                              blank one by name rather than wiping the column
  *
- * Neither is an auth failure. Neither means the session is gone. They must not
- * sign the operator out, must not surface as a page-level banner, and must not
- * be swallowed by a catch that turns everything into "something went wrong" —
- * the operator needs to know *which field* to fix, and the backend already said
- * which one in `error_code`.
+ * None is an auth failure. None means the session is gone. They must not sign
+ * the operator out, must not surface as a page-level banner, and must not be
+ * swallowed by a catch that turns everything into "something went wrong" — the
+ * operator needs to know *which field* to fix, and the backend already said
+ * which one in `error_code` or in `errors`.
  *
  * Everything else stays global: a 500 is not a phone-number problem.
  */
 
 import { ApiError } from '@/lib/api/client';
 
-/** The two form fields these errors can land on. */
-export type CountryFieldName = 'country' | 'phone';
+/** The form fields these errors can land on. */
+export type FormFieldName = 'country' | 'phone' | 'name';
 
 export interface FieldError {
-  field: CountryFieldName;
+  field: FormFieldName;
   /** Backend `error_code`, or a synthetic 'validation' for Laravel field errors. */
   code: string;
   /** The backend's own message — already human-readable. */
@@ -34,17 +36,19 @@ export interface FieldError {
   supported?: string[];
 }
 
-const FIELD_BY_ERROR_CODE: Record<string, CountryFieldName> = {
+const FIELD_BY_ERROR_CODE: Record<string, FormFieldName> = {
   country_not_supported: 'country',
   phone_invalid_for_country: 'phone',
 };
 
 /** Request field names Laravel may report a validation error against. */
-const FIELD_BY_REQUEST_KEY: Record<string, CountryFieldName> = {
+const FIELD_BY_REQUEST_KEY: Record<string, FormFieldName> = {
   phone: 'phone',
   country_code: 'country',
   iso_country_code: 'country',
   country: 'country',
+  // `name` is not clearable: a blank one comes back as a 422 against this key.
+  name: 'name',
 };
 
 function readString(meta: Record<string, unknown> | null, key: string): string | undefined {

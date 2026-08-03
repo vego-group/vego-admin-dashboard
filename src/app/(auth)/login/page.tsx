@@ -13,7 +13,11 @@ import type { Country } from '@/types';
 /** "Enter a valid Jordan mobile number (e.g. 791234567)" — built from the country's own facts. */
 function invalidPhoneMessage(country: Country | undefined): string {
   if (!country) return 'Please enter a valid phone number';
-  const hint = country.phoneExampleNational || country.phonePlaceholder;
+  // The example number, never the mask: `phone_placeholder` ("5X XXX XXXX") is
+  // what the input shows as a placeholder, and `phone_example` is the real
+  // number behind this "e.g.". With no example, the message drops the hint
+  // rather than offering a mask as something to type.
+  const hint = country.phoneExampleNational;
   return hint
     ? `Enter a valid ${country.nameEn} mobile number (e.g. ${hint})`
     : `Enter a valid ${country.nameEn} mobile number`;

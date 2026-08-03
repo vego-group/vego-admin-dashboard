@@ -19,6 +19,7 @@ import {
   seededCurrencyFor,
   toDialCode,
   toIsoCountryCode,
+  toNationalNumber,
   toVehicleTerm,
 } from '@/lib/country';
 import { logger } from '@/lib/logger';
@@ -102,9 +103,14 @@ interface ApiDriver {
   account_status?: string | null;
   account_type?: string;
   fleet_id?: number;
-  // Flat license fields — real API returns these directly in list & show
+  // Flat license fields — real API returns these directly in list & show.
+  // `driving_license_expiry` and `plate_number` are columns on the user row: the
+  // fallback for a driver with no reviewable document yet. The nested blocks
+  // below are the truth wherever a document exists.
   driving_license_number?: string | null;
+  driving_license_expiry?: string | null;
   driving_license_file?: string | null;
+  plate_number?: string | null;
   has_license?: boolean;
   // Document status on list rows (added with the upload feature)
   driving_license_status?: string | null;
@@ -406,12 +412,17 @@ function mapDriver(d: ApiDriver): Driver {
           ? 'pending'
           : 'not_uploaded';
 
+  // The document block is the truth and the flat column is the fallback, in that
+  // order: a detail edited on a driver who has a licence or plate on file is
+  // written onto that record, and only a driver with no document yet keeps it on
+  // the user row. Reading the flat column first would show a stale date for
+  // every driver who has ever uploaded a licence.
   const documents: DriverDocuments = {
     license: {
       status:          licenseStatus,
       hasLicense,
       number:          licenseNum,
-      expiryDate:      license?.expiry_date,
+      expiryDate:      license?.expiry_date ?? d.driving_license_expiry ?? undefined,
       fileUrl:         license?.file_url,
       backFileUrl:     license?.back_file_url,
       rejectionReason: license?.rejection_reason ?? undefined,
@@ -419,7 +430,7 @@ function mapDriver(d: ApiDriver): Driver {
     customsCard: { status: toDocStatus(customs?.status) },
     plate: {
       status:          toDocStatus(plate?.status ?? d.plate_status ?? undefined),
-      number:          plate?.number ?? plate?.plate_number,
+      number:          plate?.number ?? plate?.plate_number ?? d.plate_number ?? undefined,
       fileUrl:         plate?.file_url,
       rejectionReason: plate?.rejection_reason ?? undefined,
     },
@@ -704,7 +715,12 @@ function mapNotification(n: ApiNotification): Notification {
  * Field names are given generously because this payload is consumed by three
  * clients and has already been renamed once: `phone_example` used to hold the
  * mask that is now `phone_placeholder`, and an environment that has not picked
- * up the reseed still sends the old meaning.
+ * up the repair migration still sends the old meaning.
+ *
+ * The two are not interchangeable and are read for different jobs:
+ *
+ *   phone_placeholder  "5X XXX XXXX"     the input mask — the field's placeholder
+ *   phone_example      "+966512345678"   a real E.164 number — the "e.g." in an error
  */
 interface ApiCountry {
   code?: string | null;
@@ -751,13 +767,28 @@ function mapCountry(c: ApiCountry): Country | null {
   const currency   = c.currency ?? c.currency_code ?? seed?.currency ?? undefined;
   const phoneRegex = c.phone_regex ?? seed?.phoneRegex ?? '';
 
-  // This environment derives both `national_number_length` and
-  // `phone_example_national` by stripping the non-digits out of the display mask,
-  // so "5X XXX XXXX" arrives as a length of 1 and an example of "5". A length of 1
-  // caps the login field at a single character, so neither field is taken on
-  // trust: the length is read off `phone_regex` — the rule the number is actually
-  // validated against — and the example is kept only if it satisfies that rule.
-  const rawExampleNational = c.phone_example_national ?? '';
+  // The length is read off `phone_regex` first — the rule the number is actually
+  // validated against, and so the one value that cannot disagree with it. The
+  // backend now derives its own the same way and reports 9; the fallback stays
+  // because it is the right order independent of that fix.
+  //
+  // `national_number_length` is **null** where nothing can be derived, which
+  // means "unknown, use your own" — not zero. Only a positive integer is taken;
+  // anything else falls through to the seed rather than capping the field short.
+  const reportedLength =
+    typeof c.national_number_length === 'number' && c.national_number_length > 0
+      ? Math.floor(c.national_number_length)
+      : undefined;
+
+  // The "e.g." in a validation message has to be a number the operator could
+  // actually type — the national form of the real example, never the mask. The
+  // national field leads; `phone_example` is now a real E.164 number, so it is
+  // reduced to its national digits when the national field is missing.
+  const exampleFromE164 = rawExample && !looksLikeMask(rawExample)
+    ? toNationalNumber(rawExample, dialCode)
+    : '';
+  const exampleNational = [c.phone_example_national ?? '', exampleFromE164]
+    .find((candidate) => candidate && matchesPhoneRegex(candidate, phoneRegex));
 
   return {
     isoCountryCode,
@@ -768,19 +799,18 @@ function mapCountry(c: ApiCountry): Country | null {
     currencyDecimals:
       c.currency_decimals ?? c.decimals ?? seed?.currencyDecimals ?? decimalsForCurrency(currency),
     phoneRegex,
-    // `phone_placeholder` is the mask; fall back to `phone_example` only while it
-    // still holds one, never once it holds a real number.
+    // `phone_placeholder` is the mask, and it is what the input's placeholder
+    // shows. `phone_example` is only a fallback while an environment still holds
+    // a mask there — never once it holds a real number.
     phonePlaceholder:
-      c.phone_placeholder ??
-      (rawExample && looksLikeMask(rawExample) ? rawExample : undefined) ??
-      seed?.phonePlaceholder ??
+      c.phone_placeholder ||
+      (rawExample && looksLikeMask(rawExample) ? rawExample : '') ||
+      seed?.phonePlaceholder ||
       '',
-    phoneExampleNational: matchesPhoneRegex(rawExampleNational, phoneRegex)
-      ? rawExampleNational
-      : seed?.phoneExampleNational ?? '',
+    phoneExampleNational: exampleNational ?? seed?.phoneExampleNational ?? '',
     nationalNumberLength:
       phoneLengthFromRegex(phoneRegex) ??
-      c.national_number_length ??
+      reportedLength ??
       seed?.nationalNumberLength ??
       15,
     // The vehicle noun is this market's, never the app's. Left undefined when
@@ -1286,9 +1316,11 @@ export const driversApi = {
       // survived, with the form showing the clear as if it had saved. `undefined`
       // is "leave alone"; `''` is "clear this", and it is sent as `''`.
       //
-      // ⚠️ Whether the backend clears a column on `""` or requires `null` is
-      // unconfirmed — see the note in the change report. If it needs `null`,
-      // this is the one line to change.
+      // Confirmed: `''` and `null` both clear, for every nullable field here, so
+      // the `''` we already send is right. The two exceptions are `name` and
+      // `phone` — a blank one is a 422 naming the field rather than a silent wipe
+      // (a driver with no phone cannot log in). The form blocks both before they
+      // get here; if one slips through, the 422 is rethrown onto its field below.
       const body: Record<string, string | undefined> = {};
       if (updates.name     !== undefined) body['name']         = updates.name;
       if (updates.phone    !== undefined) body['phone']        = updates.phone;
@@ -1987,18 +2019,35 @@ export interface PageMeta {
 }
 
 /**
+ * Every `type` the transactions endpoint honours — its whole table, nothing else.
+ *
+ * The sub-kinds are resolved server-side: `battery_swap` and `fast_charge` are
+ * complete filters over the debits that reference a swap or a charging session,
+ * and `top_up` over the credits. `credit` / `debit` are the raw column values.
+ *
+ * A value outside this table is a **422 naming the parameter** — it used to be
+ * ignored, which returned the entire unfiltered ledger under a filter label. So
+ * nothing else may ever be sent: {@link walletQueryString} refuses it before it
+ * reaches the wire.
+ */
+export const WALLET_TRANSACTION_TYPES = [
+  'top_up', 'battery_swap', 'fast_charge', 'refund', 'credit', 'debit',
+] as const;
+
+export type WalletTransactionTypeParam = typeof WALLET_TRANSACTION_TYPES[number];
+
+/**
  * Filters `GET /fleet-admin/wallet/transactions` accepts.
  *
  * `from`, `to`, `driver_id`, `type`, `status` and `per_page` are the documented
  * set; `page` is the Laravel paginator's own cursor. `type` takes the backend's
- * vocabulary — see {@link apiTransactionType}.
+ * vocabulary — see {@link WALLET_TRANSACTION_TYPES}.
  */
 export interface WalletTransactionQuery {
   from?: string;
   to?: string;
   driverId?: string;
-  /** Backend vocabulary: 'credit' | 'debit' | 'refund'. */
-  type?: string;
+  type?: WalletTransactionTypeParam;
   status?: string;
   perPage?: number;
   page?: number;
@@ -2009,69 +2058,105 @@ function walletQueryString(params: WalletTransactionQuery): string {
   if (params.from)     qs.set('from',      params.from);
   if (params.to)       qs.set('to',        params.to);
   if (params.driverId) qs.set('driver_id', params.driverId);
-  if (params.type   && params.type   !== 'all') qs.set('type',   params.type);
+  if (params.type) {
+    // The compiler already narrows `type` to the table; this catches a value
+    // arriving from untyped code. Dropping it instead would ask for a filtered
+    // ledger and silently render the whole one.
+    if (!(WALLET_TRANSACTION_TYPES as readonly string[]).includes(params.type)) {
+      throw new Error(
+        `[Wallet] Refusing to send type=${params.type}: the endpoint honours only ` +
+        `${WALLET_TRANSACTION_TYPES.join(', ')} and rejects anything else with a 422.`,
+      );
+    }
+    qs.set('type', params.type);
+  }
   if (params.status && params.status !== 'all') qs.set('status', params.status);
-  qs.set('per_page', String(params.perPage ?? DEFAULT_PER_PAGE));
+  // `per_page` is hard-capped at 100 server-side. Asking for more would be
+  // silently reduced, and every page-count derived from it would be wrong.
+  qs.set('per_page', String(Math.min(params.perPage ?? DEFAULT_PER_PAGE, MAX_PER_PAGE)));
   if (params.page && params.page > 1) qs.set('page', String(params.page));
   return qs.toString();
 }
 
+/** Query parameters this endpoint validates, in the order we report them. */
+const WALLET_QUERY_PARAMS = ['type', 'status', 'from', 'to', 'driver_id', 'per_page', 'page'] as const;
+
 /**
- * Pagination state, wherever Laravel put it.
+ * The `422` a rejected filter comes back as, or **null** for any other failure.
  *
- * The paginator turns up at the root (`{ meta: {...} }`), inside `data`
- * (`{ data: { current_page, data: [...] } }`) or flattened onto the root — and
- * some fleet-admin endpoints return a bare array with no meta at all. A response
- * with no paginator is treated as a single complete page, which is what a bare
- * array is.
+ * A filter the endpoint cannot honour is refused by name rather than ignored, so
+ * this is an operator-visible fact — the table is empty *because the filter was
+ * rejected*, not because the fleet has no such activity. Silence here would put
+ * those two states on screen identically.
+ */
+export function walletFilterErrorFrom(
+  err: unknown,
+): { param: string | null; message: string } | null {
+  if (!(err instanceof ApiError) || err.status !== 422) return null;
+
+  for (const param of WALLET_QUERY_PARAMS) {
+    const messages = err.errors?.[param];
+    if (messages?.length) return { param, message: messages[0] };
+  }
+  // A 422 on a read-only listing is a rejected parameter even when the body does
+  // not break it out per field.
+  return { param: null, message: err.message };
+}
+
+/**
+ * Pagination state, from the one place this endpoint puts it.
+ *
+ * Confirmed contract: the response is **always** a wrapped Laravel paginator —
+ * `{ success, data: { data: [rows], current_page, last_page, per_page, total } }`.
+ * The counts sit alongside the rows inside `data`; there is no `meta` envelope
+ * and it is never a bare array, so nothing else is looked at. `data.total` and
+ * `data.last_page` are what the table pages against.
  */
 function extractPageMeta(raw: unknown, rowCount: number, perPage: number): PageMeta {
-  const single: PageMeta = { currentPage: 1, lastPage: 1, perPage, total: rowCount };
-  if (!raw || typeof raw !== 'object') return single;
-
-  const root  = raw as Record<string, unknown>;
-  const inner = (root['data'] && typeof root['data'] === 'object' && !Array.isArray(root['data']))
-    ? root['data'] as Record<string, unknown>
+  const envelope = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const page = (envelope['data'] && typeof envelope['data'] === 'object' && !Array.isArray(envelope['data']))
+    ? envelope['data'] as Record<string, unknown>
     : undefined;
 
-  const source = [root['meta'], inner, root].find(
-    (c) => c && typeof c === 'object' && 'current_page' in (c as Record<string, unknown>),
-  ) as Record<string, unknown> | undefined;
-  if (!source) return single;
+  if (!page || !('current_page' in page)) {
+    logger.warn(
+      '[Wallet] The transactions response is not the documented paginator ' +
+      '({ data: { data: [...], current_page, last_page, per_page, total } }); ' +
+      'treating what arrived as a single complete page.',
+    );
+    return { currentPage: 1, lastPage: 1, perPage, total: rowCount };
+  }
 
   const readInt = (v: unknown, fallback: number): number => {
     const n = num(v);
     return n !== undefined && n > 0 ? Math.floor(n) : fallback;
   };
-  const resolvedPerPage = readInt(source['per_page'], perPage);
   return {
-    currentPage: readInt(source['current_page'], 1),
-    lastPage:    readInt(source['last_page'], 1),
-    perPage:     resolvedPerPage,
-    total:       readInt(source['total'], rowCount),
+    currentPage: readInt(page['current_page'], 1),
+    lastPage:    readInt(page['last_page'], 1),
+    perPage:     readInt(page['per_page'], perPage),
+    total:       readInt(page['total'], rowCount),
   };
 }
 
 /**
- * Our UI category translated into the backend's `type` filter, plus whether the
- * server can express it exactly.
+ * Our UI category in the backend's own `type` vocabulary.
  *
- * The vocabularies do not line up. The backend stores `credit` / `debit`, and a
- * debit only becomes a *fast charge* or a *battery swap* once `reference_type`
- * is read — which `mapTransaction` does here, not there. So the two debit
- * sub-kinds narrow to `debit` on the server and must be finished off locally;
- * `exact: false` tells the caller it has to walk every page to be complete.
+ * Every category is an exact server-side filter: the sub-kinds are resolved
+ * where the `reference_type` lives, so `battery_swap` matches every swap debit
+ * across the whole set rather than the ones that happened to land on the page
+ * we fetched. There is no local refinement pass any more.
  */
 export function apiTransactionType(
   uiType: TransactionType | 'all',
-): { param?: string; exact: boolean } {
+): WalletTransactionTypeParam | undefined {
   switch (uiType) {
-    case 'top_up':       return { param: 'credit', exact: true };
-    case 'refund':       return { param: 'refund', exact: true };
-    case 'fast_charge':
-    case 'battery_swap': return { param: 'debit',  exact: false };
+    case 'top_up':       return 'top_up';
+    case 'refund':       return 'refund';
+    case 'fast_charge':  return 'fast_charge';
+    case 'battery_swap': return 'battery_swap';
     case 'all':
-    default:             return { exact: true };
+    default:             return undefined;
   }
 }
 
@@ -2199,10 +2284,10 @@ export const walletApi = {
   /**
    * One page of transactions, with the paginator's own totals.
    *
-   * The page used to fetch `per_page=100` and never look further, then filter
-   * and export over that capped array — so filters and the CSV were both
-   * silently incomplete, and the driver dropdown (built from the same 100 rows)
-   * could not even offer a driver whose activity fell past the cap.
+   * Rows come from `data.data` — the confirmed contract, and the only place they
+   * are. Every filter this takes is honoured server-side, so the page on screen
+   * is a true window onto the filtered set rather than a filtered window onto
+   * one page.
    */
   async getTransactions(
     params: WalletTransactionQuery = {},
@@ -2210,17 +2295,19 @@ export const walletApi = {
     const raw = await apiClient.get<unknown>(
       `/fleet-admin/wallet/transactions?${walletQueryString(params)}`,
     );
-    const rows = extractList<ApiTransaction>(raw).map(mapTransaction);
+    const envelope = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const inner = (envelope['data'] ?? {}) as Record<string, unknown>;
+    const rows = (Array.isArray(inner['data']) ? inner['data'] as ApiTransaction[] : [])
+      .map(mapTransaction);
     return { rows, page: extractPageMeta(raw, rows.length, params.perPage ?? DEFAULT_PER_PAGE) };
   },
 
   /**
    * Every transaction matching `params`, by walking the paginator.
    *
-   * For the CSV export and for the filters the backend cannot express exactly
-   * (see {@link apiTransactionType}). `truncated` is true when the page cap was
-   * reached — the caller must surface that rather than present a short export as
-   * the whole ledger.
+   * For the CSV export, which is the ledger rather than the page on screen.
+   * `truncated` is true when the page cap was reached — the caller must surface
+   * that rather than present a short export as the whole ledger.
    */
   async getAllTransactions(
     params: WalletTransactionQuery = {},

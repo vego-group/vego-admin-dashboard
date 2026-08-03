@@ -142,7 +142,7 @@ export default function DriversPage() {
 
   const handleAddSubmit = async (values: DriverFormValues) => {
     const created = await driversApi.create({
-      name: values.fullName,
+      name: values.fullName.trim(),
       // Full E.164 plus the dial code, instead of the old hardcoded '966' + phone.
       phone: toE164(values.phone, fleetDialCode),
       dialCode: fleetDialCode,
@@ -177,8 +177,10 @@ export default function DriversPage() {
     // On edit, `''` is a deliberate clear and must reach the request body — the
     // `|| undefined` that create uses would turn it back into "not supplied" and
     // the old value would survive. `driversApi.update` guards on `!== undefined`.
+    // `name` and `phone` are the exceptions: they are not clearable, the form
+    // will not submit either one blank, and a blank would be a 422 by name.
     const updated = await driversApi.update(driverId, {
-      name: values.fullName,
+      name: values.fullName.trim(),
       phone: toE164(values.phone, fleetDialCode),
       dialCode: fleetDialCode,
       email: values.email.trim(),

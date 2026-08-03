@@ -160,8 +160,11 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
 
   /** "Enter a valid Jordan mobile number (e.g. 791234567)" — from the country's own facts. */
   const invalidPhoneMessage = (c: Country): string => {
-    const name    = locale === 'ar' ? c.nameAr : c.nameEn;
-    const example = c.phoneExampleNational || c.phonePlaceholder;
+    const name = locale === 'ar' ? c.nameAr : c.nameEn;
+    // An "e.g." must be a number the operator could type. The mask
+    // ("5X XXX XXXX") belongs in the input's placeholder and nowhere else — with
+    // no example number to show, the shorter message is the honest one.
+    const example = c.phoneExampleNational;
     return example
       ? t('drivers.phoneInvalidForCountry', { country: name, example })
       : t('drivers.phoneInvalidForCountryShort', { country: name });
@@ -169,6 +172,10 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
 
   const validate = (): boolean => {
     const next: typeof errors = {};
+    // Name and phone are the two fields the backend will not let a blank value
+    // clear — it answers a 422 rather than wiping the column, because a driver
+    // with no phone can neither log in nor be looked up. Neither leaves here
+    // empty.
     if (!values.fullName.trim()) next.fullName = t('drivers.fullNameRequired');
     if (!values.phone.trim()) next.phone = t('drivers.phoneRequired');
     // The rule is the country's, from GET /countries — never a regex written here.
@@ -201,15 +208,17 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
       await onSubmit(values, driver?.id);
       onClose();
     } catch (err) {
-      // country_not_supported / phone_invalid_for_country are input mistakes, not
-      // failures of the request: they belong beside the field the operator has to
-      // fix, never in the form-wide banner.
+      // country_not_supported / phone_invalid_for_country and a refused blank
+      // name or phone are input mistakes, not failures of the request: they
+      // belong beside the field the operator has to fix, never in the form-wide
+      // banner.
       const fieldError = fieldErrorFrom(err);
       if (fieldError) {
         const detail  = fieldError.expectedFormat ?? fieldError.example;
         const message = detail ? `${fieldError.message} (${detail})` : fieldError.message;
-        if (fieldError.field === 'country') setCountryError(message);
-        else setErrors((prev) => ({ ...prev, phone: message }));
+        if (fieldError.field === 'country')   setCountryError(message);
+        else if (fieldError.field === 'name') setErrors((prev) => ({ ...prev, fullName: message }));
+        else                                  setErrors((prev) => ({ ...prev, phone: message }));
       } else {
         setSubmitError(err instanceof Error ? err.message : 'An unexpected error occurred. Please try again.');
       }

@@ -776,6 +776,7 @@ const ar: Translations = {
     showing: 'عرض {{count}} من {{total}} معاملة',
     resultTruncated:
       'عدد المعاملات المطابقة أكبر من أن يُحمَّل بالكامل — هذا العرض وملف CSV غير مكتملين. يُرجى تضييق النطاق الزمني.',
+    filterRejected: 'رفض الخادم هذا الفلتر، لذلك تعذّر تحميل أي معاملات:',
     typeTopUp: 'شحن رصيد',
     typeFastCharge: 'شحن سريع',
     typeBatterySwap: 'تبديل بطارية',

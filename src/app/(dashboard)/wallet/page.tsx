@@ -15,7 +15,7 @@ import { Pagination } from '@/components/ui/Pagination';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import { useFleetContext } from '@/hooks/useFleetContext';
-import { apiTransactionType, driversApi, walletApi } from '@/lib/api';
+import { apiTransactionType, driversApi, walletApi, walletFilterErrorFrom } from '@/lib/api';
 import { fractionDigitsOf, fromMinorUnits, toMinorUnits } from '@/lib/money';
 import type {
   CurrencyCode, Driver, TransactionType, TransactionStatus, WalletTransaction, WalletStats,
@@ -207,18 +207,19 @@ export default function WalletPage() {
   const { t, locale } = useI18n();
   const { formatMoney, currency, currencyDecimals } = useFleetContext();
 
-  // Data. `served` is one page straight from the paginator; `walked` is every
-  // matching row, used only for the two filters the server cannot express (see
-  // the effects below). Exactly one is populated at a time.
+  // Data. Every filter is honoured server-side, so `served` — one page straight
+  // from the paginator — is the whole story for the table.
   const [served, setServed] = useState<{ rows: WalletTransaction[]; total: number; lastPage: number }>(
     { rows: [], total: 0, lastPage: 1 },
   );
-  const [walked, setWalked] = useState<WalletTransaction[]>([]);
   const [stats, setStats] = useState<WalletStats | null>(null);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [truncated, setTruncated] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // A filter the endpoint refused, in its own words. An empty table for this
+  // reason must not read as "this fleet has no such activity".
+  const [filterError, setFilterError] = useState<string | null>(null);
 
   // Filters
   const [fromDate, setFromDate] = useState(defaultFrom);
@@ -231,19 +232,19 @@ export default function WalletPage() {
   /**
    * The filters the endpoint understands, in its own vocabulary.
    *
-   * `from`, `to`, `driver_id` and `status` map one-to-one. `type` does not — see
-   * `apiTransactionType`; `typeIsExact` is false for the two debit sub-kinds,
-   * which the server can only narrow to `debit`.
+   * All five map one-to-one now: the swap / fast-charge sub-kinds are resolved
+   * server-side, so `type` is an exact filter across the whole set and every
+   * request is true server-side pagination. `apiTransactionType` only ever
+   * produces a value from the endpoint's own table — anything else is a 422.
    */
-  const apiType   = apiTransactionType(typeFilter);
-  const exactMode = apiType.exact;
+  const apiType = apiTransactionType(typeFilter);
   const query = useMemo(() => ({
     from:     fromDate || undefined,
     to:       toDate   || undefined,
     driverId: driverFilter !== 'all' ? driverFilter : undefined,
     status:   statusFilter !== 'all' ? statusFilter : undefined,
-    type:     apiType.param,
-  }), [fromDate, toDate, driverFilter, statusFilter, apiType.param]);
+    type:     apiType,
+  }), [fromDate, toDate, driverFilter, statusFilter, apiType]);
 
   // Stats and the driver roster are filter-independent, so they load once.
   // Crucially the roster comes from the *drivers* endpoint: deriving it from
@@ -266,14 +267,12 @@ export default function WalletPage() {
   }, []);
 
   // Anything that changes what should be on screen puts the table back into
-  // loading; whichever fetch effect owns the current mode clears it. Declared
-  // first so it runs before them.
-  useEffect(() => { setDataLoading(true); }, [query, page, exactMode, typeFilter]);
+  // loading; the fetch effect clears it. Declared first so it runs before it.
+  useEffect(() => { setDataLoading(true); }, [query, page]);
 
-  // Exact mode — the server's filter is exactly ours, so this is true
-  // server-side pagination: one page per request, totals from the paginator.
+  // One page per request, totals from the paginator — the server's filter is
+  // exactly ours for every category, so nothing is refined here.
   useEffect(() => {
-    if (!exactMode) return;
     let cancelled = false;
     (async () => {
       try {
@@ -281,52 +280,23 @@ export default function WalletPage() {
         if (cancelled) return;
         setServed({ rows: res.rows, total: res.page.total, lastPage: Math.max(1, res.page.lastPage) });
         setTruncated(false);
+        setFilterError(null);
       } catch (err) {
         if (cancelled) return;
         logger.error('[Wallet] Failed to load transactions:', err);
+        // A refused filter says which parameter it refused — show that, not an
+        // empty table that looks like an answer.
+        setFilterError(walletFilterErrorFrom(err)?.message ?? null);
         setServed({ rows: [], total: 0, lastPage: 1 });
       } finally {
         if (!cancelled) setDataLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [exactMode, query, page]);
+  }, [query, page]);
 
-  // Refine mode — 'fast_charge' and 'battery_swap' only exist once
-  // `reference_type` is read on this side, so the server can only narrow to
-  // `debit`. Walk every matching page once per filter change and refine here;
-  // refining one page at a time would silently drop rows the operator asked for.
-  // `page` is deliberately not a dependency: paging is a local slice below, not
-  // another walk.
-  useEffect(() => {
-    if (exactMode) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await walletApi.getAllTransactions(query);
-        if (cancelled) return;
-        setWalked(res.rows.filter((tx) => tx.type === typeFilter));
-        setTruncated(res.truncated);
-      } catch (err) {
-        if (cancelled) return;
-        logger.error('[Wallet] Failed to load transactions:', err);
-        setWalked([]);
-      } finally {
-        if (!cancelled) setDataLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [exactMode, query, typeFilter]);
-
-  const { rows, total, totalPages } = useMemo(() => (
-    exactMode
-      ? { rows: served.rows, total: served.total, totalPages: served.lastPage }
-      : {
-          rows:       walked.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-          total:      walked.length,
-          totalPages: Math.max(1, Math.ceil(walked.length / PAGE_SIZE)),
-        }
-  ), [exactMode, served, walked, page]);
+  // Straight from the paginator: no local slice, no local filter.
+  const { rows, total, lastPage: totalPages } = served;
 
   const driverOptions = useMemo(() => [
     { value: 'all', label: t('wallet.allDrivers') },
@@ -341,13 +311,11 @@ export default function WalletPage() {
     setExporting(true);
     try {
       const res = await walletApi.getAllTransactions(query);
-      const exportRows = exactMode
-        ? res.rows
-        : res.rows.filter((tx) => tx.type === typeFilter);
-      exportCsv(exportRows, currency, currencyDecimals);
+      exportCsv(res.rows, currency, currencyDecimals);
       if (res.truncated) setTruncated(true);
     } catch (err) {
       logger.error('[Wallet] CSV export failed:', err);
+      setFilterError(walletFilterErrorFrom(err)?.message ?? null);
     } finally {
       setExporting(false);
     }
@@ -478,6 +446,17 @@ export default function WalletPage() {
             </Button>
           </div>
         </div>
+
+        {/* A filter the endpoint refused, in its own words. Without this the
+            operator reads "no transactions" as an answer about their fleet. */}
+        {filterError && (
+          <p className="mt-3 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              <span className="font-semibold">{t('wallet.filterRejected')}</span> {filterError}
+            </span>
+          </p>
+        )}
 
         {/* A capped result must say so — a short export that looks complete is
             the exact failure this page had. */}
