@@ -6,6 +6,7 @@ import { AlertTriangle, Sparkles } from 'lucide-react';
 import { ZONE_TYPES, ZONE_TYPE_LIST } from '@/lib/zone-types';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
+import { fitToPoints, type LatLngTuple } from '@/lib/map-fit';
 import type { Vehicle, Zone, ZonePoint } from '@/types';
 
 export interface ZoneMapProps {
@@ -95,6 +96,10 @@ export default function ZoneMapInner({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const previewDots   = useRef<any[]>([]);
 
+  // Fit the viewport to real geometry exactly once — refitting mid-draw would
+  // move the map under the operator's cursor.
+  const hasFittedRef  = useRef(false);
+
   // Stable callback refs (avoid stale closures in Leaflet handlers)
   const onZoneClickRef          = useRef(onZoneClick);
   const onDrawingPointAddRef    = useRef(onDrawingPointAdd);
@@ -114,6 +119,8 @@ export default function ZoneMapInner({
       const L = (await import('leaflet')) as any;
       if (cancelled || !containerRef.current) return;
 
+      // Placeholder viewport only — replaced by fitToPoints() over the real
+      // zone polygons (and vehicle pins) as soon as any arrive.
       const map = L.map(containerRef.current, {
         center: [24.74, 46.69],
         zoom: 13,
@@ -138,6 +145,7 @@ export default function ZoneMapInner({
       cancelled = true;
       mapRef.current?.remove();
       mapRef.current = null;
+      hasFittedRef.current = false;
       setMapReady(false);
     };
   }, []);
@@ -197,6 +205,28 @@ export default function ZoneMapInner({
       }
     })();
   }, [mapReady, zones, selectedZoneId]);
+
+  /* 2b ── Frame the real geometry, once. See @/lib/map-fit.
+     Kept out of the drawing effects so it never re-runs mid-interaction, and it
+     considers polygons and vehicle pins together — a fleet may have zones but no
+     located vehicles, or the reverse. */
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || hasFittedRef.current || drawingMode) return;
+
+    const points: LatLngTuple[] = [
+      ...zones.filter((z) => z.visible).flatMap((z) => toLLArr(z.polygon)),
+      ...vehicles.flatMap((v) => (v.coordinates ? [[v.coordinates.lat, v.coordinates.lng] as LatLngTuple] : [])),
+    ];
+    if (points.length === 0) return;
+
+    (async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const L = (await import('leaflet')) as any;
+      const map = mapRef.current;
+      if (!map || hasFittedRef.current) return;
+      hasFittedRef.current = fitToPoints(L, map, points, { maxZoom: 13 });
+    })();
+  }, [mapReady, zones, vehicles, drawingMode]);
 
   /* 3 ── Vehicle pins */
   useEffect(() => {

@@ -120,7 +120,14 @@ export interface Vehicle {
   status: VehicleStatus;
   batteryLevel: number;
   location: string;
-  coordinates: { lat: number; lng: number };
+  /**
+   * Last known position, **absent when nothing has ever reported one**.
+   *
+   * There is deliberately no fallback coordinate: a vehicle that has never sent
+   * GPS is not "in Riyadh", it is unlocated. Consumers must exclude it from maps
+   * and say so in lists rather than draw it somewhere plausible.
+   */
+  coordinates?: { lat: number; lng: number };
   assignedDriverId?: string;
   assignedDriverName?: string;
   lastTripAt: string;
@@ -138,8 +145,10 @@ export interface BatteryStation {
   id: string;
   name: string;
   district: string;
+  /** As recorded, `''` when unknown. Never defaulted to a city we guessed. */
   city: string;
-  coordinates: { lat: number; lng: number };
+  /** @see Vehicle.coordinates — absent means unlocated, not "somewhere central". */
+  coordinates?: { lat: number; lng: number };
   available: number;
   charging: number;
   inUse: number;
@@ -207,6 +216,12 @@ export interface Driver {
   swaps: number;
   walletBalance: number;
   avatarUrl?: string;
+  /**
+   * When the driver record was created, if the endpoint returns it.
+   * `GET /fleet-admin/drivers` does not today, so newest/oldest ordering falls
+   * back to the autoincrement id, which is creation order by construction.
+   */
+  createdAt?: string;
   documents: DriverDocuments;
 }
 
@@ -393,12 +408,25 @@ export interface DriverSession {
 export type TransactionType   = 'top_up' | 'fast_charge' | 'battery_swap' | 'refund';
 export type TransactionStatus = 'completed' | 'pending' | 'failed' | 'cancelled';
 
+/**
+ * Which way the money moved: `'in'` = credit / refund, `'out'` = debit.
+ *
+ * The backend's confirmed convention is that **a debit is a positive amount with
+ * `type: "debit"`, never a negative** — so the sign of `amount` carries no
+ * information and must never be used to tell a debit from a credit. Colour,
+ * sign prefixes and any ledger arithmetic key off this field.
+ */
+export type TransactionDirection = 'in' | 'out';
+
 export interface WalletTransaction {
   id: string;
   createdAt: string;
   driverName: string;
   driverId: string;
-  /** Positive = top-up credit, negative = debit (charge / swap) */
+  /**
+   * Magnitude only — always ≥ 0, because that is how the backend sends it.
+   * Pair it with {@link WalletTransaction.direction} to know the sign.
+   */
   amount: number;
   /**
    * The exact fixed-precision value behind `amount`, as the backend sent it.
@@ -406,6 +434,15 @@ export interface WalletTransaction {
    * the lossy convenience view. Absent on locally-constructed fixtures.
    */
   money?: Money;
+  /** Credit or debit. The only safe source of the sign. */
+  direction: TransactionDirection;
+  /**
+   * The backend's `signed_amount` — an exact decimal string carrying the sign
+   * ('-3.250' for a debit). Derived from `direction` + `money` when the payload
+   * predates the field, so it is always populated and always agrees with
+   * `direction`.
+   */
+  signedAmount: string;
   type: TransactionType;
   paymentMethod?: string;
   note?: string;
@@ -443,8 +480,10 @@ export interface SwappingStation {
   cabinetId: string;
   name: string;
   district: string;
+  /** As recorded, `''` when unknown. Never defaulted to a city we guessed. */
   city: string;
-  coordinates: { lat: number; lng: number };
+  /** @see Vehicle.coordinates — absent means unlocated, not "somewhere central". */
+  coordinates?: { lat: number; lng: number };
   readyBatteries: number;
   chargingBatteries: number;
   emptySlots: number;
@@ -462,8 +501,10 @@ export interface FastChargingCabinet {
   cabinetId: string;
   name: string;
   district: string;
+  /** As recorded, `''` when unknown. Never defaulted to a city we guessed. */
   city: string;
-  coordinates: { lat: number; lng: number };
+  /** @see Vehicle.coordinates — absent means unlocated, not "somewhere central". */
+  coordinates?: { lat: number; lng: number };
   availablePorts: number;
   chargingPorts: number;
   errorPorts: number;

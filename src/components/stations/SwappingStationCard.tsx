@@ -1,7 +1,8 @@
 'use client';
 
-import { Clock, MapPin, RefreshCw } from 'lucide-react';
+import { Clock, RefreshCw } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
+import { LocationLabel } from '@/components/ui/LocationLabel';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import type { SwappingStation } from '@/types';
@@ -39,10 +40,11 @@ export function SwappingStationCard({ station, onClick }: Props) {
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-sm font-bold text-slate-900 dark:text-slate-50">{station.name}</h3>
-          <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-slate-500">
-            <MapPin className="h-3 w-3 shrink-0" />
-            <span className="truncate">{station.district}, {station.city}</span>
-          </p>
+          <LocationLabel
+            coordinates={station.coordinates}
+            parts={[station.district, station.city]}
+            className="mt-0.5 flex text-xs text-slate-500"
+          />
         </div>
         <CirclePercent value={availability} />
       </div>

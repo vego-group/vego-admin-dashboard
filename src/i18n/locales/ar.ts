@@ -24,6 +24,8 @@ const ar: Translations = {
     optional: 'اختياري',
     loading: 'جارٍ التحميل...',
     noData: 'لا توجد بيانات',
+    locationUnknown: 'الموقع غير معروف',
+    locationUnknownHint: 'لم يُبلَّغ عن أي موقع — لا يظهر على الخريطة',
     error: 'حدث خطأ ما',
     retry: 'إعادة المحاولة',
     today: 'اليوم',
@@ -213,10 +215,13 @@ const ar: Translations = {
     city: 'المدينة',
     vehicleAssignment: 'تعيين المركبة',
     assignVehicle: 'تعيين مركبة',
+    assignedVehicle: 'المركبة المعيّنة',
+    assignVehicleElsewhere:
+      'يتم التعيين من إجراء «تعيين مركبة» في قائمة السائقين، وليس من هذا النموذج.',
     noVehicleAssigned: 'لا توجد مركبة معيّنة',
     noteLabel: 'ملاحظة',
     assignmentHint:
-      'بمجرد تعيين مركبة لهذا السائق، سيتمكن من بدء الرحلات باستخدامها. يمكنك تغيير تعيين المركبة في أي وقت.',
+      'استخدم إجراء «تعيين مركبة» في قائمة السائقين لتعيين مركبة لهذا السائق. بعد التعيين سيتمكن من بدء الرحلات باستخدامها، ويمكنك تغيير التعيين في أي وقت.',
     fullNameRequired: 'الاسم الكامل مطلوب',
     phoneRequired: 'رقم الهاتف مطلوب',
     phoneInvalid: 'الرجاء إدخال رقم هاتف صحيح',
@@ -684,6 +689,8 @@ const ar: Translations = {
     status: 'الحالة',
     admin: 'المشرف',
     showing: 'عرض {{count}} من {{total}} معاملة',
+    resultTruncated:
+      'عدد المعاملات المطابقة أكبر من أن يُحمَّل بالكامل — هذا العرض وملف CSV غير مكتملين. يُرجى تضييق النطاق الزمني.',
     typeTopUp: 'شحن رصيد',
     typeFastCharge: 'شحن سريع',
     typeBatterySwap: 'تبديل بطارية',

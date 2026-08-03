@@ -3,6 +3,7 @@
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useRef, useState } from 'react';
 import type { Map as LeafletMap, Marker as LeafletMarker } from 'leaflet';
+import { fitToPoints, type LatLngTuple } from '@/lib/map-fit';
 import type { SwappingStation } from '@/types';
 
 export interface SwappingStationMapProps {
@@ -66,6 +67,7 @@ export default function SwappingStationMapInner({ stations, height = 420 }: Swap
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef       = useRef<LeafletMap | null>(null);
   const markersRef   = useRef<LeafletMarker[]>([]);
+  const hasFittedRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
@@ -77,6 +79,8 @@ export default function SwappingStationMapInner({ stations, height = 420 }: Swap
       const L = (await import('leaflet')) as any;
       if (cancelled || !containerRef.current) return;
 
+      // Placeholder viewport only — replaced by fitToPoints() over the real
+      // markers as soon as any arrive. Never used to place a marker.
       const map: LeafletMap = L.map(containerRef.current, {
         center: [24.74, 46.672],
         zoom: 12,
@@ -101,6 +105,7 @@ export default function SwappingStationMapInner({ stations, height = 420 }: Swap
       cancelled = true;
       mapRef.current?.remove();
       mapRef.current = null;
+      hasFittedRef.current = false;
       setMapReady(false);
     };
   }, []);
@@ -117,7 +122,10 @@ export default function SwappingStationMapInner({ stations, height = 420 }: Swap
       markersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
 
+      // A cabinet with no reported position is not drawn — the swapping-station
+      // list labels it "location unknown" instead of pinning it to a guess.
       for (const s of stations) {
+        if (!s.coordinates) continue;
         const avail = s.totalCapacity > 0 ? (s.readyBatteries / s.totalCapacity) * 100 : 0;
         const [grad, ring] =
           avail >= 60
@@ -145,6 +153,15 @@ export default function SwappingStationMapInner({ stations, height = 420 }: Swap
         });
         m.addTo(map);
         markersRef.current.push(m);
+      }
+
+      /* Frame what is actually on the map — once. See @/lib/map-fit. */
+      if (!hasFittedRef.current) {
+        const points = markersRef.current.map((m) => {
+          const ll = m.getLatLng();
+          return [ll.lat, ll.lng] as LatLngTuple;
+        });
+        hasFittedRef.current = fitToPoints(L, map, points, { maxZoom: 13 });
       }
     })();
   }, [mapReady, stations]);

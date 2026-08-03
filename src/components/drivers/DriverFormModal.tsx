@@ -12,18 +12,26 @@ import { driversApi } from '@/lib/api';
 import { fieldErrorFrom } from '@/lib/api-errors';
 import { flagEmoji, matchesPhoneRegex, toNationalNumber } from '@/lib/country';
 import { cn } from '@/lib/cn';
-import type { Country, Driver, DriverStatus, DocumentStatus, DriverDocuments } from '@/types';
+import type { Country, Driver, DocumentStatus, DriverDocuments } from '@/types';
 
 // ── Form value shape ──────────────────────────────────────────────────────────
 
+/**
+ * What this form actually submits.
+ *
+ * `status` and `vehicleModel` used to live here. Neither was ever sent: the
+ * driver create/update endpoints accept no status (it belongs to
+ * `/toggle-status`, `/block`, `/unblock`) and no model name (a motorcycle is
+ * assigned by id through `POST /fleet-admin/motorcycles/{id}/assign-driver`,
+ * which the Assign Vehicle action in the drivers table already does). A field
+ * that cannot be saved does not belong on a form.
+ */
 export interface DriverFormValues {
   fullName: string;
   phone: string;
   email: string;
   address: string;
   city: string;
-  vehicleModel: string;
-  status: DriverStatus;
   // Documents (all optional)
   hasLicense: boolean;
   licenseFrontName: string;
@@ -44,8 +52,6 @@ const emptyForm: DriverFormValues = {
   email: '',
   address: '',
   city: '',
-  vehicleModel: '',
-  status: 'active',
   hasLicense: false,
   licenseFrontName: '',
   licenseBackName: '',
@@ -66,8 +72,6 @@ interface DriverFormModalProps {
   driver?: Driver | null;
   onSubmit: (values: DriverFormValues, driverId?: string) => void | Promise<void>;
 }
-
-const VEHICLE_OPTIONS = ['', 'VEGO Pro 400', 'VEGO Cargo 500', 'VegoMax Pro', 'VegoLite'];
 
 // ── Main modal ────────────────────────────────────────────────────────────────
 
@@ -108,8 +112,6 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
         email: driver.email ?? '',
         address: driver.address ?? '',
         city: driver.city ?? '',
-        vehicleModel: driver.vehicleModel,
-        status: driver.status,
         hasLicense: driver.documents.license.hasLicense,
         licenseFrontName: driver.documents.license.status !== 'not_uploaded' ? 'existing-front.jpg' : '',
         licenseBackName: '',
@@ -215,6 +217,12 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
   };
 
   const existingDocStatus = isEdit ? driver!.documents : null;
+
+  // Plate identifies the machine; the model is the fallback when the list row
+  // carried no plate. Empty on create — nothing is assigned yet.
+  const assignedVehicleLabel = [driver?.assignedMotorcyclePlate, driver?.vehicleModel]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
     <Modal open={open} onClose={onClose} size="lg">
@@ -358,18 +366,35 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
           </div>
 
           {/* ── Vehicle Assignment ───────────────────────────────────────── */}
+          {/*
+            Read-only on purpose. This was a dropdown of hardcoded model names
+            whose value this form had no endpoint to save. Assignment is a
+            motorcycle id sent to POST /fleet-admin/motorcycles/{id}/assign-driver
+            — the "Assign Vehicle" action in the drivers table.
+          */}
           <div className="mt-6">
             <SectionHeader icon={<Car className="h-4 w-4" />} title={t('drivers.vehicleAssignment')} />
           </div>
           <div className="mt-3 grid grid-cols-1 gap-4">
-            <Field label={t('drivers.assignVehicle')} required>
-              <NativeSelect value={values.vehicleModel} onChange={(e) => update('vehicleModel', e.target.value)}>
-                {VEHICLE_OPTIONS.map((v) => (
-                  <option key={v} value={v}>
-                    {v === '' ? t('drivers.noVehicleAssigned') : v}
-                  </option>
-                ))}
-              </NativeSelect>
+            <Field
+              label={t('drivers.assignedVehicle')}
+              hint={t('drivers.assignVehicleElsewhere')}
+            >
+              <div
+                className="flex h-11 w-full items-center gap-2 rounded-xl border bg-slate-50 px-3.5 text-sm dark:bg-slate-800/60"
+                style={{ borderColor: 'rgb(var(--border))' }}
+              >
+                {assignedVehicleLabel ? (
+                  <>
+                    <span className="truncate font-medium text-slate-700 dark:text-slate-200">
+                      {assignedVehicleLabel}
+                    </span>
+                    <Lock className="ms-auto h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+                  </>
+                ) : (
+                  <span className="text-slate-400">{t('drivers.noVehicleAssigned')}</span>
+                )}
+              </div>
             </Field>
           </div>
 
@@ -541,23 +566,6 @@ function Field({
         hint && <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">{hint}</p>
       )}
     </div>
-  );
-}
-
-function NativeSelect({ className, children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <select
-      className={cn(
-        'h-11 w-full appearance-none rounded-xl border bg-white px-3.5 text-sm text-slate-700 transition-colors',
-        'focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20',
-        'dark:bg-slate-900/40 dark:text-slate-200',
-        className
-      )}
-      style={{ borderColor: 'rgb(var(--border))' }}
-      {...props}
-    >
-      {children}
-    </select>
   );
 }
 

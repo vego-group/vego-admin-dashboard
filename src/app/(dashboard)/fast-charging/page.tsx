@@ -8,6 +8,7 @@ import { LiveFleetMap } from '@/components/dashboard/LiveFleetMap';
 import { FastChargingCabinetCard } from '@/components/stations/FastChargingCabinetCard';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { LocationLabel } from '@/components/ui/LocationLabel';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Pagination } from '@/components/ui/Pagination';
@@ -213,7 +214,13 @@ export default function FastChargingPage() {
                           <tr key={c.id} className="border-b transition-colors hover:bg-slate-50/60 dark:hover:bg-slate-800/40"
                             style={{ borderColor: 'rgb(var(--border))' }}>
                             <td className="px-5 py-3 font-mono font-medium text-slate-700 dark:text-slate-200">{c.cabinetId}</td>
-                            <td className="px-5 py-3 text-slate-600 dark:text-slate-300">{c.district}</td>
+                            <td className="px-5 py-3 text-slate-600 dark:text-slate-300">
+                              <LocationLabel
+                                coordinates={c.coordinates}
+                                parts={[c.district, c.city]}
+                                withIcon={false}
+                              />
+                            </td>
                             <td className="px-5 py-3">
                               <span className={cn('font-semibold', statusColor(c.status))}>
                                 ● {statusLabel(c.status)}

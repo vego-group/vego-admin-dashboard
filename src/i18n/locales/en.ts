@@ -22,6 +22,8 @@ const en = {
     optional: 'Optional',
     loading: 'Loading...',
     noData: 'No data available',
+    locationUnknown: 'Location unknown',
+    locationUnknownHint: 'No position reported — not shown on the map',
     error: 'Something went wrong',
     retry: 'Retry',
     today: 'Today',
@@ -211,10 +213,13 @@ const en = {
     city: 'City',
     vehicleAssignment: 'Vehicle Assignment',
     assignVehicle: 'Assign Vehicle',
+    assignedVehicle: 'Assigned Vehicle',
+    assignVehicleElsewhere:
+      'Assigned from the Assign Vehicle action in the drivers list — not from this form.',
     noVehicleAssigned: 'No Vehicle Assigned',
     noteLabel: 'Note',
     assignmentHint:
-      'Once you assign a vehicle to this driver, they will be able to start trips using the assigned bike. You can change the vehicle assignment at any time.',
+      'Use the Assign Vehicle action in the drivers list to give this driver a vehicle. Once assigned, they can start trips with it, and you can change the assignment at any time.',
     fullNameRequired: 'Full name is required',
     phoneRequired: 'Phone number is required',
     phoneInvalid: 'Please enter a valid phone number',
@@ -686,6 +691,8 @@ const en = {
     status: 'Status',
     admin: 'Admin',
     showing: 'Showing {{count}} of {{total}} transactions',
+    resultTruncated:
+      'Too many matching transactions to load in full — this view and the CSV export are incomplete. Narrow the date range.',
     typeTopUp: 'Top-Up',
     typeFastCharge: 'Fast Charge',
     typeBatterySwap: 'Battery Swap',

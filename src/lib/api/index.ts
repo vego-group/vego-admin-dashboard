@@ -22,6 +22,7 @@ import { logger } from '@/lib/logger';
 import {
   decimalsForCurrency,
   fractionDigitsOf,
+  fromMinorUnits,
   moneyToNumber,
   parseAmount,
   readMoney,
@@ -56,6 +57,8 @@ import type {
   RevenuePoint,
   SavedCard,
   SwappingStation,
+  TransactionDirection,
+  TransactionType,
   UsagePoint,
   Vehicle,
   VehicleStatus,
@@ -75,6 +78,8 @@ interface ApiDriver {
   id: number | string;
   name: string;
   phone: string;
+  /** Not returned by the fleet-admin list today — mapped when it appears. */
+  created_at?: string | null;
   /** Dial prefix, e.g. "+966" — despite the name this is NOT a country. */
   country_code?: string | null;
   /** ISO 3166-1 alpha-2, e.g. "SA" | "JO" — this is the country. */
@@ -240,10 +245,20 @@ interface ApiTransaction {
   /** Backend sends "credit" | "debit" (or legacy "top_up" | "charging" | "swap") */
   type?: string;
   /**
+   * Confirmed direction of the movement — "in" (credit, refund) or "out"
+   * (debit). Added alongside `signed_amount`; absent on older payloads.
+   */
+  direction?: string | null;
+  /**
    * Money object: amount is a fixed-precision string ("100.000") accompanied by
    * currency / minor_units / decimals.
+   *
+   * **`amount` is always the magnitude.** A debit arrives positive with
+   * `type: "debit"`; the backend normalises a negative to its magnitude on write.
    */
   amount?: number | string;
+  /** The same value with the sign applied, e.g. "-3.250". Exact decimal string. */
+  signed_amount?: number | string | null;
   currency?: string | null;
   minor_units?: number | null;
   decimals?: number | null;
@@ -420,6 +435,7 @@ function mapDriver(d: ApiDriver): Driver {
     walletBalance: moneyToNumber(readMoney(d.wallet, { amount: d.wallet_balance })),
     dialCode:       toDialCode(d.country_code),
     isoCountryCode: toIsoCountryCode(d.iso_country_code),
+    createdAt:     d.created_at ?? undefined,
     documents,
   };
 }
@@ -431,8 +447,17 @@ function mapMotorcycle(m: ApiMotorcycle): Vehicle {
   const model = [m.brand, m.model_name ?? m.model].filter(Boolean).join(' ').trim() || 'VegoMax Pro';
   // Real API driver is `assigned_user`; older shape used `driver`.
   const driver = m.assigned_user ?? m.driver ?? undefined;
-  const lat = num(gps?.latitude) ?? num(m.current_lat) ?? iot?.latitude ?? 24.7136;
-  const lng = num(gps?.longitude) ?? num(m.current_lng) ?? iot?.longitude ?? 46.6753;
+
+  // Position, or nothing. This used to fall back to 24.7136 / 46.6753 — central
+  // Riyadh — which silently relocated every vehicle that had never reported GPS.
+  // For a Jordanian fleet that put the whole offline half of the fleet in another
+  // country. A missing position is now missing: the maps drop the marker and the
+  // lists say so. Latitude 0 / longitude 0 are legal values, so the guard tests
+  // for `undefined`, not falsiness.
+  const lat = num(gps?.latitude)  ?? num(m.current_lat) ?? num(iot?.latitude);
+  const lng = num(gps?.longitude) ?? num(m.current_lng) ?? num(iot?.longitude);
+  const coordinates = lat !== undefined && lng !== undefined ? { lat, lng } : undefined;
+
   return {
     id:                 String(m.id),
     plateNumber:        m.plate_number ?? `VH-${m.id}`,
@@ -441,7 +466,7 @@ function mapMotorcycle(m: ApiMotorcycle): Vehicle {
     // Real API: battery.battery_percentage is the SOC.
     batteryLevel:       m.battery?.battery_percentage ?? m.battery?.soc_pct ?? 0,
     location:           m.city ?? '',
-    coordinates:        { lat, lng },
+    coordinates,
     assignedDriverId:   driver ? String(driver.id) : undefined,
     assignedDriverName: driver?.name,
     lastTripAt:         m.last_trip_at ?? new Date().toISOString(),
@@ -456,24 +481,69 @@ function mapMotorcycle(m: ApiMotorcycle): Vehicle {
   };
 }
 
-function mapCabinet(c: ApiCabinet): SwappingStation {
-  // Coordinates: backend returns lat/lng as strings ("24.71360000")
-  const lat = typeof c.lat === 'string' ? parseFloat(c.lat) : (c.lat ?? c.latitude ?? 24.7136);
-  const lng = typeof c.lng === 'string' ? parseFloat(c.lng) : (c.lng ?? c.longitude ?? 46.6753);
+/**
+ * The position a site record carries, or **undefined**.
+ *
+ * Cabinets and piles used to fall back to 24.7136 / 46.6753 — central Riyadh —
+ * exactly as vehicles did, in three separate copies of the same expression. A
+ * site with no coordinate is unlocated; it is dropped from maps and labelled in
+ * lists. Both fields must resolve: a lone latitude is not a position.
+ *
+ * The backend sends these as strings ("24.71360000"), hence `num()`.
+ */
+function readSiteCoordinates(
+  s: { lat?: string | number; lng?: string | number; latitude?: number; longitude?: number },
+): { lat: number; lng: number } | undefined {
+  const lat = num(s.lat) ?? num(s.latitude);
+  const lng = num(s.lng) ?? num(s.longitude);
+  return lat !== undefined && lng !== undefined ? { lat, lng } : undefined;
+}
 
+function mapCabinet(c: ApiCabinet): SwappingStation {
   return {
     id:                 String(c.id),
     cabinetId:          c.cabinet_id ?? `#CF-${String(c.id).padStart(4, '0')}`,
     name:               c.name ?? `Cabinet ${c.id}`,
     district:           c.district ?? c.address ?? c.location ?? '',
-    city:               c.city ?? 'Riyadh',
-    coordinates:        { lat, lng },
+    // No 'Riyadh' default. Stamping a city name onto a record is worse than
+    // stamping a coordinate: the wrong *name* reads as fact in a list, an export
+    // and a search, and nothing about it looks like a placeholder.
+    city:               c.city ?? '',
+    coordinates:        readSiteCoordinates(c),
     readyBatteries:     c.ready_batteries     ?? c.ready_batteries_count     ?? 0,
     chargingBatteries:  c.charging_batteries  ?? c.charging_batteries_count  ?? 0,
     emptySlots:         c.empty_slots         ?? c.empty_slots_count         ?? 0,
     totalCapacity:      c.total_capacity      ?? c.total_slots               ?? 0,
     avgWaitTimeMinutes: c.avg_wait_time_minutes ?? c.avg_wait_minutes        ?? 0,
     todaySwaps:         c.today_swaps         ?? c.today_swaps_count         ?? 0,
+  };
+}
+
+/**
+ * `BatteryStation` — the shape the live map speaks — as a projection of the
+ * swapping station.
+ *
+ * `stationsApi.list` used to re-map `ApiCabinet` by hand, which is how a third
+ * copy of the Riyadh fallback survived the first two being noticed. It is a
+ * strict subset: every field here is either a rename of a `SwappingStation`
+ * field or a constant, so there is nothing left to drift.
+ */
+function toBatteryStation(s: SwappingStation): BatteryStation {
+  return {
+    id:                 s.id,
+    name:               s.name,
+    district:           s.district,
+    city:               s.city,
+    coordinates:        s.coordinates,
+    available:          s.readyBatteries,
+    charging:           s.chargingBatteries,
+    // The cabinet endpoint reports no in-use count; ready + charging is the whole
+    // picture it gives us.
+    inUse:              0,
+    totalCapacity:      s.totalCapacity,
+    avgWaitTimeMinutes: s.avgWaitTimeMinutes,
+    todaySwaps:         s.todaySwaps,
+    type:               'swap',
   };
 }
 
@@ -491,17 +561,13 @@ function mapPile(p: ApiPile): FastChargingCabinet {
   const totalPorts = p.total_ports
     ?? (chargers.length || (p.charger_count ?? 0));
 
-  // Coordinates: backend returns lat/lng as strings ("24.71400000")
-  const lat = typeof p.lat === 'string' ? parseFloat(p.lat) : (p.lat ?? p.latitude ?? 24.7136);
-  const lng = typeof p.lng === 'string' ? parseFloat(p.lng) : (p.lng ?? p.longitude ?? 46.6753);
-
   return {
     id:                   String(p.id),
     cabinetId:            p.pile_id ?? p.dev_id ?? `FC-${String(p.id).padStart(5, '0')}`,
     name:                 p.name ?? `Pile ${p.id}`,
     district:             p.district ?? p.address ?? p.location ?? '',
-    city:                 p.city ?? 'Riyadh',
-    coordinates:          { lat, lng },
+    city:                 p.city ?? '',
+    coordinates:          readSiteCoordinates(p),
     availablePorts:       available,
     chargingPorts:        charging,
     errorPorts:           error,
@@ -510,6 +576,27 @@ function mapPile(p: ApiPile): FastChargingCabinet {
     todaySessions:        p.today_sessions ?? p.today_sessions_count ?? 0,
     status:               toFcStatus(p.status ?? p.live_status),
   };
+}
+
+/** Transaction `type` values that move money **out** of the wallet. */
+const DEBIT_TYPES = new Set([
+  'debit', 'fast_charging', 'fast_charge', 'charging', 'swap', 'battery_swap',
+]);
+
+/**
+ * Which way the money moved.
+ *
+ * The backend's `direction` is authoritative when present. Otherwise the *type*
+ * decides — never the sign of the amount. Confirmed convention (§8 of
+ * dashboard-country-currency-answers-updated.md): a debit arrives as a
+ * **positive** amount with `type: "debit"`, and a negative passed in is
+ * normalised to its magnitude on write. Reading the sign was exactly why debits
+ * rendered green as credits.
+ */
+function toDirection(tx: ApiTransaction): TransactionDirection {
+  const raw = (tx.direction ?? '').toLowerCase();
+  if (raw === 'in' || raw === 'out') return raw;
+  return DEBIT_TYPES.has(tx.type ?? '') ? 'out' : 'in';
 }
 
 function mapTransaction(tx: ApiTransaction): WalletTransaction {
@@ -532,7 +619,19 @@ function mapTransaction(tx: ApiTransaction): WalletTransaction {
   const driver = tx.wallet?.user ?? tx.user ?? tx.driver;
 
   // Fixed-precision money object — resolved through integer minor units.
-  const money = readMoney(tx);
+  // `amount` is the magnitude by contract, but a legacy row that still carries a
+  // negative must not become a negative magnitude, so take the absolute value.
+  const raw   = readMoney(tx);
+  const money = raw.minorUnits < 0
+    ? { ...raw, minorUnits: -raw.minorUnits, amount: fromMinorUnits(-raw.minorUnits, raw.decimals) }
+    : raw;
+
+  const direction = toDirection(tx);
+  // Prefer the backend's own signed string; otherwise apply the sign ourselves so
+  // the field is always present and always consistent with `direction`.
+  const signedAmount = tx.signed_amount != null && tx.signed_amount !== ''
+    ? String(tx.signed_amount)
+    : (direction === 'out' && money.minorUnits !== 0 ? `-${money.amount}` : money.amount);
 
   return {
     id:            String(tx.id),
@@ -541,6 +640,8 @@ function mapTransaction(tx: ApiTransaction): WalletTransaction {
     driverName:    driver?.name ?? '',
     amount:        moneyToNumber(money),
     money,
+    direction,
+    signedAmount,
     type,
     paymentMethod: tx.payment_method,
     note:          tx.note ?? tx.description,
@@ -906,24 +1007,8 @@ export const fleetApi = {
 export const stationsApi = {
   async list(): Promise<BatteryStation[]> {
     const raw = await apiClient.get<unknown>('/fleet-admin/cabinets');
-    return extractList<ApiCabinet>(raw).map((c) => {
-      const lat = typeof c.lat === 'string' ? parseFloat(c.lat) : (c.lat ?? c.latitude ?? 24.7136);
-      const lng = typeof c.lng === 'string' ? parseFloat(c.lng) : (c.lng ?? c.longitude ?? 46.6753);
-      return {
-        id:                 String(c.id),
-        name:               c.name ?? `Cabinet ${c.id}`,
-        district:           c.district ?? c.address ?? c.location ?? '',
-        city:               c.city ?? 'Riyadh',
-        coordinates:        { lat, lng },
-        available:          c.ready_batteries    ?? c.ready_batteries_count    ?? 0,
-        charging:           c.charging_batteries ?? c.charging_batteries_count ?? 0,
-        inUse:              0,
-        totalCapacity:      c.total_capacity     ?? c.total_slots              ?? 0,
-        avgWaitTimeMinutes: c.avg_wait_time_minutes ?? c.avg_wait_minutes      ?? 0,
-        todaySwaps:         c.today_swaps        ?? c.today_swaps_count        ?? 0,
-        type:               'swap' as const,
-      };
-    });
+    // One cabinet mapper, then a projection — see toBatteryStation.
+    return extractList<ApiCabinet>(raw).map(mapCabinet).map(toBatteryStation);
   },
 };
 
@@ -946,11 +1031,20 @@ export interface DriverCreateInput {
   email?: string;
   address?: string;
   city?: string;
-  vehicleModel: string;
-  status: Driver['status'];
   documents?: DriverDocuments;
 }
 
+/**
+ * Deliberately absent from both inputs:
+ *
+ * - **`status`** — `POST`/`PUT /fleet-admin/drivers` do not accept it. Status is
+ *   owned by `/toggle-status`, `/block` and `/unblock`, which also return the
+ *   sessions they cancelled. A `status` on this body was collected by the form
+ *   and dropped on the floor.
+ * - **`vehicleModel`** — a motorcycle is assigned with
+ *   `POST /fleet-admin/motorcycles/{id}/assign-driver`, by id. A model *name* is
+ *   not an assignment and was never sent.
+ */
 export type DriverUpdateInput = Partial<DriverCreateInput>;
 
 /** Files + fields for POST /fleet-admin/drivers/{id}/documents (any subset). */
@@ -1002,15 +1096,34 @@ export const driversApi = {
 
   async update(id: string, updates: DriverUpdateInput): Promise<Driver | null> {
     try {
-      // PUT /fleet-admin/drivers/:id — send updatable fields only
+      // PUT /fleet-admin/drivers/:id — send every field the caller supplied.
+      //
+      // The guards are `!== undefined`, not truthiness. Truthiness meant `''` was
+      // indistinguishable from "not supplied", so an operator could never clear
+      // an email, address or city: the field was dropped and the old value
+      // survived, with the form showing the clear as if it had saved. `undefined`
+      // is "leave alone"; `''` is "clear this", and it is sent as `''`.
+      //
+      // ⚠️ Whether the backend clears a column on `""` or requires `null` is
+      // unconfirmed — see the note in the change report. If it needs `null`,
+      // this is the one line to change.
       const body: Record<string, string | undefined> = {};
-      if (updates.name)     body['name']         = updates.name;
-      if (updates.phone)    body['phone']        = updates.phone;
-      if (updates.dialCode) body['country_code'] = updates.dialCode;
-      if (updates.email)   body['email']   = updates.email;
-      if (updates.address) body['address'] = updates.address;
-      if (updates.city)    body['city']    = updates.city;
-      if (updates.documents?.license?.number) body['driving_license_number'] = updates.documents.license.number;
+      if (updates.name     !== undefined) body['name']         = updates.name;
+      if (updates.phone    !== undefined) body['phone']        = updates.phone;
+      if (updates.dialCode !== undefined) body['country_code'] = updates.dialCode;
+      if (updates.email    !== undefined) body['email']        = updates.email;
+      if (updates.address  !== undefined) body['address']      = updates.address;
+      if (updates.city     !== undefined) body['city']         = updates.city;
+
+      // Licence expiry and plate number were accepted by `create` and silently
+      // dropped by `update`. Editing either one alone was a no-op unless the
+      // operator also happened to attach a file, because only the multipart
+      // documents endpoint carried them.
+      const license = updates.documents?.license;
+      const plate   = updates.documents?.plate;
+      if (license?.number     !== undefined) body['driving_license_number'] = license.number;
+      if (license?.expiryDate !== undefined) body['driving_license_expiry'] = license.expiryDate;
+      if (plate?.number       !== undefined) body['plate_number']           = plate.number;
 
       const res = await apiClient.put<{ data: ApiDriver } | ApiDriver>(`/fleet-admin/drivers/${id}`, body);
       const raw = (res as { data?: ApiDriver }).data ?? (res as ApiDriver);
@@ -1246,6 +1359,46 @@ function pointsToWkt(points: ZonePoint[]): string {
   return `POLYGON((${closed.map((p) => `${p.lng} ${p.lat}`).join(', ')}))`;
 }
 
+/**
+ * Every zone type the app can render. `ZONE_TYPES` in @/lib/zone-types is keyed
+ * by exactly these, and the zone cards index it unguarded — anything outside the
+ * union reaches `cfg.labelKey` as `undefined.labelKey` and throws.
+ */
+const ZONE_TYPE_VALUES: readonly ZoneType[] = ['normal', 'slow', 'restricted'];
+
+/**
+ * Names the backend has used for a zone type that are not the union's own.
+ * `operational` was the old default written here — it is the permissive zone,
+ * i.e. `normal`.
+ */
+const ZONE_TYPE_ALIASES: Record<string, ZoneType> = {
+  operational: 'normal',
+  standard:    'normal',
+  low_speed:   'slow',
+  slow_zone:   'slow',
+  no_ride:     'restricted',
+  noride:      'restricted',
+  forbidden:   'restricted',
+  prohibited:  'restricted',
+};
+
+/**
+ * Total over the real {@link ZoneType} union — there is no input that can make
+ * this return something the zone cards cannot render.
+ *
+ * An unrecognised type falls back to `normal` rather than `restricted`: a zone
+ * we cannot classify must not be presented as a no-riding zone the fleet's
+ * drivers are barred from, and the warning below is how the mismatch surfaces.
+ */
+function toZoneType(raw: unknown): ZoneType {
+  const key = String(raw ?? '').trim().toLowerCase();
+  if ((ZONE_TYPE_VALUES as readonly string[]).includes(key)) return key as ZoneType;
+  const alias = ZONE_TYPE_ALIASES[key];
+  if (alias) return alias;
+  if (key) logger.warn(`[Zones] Unknown zone type "${key}" — rendering as "normal".`);
+  return 'normal';
+}
+
 function mapApiZone(api: ApiZone): Zone {
   const nameEn = api.name_en ?? '';
   return {
@@ -1253,7 +1406,7 @@ function mapApiZone(api: ApiZone): Zone {
     name:         nameEn || api.name_ar || 'Unnamed',
     name_en:      nameEn,
     name_ar:      api.name_ar ?? '',
-    type:         (api.type as ZoneType) || 'operational',
+    type:         toZoneType(api.type),
     speedLimitKmh: api.speed_limit ?? 0,
     active:       api.is_active,
     visible:      true,
@@ -1620,6 +1773,117 @@ export const fastChargingApi = {
 // Wallet API
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Rows per request when the caller doesn't say. Matches the table's page size. */
+const DEFAULT_PER_PAGE = 15;
+/** Rows per request when walking the paginator — fewer round trips. */
+const MAX_PER_PAGE = 100;
+/**
+ * Hard stop when walking the paginator: 50 × 100 = 5 000 rows.
+ *
+ * A backstop, not a business rule. Hitting it is reported to the caller and
+ * logged, never swallowed — an export that quietly stops at the cap reads as
+ * "this is the whole ledger" when it isn't.
+ */
+const MAX_TRANSACTION_PAGES = 50;
+
+/** Pagination state of one response. */
+export interface PageMeta {
+  currentPage: number;
+  lastPage: number;
+  perPage: number;
+  /** Rows matching the filters across all pages. */
+  total: number;
+}
+
+/**
+ * Filters `GET /fleet-admin/wallet/transactions` accepts.
+ *
+ * `from`, `to`, `driver_id`, `type`, `status` and `per_page` are the documented
+ * set; `page` is the Laravel paginator's own cursor. `type` takes the backend's
+ * vocabulary — see {@link apiTransactionType}.
+ */
+export interface WalletTransactionQuery {
+  from?: string;
+  to?: string;
+  driverId?: string;
+  /** Backend vocabulary: 'credit' | 'debit' | 'refund'. */
+  type?: string;
+  status?: string;
+  perPage?: number;
+  page?: number;
+}
+
+function walletQueryString(params: WalletTransactionQuery): string {
+  const qs = new URLSearchParams();
+  if (params.from)     qs.set('from',      params.from);
+  if (params.to)       qs.set('to',        params.to);
+  if (params.driverId) qs.set('driver_id', params.driverId);
+  if (params.type   && params.type   !== 'all') qs.set('type',   params.type);
+  if (params.status && params.status !== 'all') qs.set('status', params.status);
+  qs.set('per_page', String(params.perPage ?? DEFAULT_PER_PAGE));
+  if (params.page && params.page > 1) qs.set('page', String(params.page));
+  return qs.toString();
+}
+
+/**
+ * Pagination state, wherever Laravel put it.
+ *
+ * The paginator turns up at the root (`{ meta: {...} }`), inside `data`
+ * (`{ data: { current_page, data: [...] } }`) or flattened onto the root — and
+ * some fleet-admin endpoints return a bare array with no meta at all. A response
+ * with no paginator is treated as a single complete page, which is what a bare
+ * array is.
+ */
+function extractPageMeta(raw: unknown, rowCount: number, perPage: number): PageMeta {
+  const single: PageMeta = { currentPage: 1, lastPage: 1, perPage, total: rowCount };
+  if (!raw || typeof raw !== 'object') return single;
+
+  const root  = raw as Record<string, unknown>;
+  const inner = (root['data'] && typeof root['data'] === 'object' && !Array.isArray(root['data']))
+    ? root['data'] as Record<string, unknown>
+    : undefined;
+
+  const source = [root['meta'], inner, root].find(
+    (c) => c && typeof c === 'object' && 'current_page' in (c as Record<string, unknown>),
+  ) as Record<string, unknown> | undefined;
+  if (!source) return single;
+
+  const readInt = (v: unknown, fallback: number): number => {
+    const n = num(v);
+    return n !== undefined && n > 0 ? Math.floor(n) : fallback;
+  };
+  const resolvedPerPage = readInt(source['per_page'], perPage);
+  return {
+    currentPage: readInt(source['current_page'], 1),
+    lastPage:    readInt(source['last_page'], 1),
+    perPage:     resolvedPerPage,
+    total:       readInt(source['total'], rowCount),
+  };
+}
+
+/**
+ * Our UI category translated into the backend's `type` filter, plus whether the
+ * server can express it exactly.
+ *
+ * The vocabularies do not line up. The backend stores `credit` / `debit`, and a
+ * debit only becomes a *fast charge* or a *battery swap* once `reference_type`
+ * is read — which `mapTransaction` does here, not there. So the two debit
+ * sub-kinds narrow to `debit` on the server and must be finished off locally;
+ * `exact: false` tells the caller it has to walk every page to be complete.
+ */
+export function apiTransactionType(
+  uiType: TransactionType | 'all',
+): { param?: string; exact: boolean } {
+  switch (uiType) {
+    case 'top_up':       return { param: 'credit', exact: true };
+    case 'refund':       return { param: 'refund', exact: true };
+    case 'fast_charge':
+    case 'battery_swap': return { param: 'debit',  exact: false };
+    case 'all':
+    default:             return { exact: true };
+  }
+}
+
 interface ApiWalletStats {
   current_month_top_ups?: number;
   total_top_ups?: number;
@@ -1650,26 +1914,59 @@ export const walletApi = {
     };
   },
 
-  async getTransactions(params?: {
-    from?: string;
-    to?: string;
-    driverId?: string;
-    type?: string;
-    status?: string;
-    perPage?: number;
-  }): Promise<WalletTransaction[]> {
-    const qs = new URLSearchParams();
-    if (params?.from)     qs.set('from',      params.from);
-    if (params?.to)       qs.set('to',        params.to);
-    if (params?.driverId) qs.set('driver_id', params.driverId);
-    if (params?.type && params.type !== 'all')   qs.set('type',   params.type);
-    if (params?.status && params.status !== 'all') qs.set('status', params.status);
-    qs.set('per_page', String(params?.perPage ?? 100));
-
+  /**
+   * One page of transactions, with the paginator's own totals.
+   *
+   * The page used to fetch `per_page=100` and never look further, then filter
+   * and export over that capped array — so filters and the CSV were both
+   * silently incomplete, and the driver dropdown (built from the same 100 rows)
+   * could not even offer a driver whose activity fell past the cap.
+   */
+  async getTransactions(
+    params: WalletTransactionQuery = {},
+  ): Promise<{ rows: WalletTransaction[]; page: PageMeta }> {
     const raw = await apiClient.get<unknown>(
-      `/fleet-admin/wallet/transactions?${qs.toString()}`,
+      `/fleet-admin/wallet/transactions?${walletQueryString(params)}`,
     );
-    return extractList<ApiTransaction>(raw).map(mapTransaction);
+    const rows = extractList<ApiTransaction>(raw).map(mapTransaction);
+    return { rows, page: extractPageMeta(raw, rows.length, params.perPage ?? DEFAULT_PER_PAGE) };
+  },
+
+  /**
+   * Every transaction matching `params`, by walking the paginator.
+   *
+   * For the CSV export and for the filters the backend cannot express exactly
+   * (see {@link apiTransactionType}). `truncated` is true when the page cap was
+   * reached — the caller must surface that rather than present a short export as
+   * the whole ledger.
+   */
+  async getAllTransactions(
+    params: WalletTransactionQuery = {},
+    maxPages = MAX_TRANSACTION_PAGES,
+  ): Promise<{ rows: WalletTransaction[]; truncated: boolean }> {
+    const perPage = params.perPage ?? MAX_PER_PAGE;
+    const rows: WalletTransaction[] = [];
+
+    let page = 1;
+    let lastPage = 1;
+    do {
+      const res = await walletApi.getTransactions({ ...params, perPage, page });
+      rows.push(...res.rows);
+      lastPage = res.page.lastPage;
+      // A backend that ignores `page` would hand back page 1 forever; stopping on
+      // an empty response keeps that from spinning.
+      if (res.rows.length === 0) break;
+      page += 1;
+    } while (page <= lastPage && page <= maxPages);
+
+    const truncated = lastPage > maxPages;
+    if (truncated) {
+      logger.warn(
+        `[Wallet] Stopped after ${maxPages} pages of ${lastPage}; ` +
+        'the result is incomplete. Narrow the date range.',
+      );
+    }
+    return { rows, truncated };
   },
 
   async getBalance(driverId: string): Promise<number> {

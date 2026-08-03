@@ -3,6 +3,7 @@
 import { UserPlus, UserCog } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { StatusPill } from '@/components/ui/StatusPill';
+import { LocationLabel } from '@/components/ui/LocationLabel';
 import { useI18n } from '@/i18n/I18nProvider';
 import type { Vehicle } from '@/types';
 
@@ -47,7 +48,9 @@ export function FleetTable({ vehicles, onAssignDriver }: FleetTableProps) {
                 <td className="px-5 py-4 text-slate-600 dark:text-slate-300">
                   {v.assignedDriverName ?? '—'}
                 </td>
-                <td className="px-5 py-4 text-slate-600 dark:text-slate-300">{v.location}</td>
+                <td className="px-5 py-4 text-slate-600 dark:text-slate-300">
+                  <LocationLabel coordinates={v.coordinates} parts={[v.location]} withIcon={false} />
+                </td>
                 <td className="px-5 py-4">
                   <StatusPill status={v.status} />
                 </td>

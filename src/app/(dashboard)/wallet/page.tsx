@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   TrendingUp, ShoppingCart, Users2,
   Download, CheckCircle2, Clock, XCircle,
-  ArrowUp, Calendar,
+  ArrowUp, AlertTriangle, Calendar,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { Card } from '@/components/ui/Card';
@@ -15,10 +15,10 @@ import { Pagination } from '@/components/ui/Pagination';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import { useFleetContext } from '@/hooks/useFleetContext';
-import { walletApi } from '@/lib/api';
+import { apiTransactionType, driversApi, walletApi } from '@/lib/api';
 import { fractionDigitsOf, fromMinorUnits, toMinorUnits } from '@/lib/money';
 import type {
-  CurrencyCode, TransactionType, TransactionStatus, WalletTransaction, WalletStats,
+  CurrencyCode, Driver, TransactionType, TransactionStatus, WalletTransaction, WalletStats,
 } from '@/types';
 import { logger } from '@/lib/logger';
 
@@ -96,11 +96,20 @@ function defaultTo(): string { return isoDate(new Date()); }
  * reconciled total drifted. The exact decimal string the backend sent is
  * preferred; the fleet's own decimals are the fallback for rows that predate the
  * money object.
+ *
+ * The **sign comes from `direction`**, never from the characters of the amount.
+ * Debits arrive positive (`type: "debit"`), so the old `startsWith('-')` test
+ * exported every single row with a leading `+` and a reconciliation against the
+ * export added spending to the balance instead of subtracting it.
  */
 function csvAmount(tx: WalletTransaction, fleetDecimals: number | null): string {
   const decimals = tx.money?.decimals ?? fleetDecimals ?? fractionDigitsOf(tx.amount);
-  const exact    = tx.money?.amount ?? fromMinorUnits(toMinorUnits(tx.amount, decimals), decimals);
-  return exact.startsWith('-') ? exact : `+${exact}`;
+  // The backend's own signed string first; then the exact magnitude; then a
+  // reconstruction for rows that predate the money object.
+  const source = tx.signedAmount
+    || tx.money?.amount
+    || fromMinorUnits(toMinorUnits(tx.amount, decimals), decimals);
+  return `${tx.direction === 'out' ? '-' : '+'}${source.replace(/^[+-]/, '')}`;
 }
 
 function exportCsv(
@@ -198,10 +207,18 @@ export default function WalletPage() {
   const { t, locale } = useI18n();
   const { formatMoney, currency, currencyDecimals } = useFleetContext();
 
-  // Data
-  const [allTransactions, setAllTransactions] = useState<WalletTransaction[]>([]);
+  // Data. `served` is one page straight from the paginator; `walked` is every
+  // matching row, used only for the two filters the server cannot express (see
+  // the effects below). Exactly one is populated at a time.
+  const [served, setServed] = useState<{ rows: WalletTransaction[]; total: number; lastPage: number }>(
+    { rows: [], total: 0, lastPage: 1 },
+  );
+  const [walked, setWalked] = useState<WalletTransaction[]>([]);
   const [stats, setStats] = useState<WalletStats | null>(null);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
+  const [truncated, setTruncated] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   // Filters
   const [fromDate, setFromDate] = useState(defaultFrom);
@@ -211,56 +228,132 @@ export default function WalletPage() {
   const [statusFilter, setStatusFilter] = useState<TransactionStatus | 'all'>('all');
   const [page, setPage] = useState(1);
 
+  /**
+   * The filters the endpoint understands, in its own vocabulary.
+   *
+   * `from`, `to`, `driver_id` and `status` map one-to-one. `type` does not — see
+   * `apiTransactionType`; `typeIsExact` is false for the two debit sub-kinds,
+   * which the server can only narrow to `debit`.
+   */
+  const apiType   = apiTransactionType(typeFilter);
+  const exactMode = apiType.exact;
+  const query = useMemo(() => ({
+    from:     fromDate || undefined,
+    to:       toDate   || undefined,
+    driverId: driverFilter !== 'all' ? driverFilter : undefined,
+    status:   statusFilter !== 'all' ? statusFilter : undefined,
+    type:     apiType.param,
+  }), [fromDate, toDate, driverFilter, statusFilter, apiType.param]);
+
+  // Stats and the driver roster are filter-independent, so they load once.
+  // Crucially the roster comes from the *drivers* endpoint: deriving it from
+  // whatever transactions happened to be on screen meant a driver whose activity
+  // fell past the cap could not be selected, while the dropdown looked complete.
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      const [statsRes, driversRes] = await Promise.allSettled([
+        walletApi.getStats(),
+        driversApi.list(),
+      ]);
+      if (cancelled) return;
+      if (statsRes.status === 'fulfilled') setStats(statsRes.value);
+      else logger.error('[Wallet] Failed to load stats:', statsRes.reason);
+      if (driversRes.status === 'fulfilled') setDrivers(driversRes.value);
+      else logger.error('[Wallet] Failed to load drivers for the filter:', driversRes.reason);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Anything that changes what should be on screen puts the table back into
+  // loading; whichever fetch effect owns the current mode clears it. Declared
+  // first so it runs before them.
+  useEffect(() => { setDataLoading(true); }, [query, page, exactMode, typeFilter]);
+
+  // Exact mode — the server's filter is exactly ours, so this is true
+  // server-side pagination: one page per request, totals from the paginator.
+  useEffect(() => {
+    if (!exactMode) return;
+    let cancelled = false;
+    (async () => {
       try {
-        const [txnsRes, statsRes] = await Promise.allSettled([
-          walletApi.getTransactions({ perPage: 100 }),
-          walletApi.getStats(),
-        ]);
-        if (!cancelled) {
-          if (txnsRes.status === 'fulfilled') setAllTransactions(txnsRes.value);
-          if (statsRes.status === 'fulfilled') setStats(statsRes.value);
-        }
+        const res = await walletApi.getTransactions({ ...query, perPage: PAGE_SIZE, page });
+        if (cancelled) return;
+        setServed({ rows: res.rows, total: res.page.total, lastPage: Math.max(1, res.page.lastPage) });
+        setTruncated(false);
       } catch (err) {
-        logger.error('[Wallet] Unexpected error:', err);
+        if (cancelled) return;
+        logger.error('[Wallet] Failed to load transactions:', err);
+        setServed({ rows: [], total: 0, lastPage: 1 });
       } finally {
         if (!cancelled) setDataLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [exactMode, query, page]);
 
-  // Unique driver options derived from fetched transactions
-  const driverOptions = useMemo(() => {
-    const seen = new Set<string>();
-    const opts: { value: string; label: string }[] = [{ value: 'all', label: t('wallet.allDrivers') }];
-    allTransactions.forEach((tx) => {
-      if (!seen.has(tx.driverId)) {
-        seen.add(tx.driverId);
-        opts.push({ value: tx.driverId, label: tx.driverName });
+  // Refine mode — 'fast_charge' and 'battery_swap' only exist once
+  // `reference_type` is read on this side, so the server can only narrow to
+  // `debit`. Walk every matching page once per filter change and refine here;
+  // refining one page at a time would silently drop rows the operator asked for.
+  // `page` is deliberately not a dependency: paging is a local slice below, not
+  // another walk.
+  useEffect(() => {
+    if (exactMode) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await walletApi.getAllTransactions(query);
+        if (cancelled) return;
+        setWalked(res.rows.filter((tx) => tx.type === typeFilter));
+        setTruncated(res.truncated);
+      } catch (err) {
+        if (cancelled) return;
+        logger.error('[Wallet] Failed to load transactions:', err);
+        setWalked([]);
+      } finally {
+        if (!cancelled) setDataLoading(false);
       }
-    });
-    return opts;
-  }, [allTransactions, t]);
+    })();
+    return () => { cancelled = true; };
+  }, [exactMode, query, typeFilter]);
 
-  // Client-side filtering
-  const filtered = useMemo(() => {
-    return allTransactions.filter((tx) => {
-      const txDate = tx.createdAt.split('T')[0];
-      if (fromDate && txDate < fromDate) return false;
-      if (toDate   && txDate > toDate)   return false;
-      if (driverFilter !== 'all' && tx.driverId !== driverFilter) return false;
-      if (typeFilter   !== 'all' && tx.type     !== typeFilter)   return false;
-      if (statusFilter !== 'all' && tx.status   !== statusFilter) return false;
-      return true;
-    });
-  }, [allTransactions, fromDate, toDate, driverFilter, typeFilter, statusFilter]);
+  const { rows, total, totalPages } = useMemo(() => (
+    exactMode
+      ? { rows: served.rows, total: served.total, totalPages: served.lastPage }
+      : {
+          rows:       walked.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+          total:      walked.length,
+          totalPages: Math.max(1, Math.ceil(walked.length / PAGE_SIZE)),
+        }
+  ), [exactMode, served, walked, page]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const setFilter  = <T,>(setter: (v: T) => void) => (v: T) => { setter(v); setPage(1); };
+  const driverOptions = useMemo(() => [
+    { value: 'all', label: t('wallet.allDrivers') },
+    ...drivers.map((d) => ({ value: d.id, label: d.name })),
+  ], [drivers, t]);
+
+  /**
+   * Export every row matching the current filters — not just the page on screen.
+   * Walks the paginator, so the CSV is the ledger rather than a window onto it.
+   */
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await walletApi.getAllTransactions(query);
+      const exportRows = exactMode
+        ? res.rows
+        : res.rows.filter((tx) => tx.type === typeFilter);
+      exportCsv(exportRows, currency, currencyDecimals);
+      if (res.truncated) setTruncated(true);
+    } catch (err) {
+      logger.error('[Wallet] CSV export failed:', err);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const setFilter = <T,>(setter: (v: T) => void) => (v: T) => { setter(v); setPage(1); };
 
   return (
     <DashboardShell title={t('wallet.title')} subtitle={t('wallet.subtitle')}>
@@ -372,18 +465,28 @@ export default function WalletPage() {
             />
           </div>
 
-          {/* Export */}
+          {/* Export — walks every page, so it exports the ledger, not the view */}
           <div className="w-full sm:ms-auto sm:w-auto">
             <Button
               variant="primary"
               leftIcon={<Download className="h-4 w-4" />}
-              onClick={() => exportCsv(filtered, currency, currencyDecimals)}
+              onClick={handleExport}
+              isLoading={exporting}
               className="w-full sm:w-auto"
             >
               {t('wallet.exportCsv')}
             </Button>
           </div>
         </div>
+
+        {/* A capped result must say so — a short export that looks complete is
+            the exact failure this page had. */}
+        {truncated && (
+          <p className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            {t('wallet.resultTruncated')}
+          </p>
+        )}
       </Card>
 
       {/* ── Transaction table ─────────────────────────────────────────── */}
@@ -416,7 +519,7 @@ export default function WalletPage() {
                     ))}
                   </tr>
                 ))
-              ) : paginated.length === 0 ? (
+              ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-5 py-16 text-center">
                     <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">
@@ -426,9 +529,12 @@ export default function WalletPage() {
                   </td>
                 </tr>
               ) : (
-                paginated.map((tx) => {
+                rows.map((tx) => {
                   const StatusIcon = STATUS_ICON[tx.status];
-                  const isCredit   = tx.amount >= 0;
+                  // Direction, never the sign. A debit is a positive amount with
+                  // type "debit" — reading `amount >= 0` painted every debit
+                  // green as if it were a credit.
+                  const isCredit   = tx.direction === 'in';
                   return (
                     <tr
                       key={tx.id}
@@ -445,8 +551,8 @@ export default function WalletPage() {
                         'px-5 py-4 font-bold tabular-nums',
                         isCredit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400',
                       )}>
-                        {isCredit ? '+' : ''}
-                        {formatMoney(tx.amount, locale)}
+                        {/* `amount` is a magnitude; the sign is the direction's. */}
+                        <span dir="ltr">{isCredit ? '+' : '−'}{formatMoney(tx.amount, locale)}</span>
                       </td>
                       <td className="px-5 py-4">
                         <span className={cn(
@@ -479,16 +585,15 @@ export default function WalletPage() {
           </table>
         </div>
 
-        {filtered.length > 0 && (
+        {total > 0 && (
           <div
             className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3"
             style={{ borderColor: 'rgb(var(--border))' }}
           >
+            {/* `total` is the paginator's own count across every page, not the
+                length of what happens to be loaded. */}
             <p className="text-xs text-slate-500">
-              {t('wallet.showing', {
-                count: Math.min(paginated.length, PAGE_SIZE),
-                total: filtered.length,
-              })}
+              {t('wallet.showing', { count: rows.length, total })}
             </p>
             <Pagination currentPage={page} totalPages={totalPages} onChange={setPage} />
           </div>
