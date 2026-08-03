@@ -215,3 +215,75 @@ export function matchesPhoneRegex(
   const regex = compilePhoneRegex(pattern);
   return regex ? regex.test(value) : true;
 }
+
+/** End of the `[...]` class opened at `open`, or -1 if it is never closed. */
+function classEnd(body: string, open: number): number {
+  let i = open + 1;
+  if (body[i] === '^') i += 1;
+  if (body[i] === ']') i += 1; // a leading ']' is a literal, not the terminator
+  while (i < body.length) {
+    if (body[i] === '\\') { i += 2; continue; }
+    if (body[i] === ']') return i;
+    i += 1;
+  }
+  return -1;
+}
+
+/**
+ * How long a national number is, read off the country's own `phone_regex`.
+ *
+ * The rule the number is validated against already states its length —
+ * `^5[0-9]{8}$` and `^7[789][0-9]{7}$` both describe nine digits — so it is the
+ * one source that cannot disagree with validation, for a third country as much
+ * as for SA and JO. It is preferred over the reported `national_number_length`
+ * because the live environment derives that field from the display mask
+ * ("5X XXX XXXX" → one digit) and reports 1.
+ *
+ * Returns the longest number the pattern can match, or undefined for anything it
+ * cannot read with certainty — alternation, groups, an unbounded `*`/`+`/`{n,}`,
+ * or a pattern that is not anchored at both ends. Undefined means "ask someone
+ * else", never a guess: capping an input short is exactly the bug being fixed.
+ */
+export function phoneLengthFromRegex(pattern: string | null | undefined): number | undefined {
+  const source = String(pattern ?? '').trim();
+  if (!source.startsWith('^') || !source.endsWith('$')) return undefined;
+
+  const body = source.slice(1, -1);
+  if (/[()|]/.test(body)) return undefined;
+
+  let length = 0;
+  let i = 0;
+
+  while (i < body.length) {
+    // One atom: an escape, a character class, or a single literal.
+    if (body[i] === '\\') {
+      i += 2;
+    } else if (body[i] === '[') {
+      const close = classEnd(body, i);
+      if (close < 0) return undefined;
+      i = close + 1;
+    } else if ('*+?{}'.includes(body[i])) {
+      return undefined; // a quantifier with no atom in front of it
+    } else {
+      i += 1;
+    }
+
+    // Its quantifier, if it has one.
+    const braced = /^\{(\d+)(?:,(\d*))?\}/.exec(body.slice(i));
+    if (braced) {
+      const [whole, min, max] = braced;
+      if (max === '') return undefined; // `{n,}` is unbounded
+      length += Number(max ?? min);
+      i += whole.length;
+    } else if (body[i] === '?') {
+      length += 1; // the atom is optional — count the longest match
+      i += 1;
+    } else if (body[i] === '*' || body[i] === '+') {
+      return undefined;
+    } else {
+      length += 1;
+    }
+  }
+
+  return length || undefined;
+}

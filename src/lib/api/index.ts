@@ -13,6 +13,8 @@ import { apiClient } from '@/lib/api/client';
 import { isFieldLevelError } from '@/lib/api-errors';
 import {
   SEEDED_COUNTRIES,
+  matchesPhoneRegex,
+  phoneLengthFromRegex,
   seededCountries,
   seededCurrencyFor,
   toDialCode,
@@ -714,6 +716,15 @@ function mapCountry(c: ApiCountry): Country | null {
 
   const rawExample = c.phone_example ?? '';
   const currency   = c.currency ?? c.currency_code ?? seed?.currency ?? undefined;
+  const phoneRegex = c.phone_regex ?? seed?.phoneRegex ?? '';
+
+  // This environment derives both `national_number_length` and
+  // `phone_example_national` by stripping the non-digits out of the display mask,
+  // so "5X XXX XXXX" arrives as a length of 1 and an example of "5". A length of 1
+  // caps the login field at a single character, so neither field is taken on
+  // trust: the length is read off `phone_regex` — the rule the number is actually
+  // validated against — and the example is kept only if it satisfies that rule.
+  const rawExampleNational = c.phone_example_national ?? '';
 
   return {
     isoCountryCode,
@@ -723,7 +734,7 @@ function mapCountry(c: ApiCountry): Country | null {
     currency,
     currencyDecimals:
       c.currency_decimals ?? c.decimals ?? seed?.currencyDecimals ?? decimalsForCurrency(currency),
-    phoneRegex: c.phone_regex ?? seed?.phoneRegex ?? '',
+    phoneRegex,
     // `phone_placeholder` is the mask; fall back to `phone_example` only while it
     // still holds one, never once it holds a real number.
     phonePlaceholder:
@@ -731,11 +742,14 @@ function mapCountry(c: ApiCountry): Country | null {
       (rawExample && looksLikeMask(rawExample) ? rawExample : undefined) ??
       seed?.phonePlaceholder ??
       '',
-    phoneExampleNational: c.phone_example_national ?? seed?.phoneExampleNational ?? '',
+    phoneExampleNational: matchesPhoneRegex(rawExampleNational, phoneRegex)
+      ? rawExampleNational
+      : seed?.phoneExampleNational ?? '',
     nationalNumberLength:
+      phoneLengthFromRegex(phoneRegex) ??
       c.national_number_length ??
       seed?.nationalNumberLength ??
-      (c.phone_example_national ? c.phone_example_national.replace(/\D/g, '').length : 15),
+      15,
   };
 }
 
