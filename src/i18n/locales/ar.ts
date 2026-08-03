@@ -340,7 +340,10 @@ const ar: Translations = {
     topUpWallet: 'شحن المحفظة',
     topUpWalletDescription: 'إضافة رصيد إلى محفظة السائق',
     currentBalance: 'الرصيد الحالي',
-    topUpAmount: 'المبلغ (ريال)',
+    // عملة الأسطول نفسها (SAR أو JOD …) ولا تُفترض أبداً — يُستخدم الشكل بدون
+    // عملة إلى أن يُحسم `/fleet-admin/me`.
+    topUpAmount: 'المبلغ',
+    topUpAmountWithCurrency: 'المبلغ ({{currency}})',
     topUpAmountPlaceholder: '0.00',
     quickAmounts: 'مبالغ سريعة',
     paymentMethod: 'طريقة الدفع',
@@ -356,6 +359,14 @@ const ar: Translations = {
     topUpSuccessDescription: 'تم شحن محفظة {{name}} بمبلغ {{amount}} بنجاح.',
     topUpAmountRequired: 'الرجاء إدخال مبلغ صحيح',
     topUpAmountInvalid: 'يجب أن يكون المبلغ أكبر من صفر',
+    // الحد الأدنى للشحن — المبلغ يأتي من الخادم ولا يُحسب هنا إطلاقاً.
+    minTopUpHint: 'الحد الأدنى للشحن: {{amount}}',
+    minTopUpAbsoluteFloor: 'الحد الأدنى للشحن هو {{amount}}.',
+    minTopUpBelowServicePrice:
+      'الحد الأدنى للشحن هو {{amount}} — يجب أن يكفي رصيد المحفظة بعد الشحن لتبديل بطارية واحد أو شحن سريع واحد على الأقل.',
+    servicePricesHint: 'الأسعار الحالية — {{prices}}',
+    servicePriceBatterySwap: 'تبديل بطارية',
+    servicePriceFastCharge: 'شحن سريع',
     // Saved cards
     savedCards: 'البطاقات المحفوظة',
     savedCardsLoading: 'جارٍ تحميل البطاقات المحفوظة…',

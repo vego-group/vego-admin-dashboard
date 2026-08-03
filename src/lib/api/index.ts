@@ -9,7 +9,7 @@
  * Auth prefix:  /fleet-admin/*
  */
 
-import { apiClient } from '@/lib/api/client';
+import { ApiError, apiClient } from '@/lib/api/client';
 import { isFieldLevelError } from '@/lib/api-errors';
 import {
   SEEDED_COUNTRIES,
@@ -34,6 +34,10 @@ import type {
   BatteryDistribution,
   BatteryHealthPoint,
   Alarm,
+  MinTopUpReason,
+  Money,
+  ServicePrice,
+  TopUpOptions,
   AlarmSeverity,
   AlarmStatus,
   BatteryStation,
@@ -1911,6 +1915,97 @@ interface ApiWalletStats {
   active_drivers_count?: number;
 }
 
+// ── Top-up options (minimum + suggested chips) ───────────────────────────────
+
+/** `GET /fleet-admin/wallet/topup-options` as the backend serialises it. */
+interface ApiTopUpOptions {
+  currency?:         string | null;
+  decimals?:         number | null;
+  balance?:          ApiMoneyFields | string | number | null;
+  min_topup?:        ApiMoneyFields | string | number | null;
+  min_topup_reason?: string | null;
+  suggested_amounts?: Array<ApiMoneyFields | string | number> | null;
+  service_prices?:   unknown;
+}
+
+/**
+ * Read one amount out of the options envelope.
+ *
+ * Each field may arrive either as a full money object or as a bare
+ * fixed-precision string alongside the envelope's own `currency`/`decimals`.
+ * The envelope only ever fills gaps — a nested object that states its own
+ * currency wins, exactly as {@link readMoney} treats `decimals`.
+ */
+function readEnvelopeMoney(
+  value: ApiMoneyFields | string | number | null | undefined,
+  currency: string | null,
+  decimals: number | null,
+): Money {
+  if (value !== null && typeof value === 'object') {
+    return readMoney({
+      ...value,
+      currency: value.currency ?? currency,
+      decimals: value.decimals ?? decimals,
+    });
+  }
+  return readMoney({ amount: value ?? null, currency, decimals });
+}
+
+function readMinTopUpReason(raw: unknown): MinTopUpReason | null {
+  return raw === 'below_service_price' || raw === 'absolute_floor' ? raw : null;
+}
+
+/**
+ * `service_prices` in either shape the backend might send: a keyed map
+ * (`{ battery_swap: "1.500" }`) or a list of records. Unknown keys survive —
+ * the modal falls back to the backend's own label for anything it cannot name.
+ */
+function mapServicePrices(raw: unknown, currency: string | null, decimals: number | null): ServicePrice[] {
+  if (!raw || typeof raw !== 'object') return [];
+
+  const entries: Array<[string, unknown]> = Array.isArray(raw)
+    ? raw.map((item, i) => {
+        const rec = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+        const key = rec.key ?? rec.service ?? rec.type ?? rec.name ?? i;
+        return [String(key), item];
+      })
+    : Object.entries(raw as Record<string, unknown>);
+
+  return entries.map(([key, value]) => {
+    const rec = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+    const label = typeof rec.label === 'string' ? rec.label : undefined;
+    // A list entry holds its amount under `price`/`amount`; a map entry *is* the amount.
+    const amount = (rec.price ?? value) as ApiMoneyFields | string | number | null;
+    return { key, label, price: readEnvelopeMoney(amount, currency, decimals) };
+  });
+}
+
+/**
+ * The `422 topup_below_minimum` a top-up is rejected with, or **null** for any
+ * other failure.
+ *
+ * The backend states the current minimum in `meta.min_topup`, so this belongs on
+ * the amount field with that number — never on a generic error banner, and never
+ * with the stale minimum the form happened to be holding.
+ */
+export function topUpBelowMinimumFrom(
+  err: unknown,
+): { minTopUp: Money | null; reason: MinTopUpReason | null; message: string } | null {
+  if (!(err instanceof ApiError) || err.status !== 422) return null;
+  if (err.code !== 'topup_below_minimum') return null;
+
+  const meta     = err.meta ?? {};
+  const currency = typeof meta.currency === 'string' ? meta.currency : null;
+  const decimals = typeof meta.decimals === 'number' ? meta.decimals : null;
+  const raw      = meta.min_topup as ApiMoneyFields | string | number | null | undefined;
+
+  return {
+    minTopUp: raw != null ? readEnvelopeMoney(raw, currency, decimals) : null,
+    reason:   readMinTopUpReason(meta.min_topup_reason),
+    message:  err.message,
+  };
+}
+
 export const walletApi = {
   async getStats(): Promise<WalletStats> {
     const raw = await apiClient.get<{ data?: ApiWalletStats } & ApiWalletStats>('/fleet-admin/wallet/stats');
@@ -1991,6 +2086,37 @@ export const walletApi = {
     // { success, data: { driver_id, name, balance, currency, minor_units, decimals } }
     const inner = (res.data && typeof res.data === 'object') ? res.data : res;
     return moneyToNumber(readMoney(inner));
+  },
+
+  /**
+   * Everything the top-up form needs for one driver: the minimum, why it is what
+   * it is, and the quick-amount chips.
+   *
+   * `suggested_amounts` is passed through untouched. The backend has already
+   * removed the chips below the minimum and prepended the minimum itself, so
+   * filtering or re-sorting here would only produce a set the server disagrees
+   * with — and in a three-decimal currency that disagreement is invisible until
+   * a payment is rejected.
+   */
+  async getTopUpOptions(driverId: string): Promise<TopUpOptions> {
+    const res = await apiClient.get<{ data?: ApiTopUpOptions } & ApiTopUpOptions>(
+      `/fleet-admin/wallet/topup-options?driver_id=${encodeURIComponent(driverId)}`,
+    );
+    const d: ApiTopUpOptions = (res.data && typeof res.data === 'object') ? res.data : res;
+
+    const currency = d.currency ?? null;
+    const decimals = typeof d.decimals === 'number' ? d.decimals : null;
+
+    return {
+      currency,
+      decimals,
+      balance:        readEnvelopeMoney(d.balance,   currency, decimals),
+      minTopUp:       readEnvelopeMoney(d.min_topup, currency, decimals),
+      minTopUpReason: readMinTopUpReason(d.min_topup_reason),
+      suggestedAmounts: (Array.isArray(d.suggested_amounts) ? d.suggested_amounts : [])
+        .map((a) => readEnvelopeMoney(a, currency, decimals)),
+      servicePrices:  mapServicePrices(d.service_prices, currency, decimals),
+    };
   },
 
   /**

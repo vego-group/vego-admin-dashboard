@@ -473,6 +473,54 @@ export interface SavedCard {
   expYear?: number;    // 4-digit year
 }
 
+/**
+ * Why the backend refuses a top-up below {@link TopUpOptions.minTopUp}.
+ *
+ * - `below_service_price` — the wallet must end up able to pay for at least one
+ *   swap or one fast charge, so the floor is derived from the service prices.
+ * - `absolute_floor` — a flat per-country minimum, unrelated to what the driver
+ *   can currently afford.
+ *
+ * Anything else the backend adds later parses to `null`, which renders the plain
+ * "minimum is X" message rather than a wrong explanation.
+ */
+export type MinTopUpReason = 'below_service_price' | 'absolute_floor';
+
+/** What one chargeable service costs, from `topup-options.service_prices`. */
+export interface ServicePrice {
+  /** Backend key, e.g. 'battery_swap' | 'fast_charge'. */
+  key: string;
+  /** Backend-supplied display name, when it sends one. */
+  label?: string;
+  price: Money;
+}
+
+/**
+ * `GET /fleet-admin/wallet/topup-options?driver_id={id}` — everything the top-up
+ * form needs that depends on *this* driver's balance.
+ *
+ * The minimum is a function of the balance (a driver who cannot afford one swap
+ * has to top up further than one who can), so both move together and the options
+ * must be re-read whenever the balance changes.
+ *
+ * `suggestedAmounts` is rendered **verbatim**: the backend has already dropped
+ * the chips that fall below `minTopUp` and prepended the minimum itself. Any
+ * client-side filtering here would silently disagree with the server.
+ */
+export interface TopUpOptions {
+  /** ISO 4217 code the amounts are denominated in; null when omitted. */
+  currency: CurrencyCode | null;
+  /** Minor-unit exponent for `currency`; null when the backend omits it. */
+  decimals: number | null;
+  balance: Money;
+  minTopUp: Money;
+  minTopUpReason: MinTopUpReason | null;
+  /** Quick-amount chips, in the backend's own order. Never re-sorted or filtered. */
+  suggestedAmounts: Money[];
+  /** Empty when the backend sends no prices — the UI just omits the hint. */
+  servicePrices: ServicePrice[];
+}
+
 // ----- Battery Swapping -------------------------------------------------------
 
 export interface SwappingStation {

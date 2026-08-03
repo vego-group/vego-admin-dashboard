@@ -338,7 +338,10 @@ const en = {
     topUpWallet: 'Top-Up Wallet',
     topUpWalletDescription: "Add funds to driver's wallet",
     currentBalance: 'Current Balance',
-    topUpAmount: 'Amount (SAR)',
+    // The currency is the fleet's own (SAR, JOD, …) and is never assumed — the
+    // unlabelled form is used until `/fleet-admin/me` resolves it.
+    topUpAmount: 'Amount',
+    topUpAmountWithCurrency: 'Amount ({{currency}})',
     topUpAmountPlaceholder: '0.00',
     quickAmounts: 'Quick Amounts',
     paymentMethod: 'Payment Method',
@@ -354,6 +357,14 @@ const en = {
     topUpSuccessDescription: "{{name}}'s wallet has been topped up with {{amount}}.",
     topUpAmountRequired: 'Please enter a valid amount',
     topUpAmountInvalid: 'Amount must be greater than 0',
+    // Minimum top-up — the amount comes from the backend, never from this app.
+    minTopUpHint: 'Minimum top-up: {{amount}}',
+    minTopUpAbsoluteFloor: 'The minimum top-up is {{amount}}.',
+    minTopUpBelowServicePrice:
+      'The minimum top-up is {{amount}} — a top-up has to leave the wallet able to pay for at least one battery swap or one fast charge.',
+    servicePricesHint: 'Current prices — {{prices}}',
+    servicePriceBatterySwap: 'Battery swap',
+    servicePriceFastCharge: 'Fast charge',
     // Saved cards
     savedCards: 'Saved Cards',
     savedCardsLoading: 'Loading saved cards…',
