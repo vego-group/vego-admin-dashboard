@@ -1,3 +1,15 @@
+/**
+ * English copy.
+ *
+ * `{{vehicle}}` / `{{vehicles}}` — and the title-case `{{Vehicle}}` /
+ * `{{Vehicles}}` — are the **server-driven vehicle noun** for the fleet's
+ * country (`vehicle_term` on `GET /countries` and `GET /fleet-admin/me`). Saudi
+ * Arabia seeds `دباب`, Jordan `دراجة نارية`, and the next market seeds its own.
+ * Never write one of those words here.
+ *
+ * Render any key holding a `{{vehicle}}` placeholder through `tv()` from
+ * `useVehicleTerm()` rather than `t()` — it binds all four forms.
+ */
 const en = {
   common: {
     appName: 'MyVego',
@@ -18,6 +30,7 @@ const en = {
     add: 'Add',
     confirm: 'Confirm',
     close: 'Close',
+    back: 'Back',
     undo: 'Undo',
     optional: 'Optional',
     loading: 'Loading...',
@@ -32,6 +45,7 @@ const en = {
     lastUpdate: 'Last update now',
     minutes: 'min',
     kilometers: 'km',
+    kmh: 'km/h',
     minAgo: 'min ago',
     hourAgo: 'hour ago',
     daysAgo: 'days ago',
@@ -48,7 +62,7 @@ const en = {
     fastCharging: 'Fast Charging',
     drivers: 'Drivers',
     sessions: 'Sessions',
-    vehicleControl: 'Vehicle Control',
+    vehicleControl: '{{Vehicle}} Control',
     iotDevices: 'IoT Devices',
     zones: 'Zone',
     alarms: 'Alarms',
@@ -63,10 +77,10 @@ const en = {
     online: 'Online',
     offline: 'Offline',
     weakGps: 'Weak / No GPS',
-    searchPlaceholder: 'Search by device ID or motorcycle…',
+    searchPlaceholder: 'Search by device ID or {{vehicle}}…',
     empty: 'No devices match your current filters.',
     deviceId: 'Device ID',
-    motorcycle: 'Motorcycle',
+    motorcycle: '{{Vehicle}}',
     status: 'Status',
     battery: 'Battery',
     gps: 'GPS',
@@ -78,7 +92,7 @@ const en = {
   },
   alarms: {
     title: 'Alarms',
-    subtitle: 'Review and resolve device and vehicle alarms',
+    subtitle: 'Review and resolve device and {{vehicle}} alarms',
     unresolved: 'Unresolved',
     criticalOpen: 'Critical (open)',
     resolved: 'Resolved',
@@ -115,12 +129,12 @@ const en = {
     totalTripsToday: 'Total Trips Today',
     avgTripDuration: 'Avg. Trip Duration',
     liveFleetMap: 'Live Fleet Map',
-    liveFleetMapSubtitle: 'Real-time location of mopeds and battery stations',
+    liveFleetMapSubtitle: 'Real-time location of {{vehicles}} and battery stations',
     fleetStatus: 'Fleet Status',
     chargingBattery: 'Charging battery',
     averageSoc: 'Average SOC',
     lowBattery: 'Low battery',
-    averageCostVehicle: 'Average cost/vehicle',
+    averageCostVehicle: 'Average cost/{{vehicle}}',
     successRate: 'Success rate',
     totalDrivers: 'Total Drivers',
     activeTrips: 'Active Trips',
@@ -137,7 +151,7 @@ const en = {
   },
   fleet: {
     title: 'Fleet Management',
-    subtitle: 'Monitor and manage your entire electric moped fleet',
+    subtitle: 'Monitor and manage your entire electric {{vehicle}} fleet',
     active: 'Active',
     charging: 'Charging',
     idle: 'Idle',
@@ -145,7 +159,7 @@ const en = {
     battery: 'Battery',
     lastTrip: 'Last Trip',
     totalDistance: 'Total Distance',
-    vehicleId: 'Vehicle ID',
+    vehicleId: '{{Vehicle}} ID',
     plateNumber: 'Plate Number',
     model: 'Model',
     assignedDriver: 'Assigned Driver',
@@ -160,9 +174,11 @@ const en = {
     searchDrivers: 'Search drivers by name or phone…',
     noActiveDrivers: 'No active drivers available to assign.',
     assignSuccessTitle: 'Driver assigned',
-    assignSuccessDescription: '{{driver}} is now assigned to {{vehicle}}.',
+    // `{{plate}}`, not `{{vehicle}}`: this names one specific machine, while
+    // `{{vehicle}}` is reserved everywhere for the country's noun for the type.
+    assignSuccessDescription: '{{driver}} is now assigned to {{plate}}.',
     unassignSuccessTitle: 'Driver unassigned',
-    unassignSuccessDescription: '{{vehicle}} no longer has a driver assigned.',
+    unassignSuccessDescription: '{{plate}} no longer has a driver assigned.',
   },
   stations: {
     title: 'Battery Stations',
@@ -173,7 +189,7 @@ const en = {
     totalCapacity: 'Total Capacity',
     readyForUse: 'Ready for immediate use',
     currentlyCharging: 'Currently charging',
-    currentlyInScooters: 'Currently in e-bikes',
+    currentlyInVehicles: 'Currently in {{vehicles}}',
     acrossStations: 'Across {{count}} stations',
     stationLocations: 'Station Locations',
     realtimeMap: 'Real-time battery availability map',
@@ -190,7 +206,7 @@ const en = {
     driverId: 'Driver ID',
     name: 'Name',
     phone: 'Phone',
-    vehicles: 'Vehicles',
+    vehicles: '{{Vehicles}}',
     status: 'Status',
     trips: 'Trips',
     charges: 'Charges',
@@ -198,10 +214,10 @@ const en = {
     actions: 'Actions',
     addNewDriver: 'Add New Driver',
     addDriver: 'Add Driver',
-    addDriverDescription: 'Enter driver details and assign a vehicle',
+    addDriverDescription: 'Enter driver details and assign a {{vehicle}}',
     editDriver: 'Edit Driver',
     updateDriver: 'Update Driver',
-    editDriverDescription: 'Update driver information and vehicle assignment',
+    editDriverDescription: 'Update driver information and {{vehicle}} assignment',
     personalInformation: 'Personal Information',
     fullName: 'Full Name',
     country: 'Country',
@@ -211,15 +227,15 @@ const en = {
     emailAddress: 'Email Address',
     address: 'Address',
     city: 'City',
-    vehicleAssignment: 'Vehicle Assignment',
-    assignVehicle: 'Assign Vehicle',
-    assignedVehicle: 'Assigned Vehicle',
+    vehicleAssignment: '{{Vehicle}} Assignment',
+    assignVehicle: 'Assign {{Vehicle}}',
+    assignedVehicle: 'Assigned {{Vehicle}}',
     assignVehicleElsewhere:
-      'Assigned from the Assign Vehicle action in the drivers list — not from this form.',
-    noVehicleAssigned: 'No Vehicle Assigned',
+      'Assigned from the Assign {{Vehicle}} action in the drivers list — not from this form.',
+    noVehicleAssigned: 'No {{Vehicle}} Assigned',
     noteLabel: 'Note',
     assignmentHint:
-      'Use the Assign Vehicle action in the drivers list to give this driver a vehicle. Once assigned, they can start trips with it, and you can change the assignment at any time.',
+      'Use the Assign {{Vehicle}} action in the drivers list to give this driver a {{vehicle}}. Once assigned, they can start trips with it, and you can change the assignment at any time.',
     fullNameRequired: 'Full name is required',
     phoneRequired: 'Phone number is required',
     phoneInvalid: 'Please enter a valid phone number',
@@ -315,26 +331,27 @@ const en = {
     swapSessionsCancelled: '{{count}} active swap sessions were cancelled.',
     chargingSessionCancelled: '{{count}} active charging session was cancelled.',
     chargingSessionsCancelled: '{{count}} active charging sessions were cancelled.',
-    // Motorcycle assignment (driver side)
-    assignMotorcycle: 'Assign Motorcycle',
-    changeMotorcycle: 'Change Motorcycle',
+    // Vehicle assignment (driver side). `{{motorcycle}}` here is a plate — one
+    // specific machine — while `{{vehicle}}` is the country's noun for the type.
+    assignMotorcycle: 'Assign {{Vehicle}}',
+    changeMotorcycle: 'Change {{Vehicle}}',
     viewCurrentImage: 'View current image',
     viewBackImage: 'View back image',
     rejectionReason: 'Rejection reason',
-    assignMotorcycleAction: 'Assign motorcycle',
-    changeMotorcycleAction: 'Change motorcycle',
+    assignMotorcycleAction: 'Assign {{vehicle}}',
+    changeMotorcycleAction: 'Change {{vehicle}}',
     unassignMotorcycle: 'Unassign',
-    currentMotorcycle: 'Current motorcycle',
-    selectMotorcycle: 'Select a motorcycle',
+    currentMotorcycle: 'Current {{vehicle}}',
+    selectMotorcycle: 'Select a {{vehicle}}',
     searchMotorcycles: 'Search by plate, ID, or model…',
-    noAvailableMotorcycles: 'No unassigned motorcycles available.',
-    noMotorcycleAssigned: 'No motorcycle',
-    assignMotorcycleFailed: 'Failed to assign motorcycle. Please try again.',
-    unassignMotorcycleFailed: 'Failed to unassign motorcycle. Please try again.',
-    motorcycleAssignedTitle: 'Motorcycle assigned',
+    noAvailableMotorcycles: 'No unassigned {{vehicles}} available.',
+    noMotorcycleAssigned: 'No {{vehicle}}',
+    assignMotorcycleFailed: 'Failed to assign the {{vehicle}}. Please try again.',
+    unassignMotorcycleFailed: 'Failed to unassign the {{vehicle}}. Please try again.',
+    motorcycleAssignedTitle: '{{Vehicle}} assigned',
     motorcycleAssignedDescription: '{{motorcycle}} is now assigned to {{driver}}.',
-    motorcycleUnassignedTitle: 'Motorcycle unassigned',
-    motorcycleUnassignedDescription: '{{driver}} no longer has a motorcycle assigned.',
+    motorcycleUnassignedTitle: '{{Vehicle}} unassigned',
+    motorcycleUnassignedDescription: '{{driver}} no longer has a {{vehicle}} assigned.',
     topUpWallet: 'Top-Up Wallet',
     topUpWalletDescription: "Add funds to driver's wallet",
     currentBalance: 'Current Balance',
@@ -378,16 +395,27 @@ const en = {
     removeCardConfirm: 'Remove this saved card?',
     saveCardHint: 'You can choose to save this card on the next step for faster future top-ups.',
     chargeFailed: 'The payment could not be completed. Please try again or use another card.',
+    // These four were hardcoded English in TopUpModal — invisible to the
+    // language switch, and the two naming Moyasar were wrong outright for a
+    // Jordanian fleet, where Moyasar is not the gateway. The gateway is now a
+    // parameter, and the unnamed variants are used wherever it is not known to
+    // be Moyasar. See `gatewayName` in TopUpModal.
+    payAmount: 'Pay {{amount}}',
+    amountWillBeCharged: '{{amount}} will be charged',
+    securePaymentBy: 'Secure payment by {{gateway}}',
+    securePayment: 'Secure payment',
+    encryptedPaymentBy: 'Encrypted secure payment by {{gateway}}',
+    encryptedPayment: 'Encrypted secure payment',
   },
   vehicleControl: {
-    title: 'Vehicle Control',
+    title: '{{Vehicle}} Control',
     subtitle: 'Real-time fleet monitoring and analytics',
-    selectVehicle: 'Select a Vehicle',
-    selectVehicleDescription: 'Choose a vehicle from the list to view details and controls',
+    selectVehicle: 'Select a {{Vehicle}}',
+    selectVehicleDescription: 'Choose a {{vehicle}} from the list to view details and controls',
     batteryStatus: 'Battery Status',
     currentLevel: 'Current Level',
     estRange: 'Est. Range',
-    vehicleInformation: 'Vehicle Information',
+    vehicleInformation: '{{Vehicle}} Information',
     location: 'Location',
     assignedDriver: 'Assigned Driver',
     currentSpeed: 'Current Speed',
@@ -411,6 +439,9 @@ const en = {
     gpsSignal: 'GPS Signal',
     strong: 'Strong',
     weak: 'Weak',
+    // 'none' used to render as a bare em dash, which reads as "we didn't check"
+    // rather than "the device is reporting no fix".
+    gpsNone: 'No signal',
     connection: 'Connection',
     online: 'Online',
     offline: 'Offline',
@@ -422,13 +453,33 @@ const en = {
     statDistance: 'Total Distance',
     // Driver assignment card
     driverAssignment: 'Driver Assignment',
-    noDriverAssigned: 'No driver currently assigned to this vehicle.',
+    noDriverAssigned: 'No driver currently assigned to this {{vehicle}}.',
     selectDriver: 'Select a driver…',
     assignDriver: 'Assign Driver',
     unassignDriver: 'Unassign Driver',
     assignFailed: 'Failed to assign driver. Please try again.',
     unassignFailed: 'Failed to unassign driver. Please try again.',
-    commandFailed: 'Command failed to reach the vehicle. Please try again.',
+    commandFailed: 'The command did not reach the {{vehicle}}. Nothing has changed — please try again.',
+
+    // ── Who owns these controls (CR-7.1) ────────────────────────────────────
+    // Individual owners *do* get engine, lock and speed control in the mobile
+    // app. Fleet operators will ask why their drivers do not, so the split is
+    // stated here rather than left to support to explain.
+    fleetControlledTitle: 'Controlled by your fleet',
+    fleetControlledNote:
+      'Engine, lock and speed limit belong to the fleet on {{vehicles}} you own. The driver’s app cannot start, unlock or re-raise the speed limit on this {{vehicle}} — only an operator here can. Individual owners riding their own {{vehicles}} keep these controls in their app.',
+
+    // ── Command outcomes (CR-7.2) ───────────────────────────────────────────
+    commandUnsupported: 'This {{vehicle}}’s device does not support that command.',
+    commandUnsupportedTooltip: 'Not supported by this {{vehicle}}’s device.',
+    commandOffline: 'This {{vehicle}} is offline — commands cannot reach it right now.',
+    emergencyStopConfirmTitle: 'Cut power to this {{vehicle}}?',
+    emergencyStopConfirmDescription:
+      'An emergency stop cuts the engine and locks the {{vehicle}} immediately, wherever it is. If a driver is riding it, it will stop under them. Only use this when the {{vehicle}} must not keep moving.',
+    emergencyStopConfirmAction: 'Emergency stop',
+    speedLimitUnknown: 'Not reported',
+    speedLimitUnknownHint:
+      'This {{vehicle}} has not reported a speed limit. Setting one below sends it to the device.',
   },
   zones: {
     title: 'Zone Control',
@@ -465,10 +516,24 @@ const en = {
     speedNormalLabel: 'Normal Speed',
     speedSlowLabel: 'Slow',
     speedNoRideLabel: 'No Riding',
-    speedHint: 'All vehicles in this zone will be automatically limited to this maximum speed',
+    speedHint: 'All fleet {{vehicles}} in this zone will be automatically limited to this maximum speed',
     statusLabel: 'Status',
-    statusActiveDescription: 'Zone rules are enforced',
+    statusActiveDescription: 'Zone rules are switched on',
     statusInactiveDescription: 'Zone rules are paused',
+
+    // ── Who a zone binds (CR-7.4) ───────────────────────────────────────────
+    // `enforced` is not `active`: active is "the rules are switched on",
+    // enforced is "the backend binds riders to them". And a fleet's zones bind
+    // that fleet's drivers only — an operator reading an unlabelled map assumes
+    // it covers every rider on those roads, which it does not.
+    enforcedLabel: 'Enforced',
+    notEnforcedLabel: 'Advisory',
+    enforcedFleetNote:
+      'Enforced on your fleet’s drivers: their {{vehicles}} are limited automatically inside this zone.',
+    notEnforcedFleetNote:
+      'Not enforced — this zone is shown on the map but does not limit any {{vehicle}}.',
+    enforcementScopeNote:
+      'Your zones bind your own drivers. Individual owners riding their own {{vehicles}} on these roads are not affected by them.',
     saveZone: 'Save Zone',
     cancel: 'Cancel',
     notice: 'Notice',
@@ -479,13 +544,13 @@ const en = {
     types: {
       normal: 'Normal',
       normalLong: 'Normal Zone',
-      normalDescription: 'Bike operates normally with no restrictions',
+      normalDescription: 'The {{vehicle}} operates normally with no restrictions',
       slow: 'Slow Zone',
       slowLong: 'Slow Zone',
-      slowDescription: 'Speed capped — bike is limited to the set speed',
+      slowDescription: 'Speed capped — the {{vehicle}} is limited to the set speed',
       restricted: 'Restricted',
       restrictedLong: 'Restricted Zone',
-      restrictedDescription: 'Bike is shut down — riding is not allowed inside',
+      restrictedDescription: 'The {{vehicle}} is shut down — riding is not allowed inside',
     },
 
     // Validation
@@ -539,7 +604,7 @@ const en = {
   },
   reports: {
     title: 'Report Management',
-    subtitle: 'Monitor and manage your entire electric moped fleet',
+    subtitle: 'Monitor and manage your entire electric {{vehicle}} fleet',
     partialLoad: 'Some report data could not be loaded:',
     sectionMetrics: 'Key metrics',
     sectionWeeklyTrips: 'Weekly trips',

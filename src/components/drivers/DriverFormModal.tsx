@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useCountries } from '@/hooks/useCountries';
 import { useFleetContext } from '@/hooks/useFleetContext';
+import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { driversApi } from '@/lib/api';
 import { fieldErrorFrom } from '@/lib/api-errors';
 import { flagEmoji, matchesPhoneRegex, toNationalNumber } from '@/lib/country';
@@ -77,6 +78,7 @@ interface DriverFormModalProps {
 
 export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormModalProps) {
   const { t, locale } = useI18n();
+  const { tv } = useVehicleTerm();
   const isEdit = !!driver;
 
   // A fleet does not span countries, so the driver's country is the fleet's and
@@ -240,7 +242,7 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
               {isEdit ? t('drivers.editDriver') : t('drivers.addNewDriver')}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              {isEdit ? t('drivers.editDriverDescription') : t('drivers.addDriverDescription')}
+              {isEdit ? tv('drivers.editDriverDescription') : tv('drivers.addDriverDescription')}
             </p>
           </div>
         </div>
@@ -373,12 +375,12 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
             — the "Assign Vehicle" action in the drivers table.
           */}
           <div className="mt-6">
-            <SectionHeader icon={<Car className="h-4 w-4" />} title={t('drivers.vehicleAssignment')} />
+            <SectionHeader icon={<Car className="h-4 w-4" />} title={tv('drivers.vehicleAssignment')} />
           </div>
           <div className="mt-3 grid grid-cols-1 gap-4">
             <Field
-              label={t('drivers.assignedVehicle')}
-              hint={t('drivers.assignVehicleElsewhere')}
+              label={tv('drivers.assignedVehicle')}
+              hint={tv('drivers.assignVehicleElsewhere')}
             >
               <div
                 className="flex h-11 w-full items-center gap-2 rounded-xl border bg-slate-50 px-3.5 text-sm dark:bg-slate-800/60"
@@ -392,7 +394,7 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
                     <Lock className="ms-auto h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
                   </>
                 ) : (
-                  <span className="text-slate-400">{t('drivers.noVehicleAssigned')}</span>
+                  <span className="text-slate-400">{tv('drivers.noVehicleAssigned')}</span>
                 )}
               </div>
             </Field>
@@ -481,7 +483,7 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
           <div className="mt-3 rounded-xl border p-4" style={{ borderColor: 'rgb(var(--border))' }}>
             <div className="flex items-center justify-between">
               <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                {t('drivers.licensePlate')}
+                {tv('drivers.licensePlate')}
               </span>
               {isEdit && (
                 <DocStatusBadge status={existingDocStatus!.plate.status} />
@@ -516,7 +518,7 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
             <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
             <p>
               <span className="font-semibold">{t('drivers.noteLabel')}:</span>{' '}
-              {t('drivers.assignmentHint')}
+              {tv('drivers.assignmentHint')}
             </p>
           </div>
         </div>

@@ -34,17 +34,19 @@ function avgCenter(pts: ZonePoint[]): ZonePoint {
 
 /* ── Tooltip HTML ────────────────────────────────────────── */
 
-const TYPE_LABEL: Record<string, string> = {
-  operational: 'Operational Zone',
-  noRide:      'No-Ride Zone',
-  slow:        'Slow Zone',
-  parking:     'Parking Area',
-};
-
-function zoneTooltipHtml(zone: Zone): string {
+/**
+ * Leaflet tooltips are raw HTML, so they were built from hardcoded English:
+ * "NO RIDING", "km/h", and a `TYPE_LABEL` map keyed on names — `operational`,
+ * `noRide`, `parking` — that no longer exist in `ZONE_TYPES`. Every lookup but
+ * `slow` therefore missed and printed the raw key, so an Arabic map read
+ * "normal" and "restricted". The dictionary is the source for all three now.
+ */
+function zoneTooltipHtml(zone: Zone, t: (key: string) => string): string {
   const cfg = ZONE_TYPES[zone.type];
-  const label = TYPE_LABEL[cfg.labelKey] ?? cfg.labelKey;
-  const speed = cfg.speedLabelOverride === 'no_riding' ? 'NO RIDING' : `${zone.speedLimitKmh} km/h`;
+  const label = t(`zones.types.${cfg.labelKey}Long`);
+  const speed = cfg.speedLabelOverride === 'no_riding'
+    ? t('zones.noRiding')
+    : `${zone.speedLimitKmh} ${t('common.kmh')}`;
   return `<div style="font-family:system-ui,sans-serif;padding:10px 14px;min-width:170px">
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
       <span style="width:8px;height:8px;border-radius:50%;background:${cfg.color};flex-shrink:0"></span>
@@ -177,7 +179,7 @@ export default function ZoneMapInner({
           opacity:      0.9,
         });
 
-        poly.bindTooltip(zoneTooltipHtml(zone), {
+        poly.bindTooltip(zoneTooltipHtml(zone, t), {
           sticky:    true,
           className: 'zone-tooltip',
           direction: 'top',

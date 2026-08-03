@@ -27,6 +27,24 @@ export type IsoCountryCode = string & { readonly __brand: 'IsoCountryCode' };
 export type CurrencyCode = string;
 
 /**
+ * What this market calls the machine a driver rides.
+ *
+ * It is **server-driven per country** — `vehicle_term` on `GET /countries` and on
+ * `country` in `GET /fleet-admin/me`. Saudi Arabia seeds `دباب`, Jordan seeds
+ * `دراجة نارية`, and a third market will seed something else again.
+ *
+ * Nothing in this app may hardcode one of those words. Every user-facing string
+ * that names the vehicle is a parameterised key interpolated with this term —
+ * `"ال{{vehicle}}"` — resolved through `useVehicleTerm()`.
+ */
+export interface VehicleTerm {
+  /** Arabic singular, e.g. 'دباب' | 'دراجة نارية'. */
+  ar: string;
+  /** English singular, e.g. 'motorcycle'. */
+  en: string;
+}
+
+/**
  * A country as `GET /countries` describes it (API root, no token).
  *
  * The phone facts are the point of this record: the app must not carry its own
@@ -53,6 +71,8 @@ export interface Country {
   phoneExampleNational: string;
   /** Digit count of a national number — sizes and caps the input. */
   nationalNumberLength: number;
+  /** What this market calls the vehicle. Absent when the payload omitted it. */
+  vehicleTerm?: VehicleTerm;
 }
 
 /**
@@ -87,6 +107,12 @@ export interface FleetProfile {
   currencyDecimals: number;
   maxDrivers?: number;
   status?: string;
+  /**
+   * The vehicle noun for this fleet's country, from `country.vehicle_term`.
+   * Absent when the profile omitted it — {@link VehicleTerm} explains why the
+   * app must never substitute a word of its own.
+   */
+  vehicleTerm?: VehicleTerm;
 }
 
 export type VehicleStatus = 'active' | 'charging' | 'idle' | 'maintenance';
@@ -134,11 +160,29 @@ export interface Vehicle {
   totalDistanceKm: number;
   currentSpeedKmh: number;
   estimatedRangeKm: number;
-  speedLimitKmh: number;
+  /**
+   * Speed ceiling the fleet has set on this vehicle, in km/h — **absent when the
+   * backend did not report one**.
+   *
+   * There is deliberately no default. This used to read `speed_limit_kmh ?? 80`,
+   * which invented a ceiling the fleet never set and then showed it back to the
+   * operator as fact, on a slider that only went to 45. The one scale every
+   * speed limit in this app is expressed on is `VEHICLE_SPEED_LIMIT_MAX` in
+   * @/lib/vehicle-speed.
+   */
+  speedLimitKmh?: number;
   isLocked: boolean;
   isEngineRunning: boolean;
   gpsSignal: 'strong' | 'weak' | 'none';
   isOnline: boolean;
+  /**
+   * The commands this vehicle's device advertises, when the payload lists them.
+   *
+   * **Undefined means "not advertised", never "none supported"** — the controls
+   * stay enabled and a `422 command_not_supported` is what teaches us otherwise.
+   * An empty array is a device that genuinely accepts nothing.
+   */
+  supportedCommands?: string[];
 }
 
 export interface BatteryStation {
@@ -254,10 +298,26 @@ export interface Zone {
   name_en: string;
   name_ar: string;
   type: ZoneType;
-  /** Maximum allowed speed inside the zone, in km/h. 0 means "no riding" allowed. */
+  /**
+   * Maximum allowed speed inside the zone, in km/h. 0 means "no riding" allowed.
+   * Expressed on the single scale in @/lib/vehicle-speed, same as a vehicle's.
+   */
   speedLimitKmh: number;
   /** Whether the zone rules are currently being enforced. */
   active: boolean;
+  /**
+   * Whether the backend binds riders to this zone's rules.
+   *
+   * A fleet's zones bind that fleet's **drivers** — they do not bind individual
+   * owners riding their own vehicles on the same roads, who answer only to the
+   * platform-wide zones. Operators read an unlabelled map as covering everyone,
+   * so this drives an explicit label rather than being inferred from `active`:
+   * `active` is "are the rules switched on", `enforced` is "are they binding".
+   *
+   * Undefined when the payload omits the flag — the label then says nothing
+   * rather than claiming enforcement either way.
+   */
+  enforced?: boolean;
   /** Frontend-only — whether the zone polygon is visible on the map. */
   visible: boolean;
   /** Closed polygon. Minimum 3 points to be a valid zone. */

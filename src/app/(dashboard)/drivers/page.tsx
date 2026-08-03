@@ -17,6 +17,7 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Pagination } from '@/components/ui/Pagination';
 import { SuccessDialog } from '@/components/ui/SuccessDialog';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { useCountries } from '@/hooks/useCountries';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { driversApi, fleetApi } from '@/lib/api';
@@ -48,6 +49,7 @@ function recencyKey(d: Driver): number {
 
 export default function DriversPage() {
   const { t } = useI18n();
+  const { tv } = useVehicleTerm();
 
   // A driver is created in the fleet's country — fleets do not span countries —
   // so the dial code that builds the E.164 number comes from the fleet profile.
@@ -302,7 +304,7 @@ export default function DriversPage() {
     );
     setSuccessDialog({
       kind: 'statusChanged',
-      title: t('drivers.motorcycleAssignedTitle'),
+      title: tv('drivers.motorcycleAssignedTitle'),
       description: t('drivers.motorcycleAssignedDescription', { motorcycle: plate, driver: driver?.name ?? driverId }),
     });
     return true;
@@ -325,8 +327,8 @@ export default function DriversPage() {
     );
     setSuccessDialog({
       kind: 'statusChanged',
-      title: t('drivers.motorcycleUnassignedTitle'),
-      description: t('drivers.motorcycleUnassignedDescription', { driver: driver?.name ?? driverId }),
+      title: tv('drivers.motorcycleUnassignedTitle'),
+      description: tv('drivers.motorcycleUnassignedDescription', { driver: driver?.name ?? driverId }),
     });
     return true;
   };

@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import type { DashboardMetrics } from '@/types';
 import { cn } from '@/lib/cn';
@@ -27,6 +28,7 @@ interface FleetStatusPanelProps {
 
 export function FleetStatusPanel({ metrics }: FleetStatusPanelProps) {
   const { t, locale } = useI18n();
+  const { tv } = useVehicleTerm();
   const { formatMoney } = useFleetContext();
 
   const items: StatusItem[] = [
@@ -56,7 +58,7 @@ export function FleetStatusPanel({ metrics }: FleetStatusPanelProps) {
     },
     {
       icon: <Coins className="h-4 w-4" />,
-      label: t('dashboard.averageCostVehicle'),
+      label: tv('dashboard.averageCostVehicle'),
       // Money, and it used to render as a bare number with no unit at all — which
       // reads as riyals to a Saudi operator and as dinars to a Jordanian one.
       value: formatMoney(metrics.averageCostPerVehicle, locale),

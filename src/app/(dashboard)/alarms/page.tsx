@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { alarmsApi } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
@@ -31,6 +32,7 @@ const SEVERITY_CFG: Record<AlarmSeverity, {
 
 export default function AlarmsPage() {
   const { t, locale } = useI18n();
+  const { tv } = useVehicleTerm();
   const [alarms, setAlarms] = useState<Alarm[]>([]);
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState<string | null>(null);
@@ -81,7 +83,7 @@ export default function AlarmsPage() {
   };
 
   return (
-    <DashboardShell title={t('alarms.title')} subtitle={t('alarms.subtitle')}>
+    <DashboardShell title={t('alarms.title')} subtitle={tv('alarms.subtitle')}>
       {apiError && (
         <div className="mb-3 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
           <span>{apiError}</span>

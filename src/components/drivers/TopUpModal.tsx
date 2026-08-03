@@ -40,9 +40,26 @@ function brandLabel(brand: string): string {
 
 type PaymentData = Awaited<ReturnType<typeof walletApi.initiateTopUp>>['paymentData'];
 
+/**
+ * The payment gateway to name in the security footnote, or **null** to name none.
+ *
+ * Moyasar is a Saudi gateway. Printing "Secure payment by Moyasar" to a
+ * Jordanian fleet names a company that is not processing their money — so the
+ * gateway is only named where it is known, and the neutral wording is used
+ * everywhere else rather than a wrong one.
+ *
+ * CR-2 replaces this with the gateway the payment-methods endpoint declares per
+ * country (`jo_card`, `zaincash`, `orangemoney`, `efawateer`, …). Until that
+ * ships, the fleet's own country is the only fact available, and the honest
+ * answer for a non-SA fleet is "we don't know yet".
+ */
+function gatewayNameFor(isoCountryCode: string | null): string | null {
+  return isoCountryCode === 'SA' ? 'Moyasar' : null;
+}
+
 export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const { t, locale } = useI18n();
-  const { formatMoney, currency, currencyDecimals, currencyStatus } = useFleetContext();
+  const { formatMoney, currency, currencyDecimals, currencyStatus, isoCountryCode } = useFleetContext();
 
   const [step, setStep]               = useState<Step>('amount');
 
@@ -228,6 +245,15 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     reason === 'below_service_price'
       ? t('drivers.minTopUpBelowServicePrice', { amount: formatAmount(money) })
       : t('drivers.minTopUpAbsoluteFloor',     { amount: formatAmount(money) });
+
+  // Named only where the gateway is known — never "Moyasar" to a Jordanian fleet.
+  const gateway = gatewayNameFor(isoCountryCode);
+  const securePaymentLabel = gateway
+    ? t('drivers.securePaymentBy', { gateway })
+    : t('drivers.securePayment');
+  const encryptedPaymentLabel = gateway
+    ? t('drivers.encryptedPaymentBy', { gateway })
+    : t('drivers.encryptedPayment');
 
   const servicePriceLabel = (service: ServicePrice): string => {
     const key = service.key.toLowerCase();
@@ -560,7 +586,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
           >
             <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
               <Shield className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-              <span>Secure payment by Moyasar</span>
+              <span>{securePaymentLabel}</span>
             </div>
             <div className="flex items-center gap-2">
               <Button type="button" variant="secondary" onClick={onClose} className="min-w-[90px]">
@@ -576,7 +602,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                 leftIcon={!initiating ? <CreditCard className="h-4 w-4" /> : undefined}
               >
                 {numAmount > 0 && currencyStatus !== 'pending'
-                  ? `Pay ${formatMoney(numAmount, locale)}`
+                  ? t('drivers.payAmount', { amount: formatMoney(numAmount, locale) })
                   : t('drivers.confirmTopUp')}
               </Button>
             </div>
@@ -595,7 +621,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
               type="button"
               onClick={headerBack}
               className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 transition-colors dark:hover:bg-slate-800"
-              aria-label="Back"
+              aria-label={t('common.back')}
             >
               <ChevronLeft className="h-5 w-5" />
             </button>
@@ -607,7 +633,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                 {cardMode === 'list' ? t('drivers.savedCards') : t('drivers.addNewCardTitle')}
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {formatMoney(numAmount, locale)} will be charged
+                {t('drivers.amountWillBeCharged', { amount: formatMoney(numAmount, locale) })}
               </p>
             </div>
           </div>
@@ -645,9 +671,10 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                           </p>
                           {(card.expMonth && card.expYear) ? (
                             <p className="text-[11px] text-slate-400">
-                              {t('drivers.expiresShort')
-                                .replace('{{month}}', String(card.expMonth).padStart(2, '0'))
-                                .replace('{{year}}', String(card.expYear).slice(-2))}
+                              {t('drivers.expiresShort', {
+                                month: String(card.expMonth).padStart(2, '0'),
+                                year:  String(card.expYear).slice(-2),
+                              })}
                             </p>
                           ) : card.name ? (
                             <p className="truncate text-[11px] text-slate-400">{card.name}</p>
@@ -701,12 +728,12 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                 className="mt-5 w-full"
                 leftIcon={!charging ? <CreditCard className="h-4 w-4" /> : undefined}
               >
-                {t('drivers.payWithCard').replace('{{amount}}', formatMoney(numAmount, locale))}
+                {t('drivers.payWithCard', { amount: formatMoney(numAmount, locale) })}
               </Button>
 
               <div className="mt-3 flex items-center justify-center gap-2 text-xs text-slate-400">
                 <Shield className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                <span>Encrypted secure payment by Moyasar</span>
+                <span>{encryptedPaymentLabel}</span>
               </div>
             </div>
           )}
@@ -731,7 +758,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
 
               <div className="mt-4 flex items-center justify-center gap-2 rounded-xl bg-slate-50 py-2.5 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
                 <Shield className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                <span>Encrypted secure payment by Moyasar</span>
+                <span>{encryptedPaymentLabel}</span>
               </div>
             </div>
           )}

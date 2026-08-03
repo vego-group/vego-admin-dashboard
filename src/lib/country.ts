@@ -24,7 +24,7 @@
  */
 
 import { logger } from '@/lib/logger';
-import type { Country, CurrencyCode, DialCode, IsoCountryCode } from '@/types';
+import type { Country, CurrencyCode, DialCode, IsoCountryCode, VehicleTerm } from '@/types';
 
 /** Coerce a raw API `country_code` into a dial prefix. */
 export function toDialCode(raw: string | number | null | undefined): DialCode | undefined {
@@ -61,6 +61,7 @@ export const SEEDED_COUNTRIES: Record<string, Country> = {
     phonePlaceholder: '5X XXX XXXX',
     phoneExampleNational: '512345678',
     nationalNumberLength: 9,
+    vehicleTerm: { ar: 'دباب', en: 'motorcycle' },
   },
   JO: {
     isoCountryCode: 'JO' as IsoCountryCode,
@@ -73,6 +74,7 @@ export const SEEDED_COUNTRIES: Record<string, Country> = {
     phonePlaceholder: '7X XXX XXXX',
     phoneExampleNational: '791234567',
     nationalNumberLength: 9,
+    vehicleTerm: { ar: 'دراجة نارية', en: 'motorcycle' },
   },
 };
 
@@ -90,6 +92,44 @@ export function seededCurrencyFor(
   return seed?.currency && seed.currencyDecimals !== undefined
     ? { currency: seed.currency, currencyDecimals: seed.currencyDecimals }
     : undefined;
+}
+
+// ── Vehicle terminology ──────────────────────────────────────────────────────
+
+/**
+ * What the app calls the vehicle when nobody has told it what this market calls
+ * one — a **generic** noun, never one country's word.
+ *
+ * Falling back to `دباب` would reintroduce exactly the bug CR-5 removes: a
+ * Jordanian operator reading Saudi vocabulary. "Vehicle" / "مركبة" is vaguer
+ * than the real term and correct in every market, which is the right trade when
+ * the real term is genuinely unknown.
+ */
+export const NEUTRAL_VEHICLE_TERM: VehicleTerm = { ar: 'مركبة', en: 'vehicle' };
+
+/** Read a `vehicle_term` object off a payload, or undefined if it is unusable. */
+export function toVehicleTerm(raw: unknown): VehicleTerm | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const { ar, en } = raw as { ar?: unknown; en?: unknown };
+  const arTerm = typeof ar === 'string' ? ar.trim() : '';
+  const enTerm = typeof en === 'string' ? en.trim() : '';
+  if (!arTerm && !enTerm) return undefined;
+  // One language present is still better than none — mirror it rather than
+  // dropping a term the backend did supply.
+  return { ar: arTerm || enTerm, en: enTerm || arTerm };
+}
+
+/**
+ * The vehicle noun for a country, from the seed.
+ *
+ * Only a backstop for a payload that omitted `vehicle_term`. It is keyed by
+ * country, so a Jordanian fleet still gets the Jordanian word — this is not the
+ * blanket hardcode CR-5 forbids. An unknown country gets
+ * {@link NEUTRAL_VEHICLE_TERM}, not Saudi Arabia's.
+ */
+export function seededVehicleTermFor(iso: IsoCountryCode | null | undefined): VehicleTerm {
+  if (!iso) return NEUTRAL_VEHICLE_TERM;
+  return SEEDED_COUNTRIES[iso]?.vehicleTerm ?? NEUTRAL_VEHICLE_TERM;
 }
 
 /** Find a country by ISO code in a roster. */

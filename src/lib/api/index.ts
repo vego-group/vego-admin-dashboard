@@ -19,6 +19,7 @@ import {
   seededCurrencyFor,
   toDialCode,
   toIsoCountryCode,
+  toVehicleTerm,
 } from '@/lib/country';
 import { logger } from '@/lib/logger';
 import {
@@ -162,6 +163,8 @@ interface ApiMotorcycle {
     // Real API nests the latest telemetry
     latest_gps?: { latitude?: number | string; longitude?: number | string; speed?: number; gps_signal?: string };
     latest_battery?: { soc?: number; relative_soc?: number; soh?: number; voltage?: number };
+    /** Device-twin capability list, when the device advertises one. */
+    supported_commands?: unknown;
   };
   // Real API: assigned_user; legacy: driver
   assigned_user?: { id: number | string; name: string } | null;
@@ -172,6 +175,8 @@ interface ApiMotorcycle {
   speed_limit_kmh?: number;
   is_locked?: boolean;
   is_engine_running?: boolean;
+  /** Commands this vehicle's device advertises, if the payload lists them. */
+  supported_commands?: unknown;
 }
 
 interface ApiCabinet {
@@ -446,6 +451,24 @@ function mapDriver(d: ApiDriver): Driver {
   };
 }
 
+/**
+ * The device's advertised command list, or **undefined** when it advertises
+ * none.
+ *
+ * The distinction matters: undefined means "this payload says nothing about
+ * capabilities", and the controls stay enabled on that basis. An empty array is
+ * a device that positively accepts nothing, and greys them out. Collapsing the
+ * two would disable every control on every backend that has not shipped the
+ * field yet.
+ */
+function toSupportedCommands(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  return raw
+    .filter((c): c is string => typeof c === 'string')
+    .map((c) => c.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 function mapMotorcycle(m: ApiMotorcycle): Vehicle {
   const iot = m.iot_device;
   const gps = iot?.latest_gps;
@@ -479,11 +502,15 @@ function mapMotorcycle(m: ApiMotorcycle): Vehicle {
     totalDistanceKm:    m.total_distance_km ?? 0,
     currentSpeedKmh:    gps?.speed ?? iot?.speed_kmh ?? 0,
     estimatedRangeKm:   m.estimated_range_km ?? 0,
-    speedLimitKmh:      m.speed_limit_kmh ?? 80,
+    // No default. This was `?? 80` — a ceiling no fleet had set, shown back to
+    // the operator as theirs, on a slider that stopped at 45. Unknown is
+    // unknown; the control panel says so rather than picking a number.
+    speedLimitKmh:      m.speed_limit_kmh ?? undefined,
     isLocked:           m.is_locked ?? false,
     isEngineRunning:    m.is_engine_running ?? false,
     gpsSignal:          (gps?.gps_signal ?? iot?.gps_signal ?? 'strong') as Vehicle['gpsSignal'],
     isOnline:           iot?.is_online ?? false,
+    supportedCommands:  toSupportedCommands(m.supported_commands ?? iot?.supported_commands),
   };
 }
 
@@ -700,6 +727,8 @@ interface ApiCountry {
   phone_example_national?: string | null;
   national_number_length?: number | null;
   is_active?: boolean | null;
+  /** What this market calls the vehicle — `{ ar, en }`. Seeded per country. */
+  vehicle_term?: { ar?: string | null; en?: string | null } | null;
 }
 
 /** Does this look like a format mask ("5X XXX XXXX") rather than a number? */
@@ -754,6 +783,10 @@ function mapCountry(c: ApiCountry): Country | null {
       c.national_number_length ??
       seed?.nationalNumberLength ??
       15,
+    // The vehicle noun is this market's, never the app's. Left undefined when
+    // neither the payload nor the seed has one, so callers fall through to the
+    // neutral term instead of inheriting another country's word.
+    vehicleTerm: toVehicleTerm(c.vehicle_term) ?? seed?.vehicleTerm,
   };
 }
 
@@ -802,19 +835,46 @@ export const countriesApi = {
 // Fleet self-profile — GET /fleet-admin/me
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * `GET /fleet-admin/me`, across the shapes it is documented and observed in.
+ *
+ * The currency and the country sit at **two levels**: some payloads carry them
+ * on `fleet`, the documented one carries `currency` / `currency_decimals` at the
+ * top and the country as a sibling `country` block. Both are read, fleet-first,
+ * because a field that moved must not silently become "unresolved".
+ *
+ * `country.vehicle_term` is the only place this app can learn what this market
+ * calls the vehicle, which is why the `country` block is read at all.
+ *
+ * Note `fleet.country_code`: on a **user** that name means the dial prefix, but
+ * on the fleet block the backend puts an ISO code ("JO") in it. `toIsoCountryCode`
+ * rejects "+962" outright, so reading both here cannot mistake one for the other.
+ */
 interface ApiFleetMe {
   fleet?: {
     id?: number | string;
     name?: string;
+    company_name?: string | null;
     iso_country_code?: string | null;
-    /** Dial prefix — present for display, never used to resolve the country. */
+    /** ISO code on this block, despite the name. Dial prefixes are rejected. */
     country_code?: string | null;
     currency?: string | null;
     currency_decimals?: number | null;
-    money_format?: string | null;
     max_drivers?: number | null;
     status?: string | null;
   };
+  /** The fleet's country — the source of `vehicle_term`. */
+  country?: {
+    code?: string | null;
+    iso_code?: string | null;
+    name_en?: string | null;
+    dial_code?: string | null;
+    vehicle_term?: { ar?: string | null; en?: string | null } | null;
+  } | null;
+  currency?: string | null;
+  currency_decimals?: number | null;
+  /** A zero in the fleet's currency, e.g. `{ amount: "0.000", decimals: 3 }`. */
+  money_format?: { currency?: string | null; decimals?: number | null } | null;
   user?: {
     id?: number | string;
     name?: string;
@@ -834,14 +894,25 @@ export const fleetAdminApi = {
   async getMe(): Promise<FleetProfile> {
     const raw = await apiClient.get<{ data?: ApiFleetMe } & ApiFleetMe>('/fleet-admin/me');
     const body = (raw.data && typeof raw.data === 'object') ? raw.data : raw;
-    const fleet = body.fleet ?? {};
+    const fleet   = body.fleet ?? {};
+    const country = body.country ?? {};
 
-    const isoCountryCode = toIsoCountryCode(fleet.iso_country_code) ?? null;
-    // Prefer the fleet's declared currency; fall back to the country seed only
-    // when the payload omits it entirely.
+    const isoCountryCode =
+      toIsoCountryCode(fleet.iso_country_code)
+      ?? toIsoCountryCode(fleet.country_code)
+      ?? toIsoCountryCode(country.code ?? country.iso_code)
+      ?? null;
+
+    // Prefer the fleet's declared currency, then the top-level block the
+    // documented payload uses, then `money_format`'s own example, and only then
+    // the country seed.
     const seeded   = seededCurrencyFor(isoCountryCode);
-    const currency = fleet.currency ?? seeded?.currency;
-    const decimals = fleet.currency_decimals
+    const currency =
+      fleet.currency ?? body.currency ?? body.money_format?.currency ?? seeded?.currency;
+    const decimals =
+      fleet.currency_decimals
+      ?? body.currency_decimals
+      ?? body.money_format?.decimals
       ?? seeded?.currencyDecimals
       ?? decimalsForCurrency(currency);
 
@@ -857,12 +928,16 @@ export const fleetAdminApi = {
 
     return {
       id:               String(fleet.id ?? ''),
-      name:             fleet.name ?? '',
+      name:             fleet.name ?? fleet.company_name ?? '',
       isoCountryCode,
       currency,
       currencyDecimals: decimals,
       maxDrivers:       fleet.max_drivers ?? undefined,
       status:           fleet.status ?? undefined,
+      // Unlike the currency, a missing vehicle term is not fatal: the UI falls
+      // back to the country seed and then to a neutral noun. See
+      // `resolveVehicleTerm()` in @/hooks/useVehicleTerm.
+      vehicleTerm:      toVehicleTerm(country.vehicle_term),
     };
   },
 };
@@ -902,13 +977,78 @@ export interface MotorcycleStatistics {
   totalDistanceKm: number;
 }
 
-// Vehicle control commands (POST /fleet-admin/motorcycles/{id}/command)
+// ── Vehicle control commands ─────────────────────────────────────────────────
+//
+// POST /fleet-admin/motorcycles/{id}/command — the fleet-admin realm's own route
+// for the IoT command layer. SuperAdmin drives the same hardware through
+// POST /iot-devices/{imei}/{action}; that route is keyed by IMEI, which a
+// fleet motorcycle payload does not carry, and is scoped to a realm this app's
+// token does not hold. Fleet Admin commands go through here.
+
 export type VehicleCommand = 'lock' | 'unlock' | 'start' | 'stop' | 'emergency_stop' | 'set_speed_limit';
 
+/**
+ * Control state as the backend reports it — **every field optional**.
+ *
+ * Each field used to be defaulted (`is_locked ?? false`) and then adopted as
+ * authoritative. A 2xx that named only the field it changed therefore made the
+ * panel announce that the engine was stopped and the speed limit was 0, neither
+ * of which the backend had said. An absent field now stays absent, and the
+ * caller keeps the value it already had.
+ */
 export interface VehicleControlState {
-  isLocked: boolean;
-  isEngineRunning: boolean;
-  speedLimitKmh: number;
+  isLocked?: boolean;
+  isEngineRunning?: boolean;
+  speedLimitKmh?: number;
+}
+
+/**
+ * What a control command did.
+ *
+ * `unsupported` is kept distinct from `failed` because they need different
+ * words and different consequences: a device that cannot lock will never lock,
+ * so that control is disabled from then on, while a failure is worth retrying.
+ * Collapsing both into `null` — which is what this returned before — meant an
+ * operator retried a command the hardware does not implement, indefinitely.
+ */
+export type VehicleCommandOutcome =
+  | { ok: true;  state: VehicleControlState }
+  | { ok: false; reason: 'unsupported' | 'failed'; message: string | null };
+
+/**
+ * Does this failure mean the device cannot do this, rather than that the attempt
+ * went wrong?
+ *
+ * `422 command_not_supported` is the backend's explicit signal. A 404/405/501 on
+ * the command route is the same thing said structurally — the action is not a
+ * thing this deployment can do — and must not be dressed up as a transient
+ * error the operator should retry.
+ */
+function isUnsupportedCommand(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  if (err.code === 'command_not_supported') return true;
+  return err.status === 404 || err.status === 405 || err.status === 501;
+}
+
+/**
+ * The state a successful command implies about the field it acted on.
+ *
+ * A 2xx for `lock` means the vehicle is locked — that is what the response
+ * *means*, so it is not an assumption. It says nothing about the engine, which
+ * is why nothing else is filled in here.
+ */
+function intendedState(action: VehicleCommand, speedLimit?: number): VehicleControlState {
+  switch (action) {
+    case 'lock':            return { isLocked: true };
+    case 'unlock':          return { isLocked: false };
+    case 'start':           return { isEngineRunning: true };
+    case 'stop':            return { isEngineRunning: false };
+    // Only the engine. Whether an emergency stop also engages the lock is
+    // backend behaviour we have not confirmed, and "locked" is a security claim
+    // — if it locks, the response says so and that wins.
+    case 'emergency_stop':  return { isEngineRunning: false };
+    case 'set_speed_limit': return speedLimit != null ? { speedLimitKmh: speedLimit } : {};
+  }
 }
 
 export const fleetApi = {
@@ -992,13 +1132,17 @@ export const fleetApi = {
   /**
    * Send a control command to a motorcycle.
    * Endpoint: POST /fleet-admin/motorcycles/{id}/command
-   * Returns the authoritative control state the backend persisted, or null on error.
+   *
+   * These buttons cut a moving vehicle's engine, so the one thing this must
+   * never do is report a success it did not get. Every failure is classified and
+   * returned — see {@link VehicleCommandOutcome} — instead of being flattened
+   * into a single `null` the UI could only describe as "command failed".
    */
   async sendCommand(
     motorcycleId: string,
     action: VehicleCommand,
     speedLimit?: number,
-  ): Promise<VehicleControlState | null> {
+  ): Promise<VehicleCommandOutcome> {
     try {
       const res = await apiClient.post<{
         data?: { is_locked?: boolean; is_engine_running?: boolean; speed_limit_kmh?: number };
@@ -1006,14 +1150,34 @@ export const fleetApi = {
         action,
         ...(action === 'set_speed_limit' && speedLimit != null ? { speed_limit: speedLimit } : {}),
       });
-      const d = res.data ?? {};
+
+      const d = res?.data ?? {};
+      // What the backend reported wins; what the command *means* fills only the
+      // gaps it left. A field neither of them mentions stays undefined, and the
+      // caller keeps whatever it already knew.
       return {
-        isLocked:        d.is_locked ?? false,
-        isEngineRunning: d.is_engine_running ?? false,
-        speedLimitKmh:   d.speed_limit_kmh ?? speedLimit ?? 0,
+        ok: true,
+        state: {
+          ...intendedState(action, speedLimit),
+          ...(d.is_locked         !== undefined ? { isLocked:        d.is_locked }         : {}),
+          ...(d.is_engine_running !== undefined ? { isEngineRunning: d.is_engine_running } : {}),
+          ...(d.speed_limit_kmh   !== undefined ? { speedLimitKmh:   d.speed_limit_kmh }   : {}),
+        },
       };
-    } catch {
-      return null;
+    } catch (err) {
+      const unsupported = isUnsupportedCommand(err);
+      logger.warn(
+        `[fleetApi] Command "${action}" on motorcycle ${motorcycleId} ` +
+        `${unsupported ? 'is not supported by this device' : 'failed'}:`,
+        err,
+      );
+      return {
+        ok: false,
+        reason: unsupported ? 'unsupported' : 'failed',
+        // The backend's own sentence when it wrote one — it knows more about why
+        // than any message this layer could compose.
+        message: err instanceof ApiError && err.message ? err.message : null,
+      };
     }
   },
 };
@@ -1347,6 +1511,12 @@ interface ApiZone {
   speed_limit: number | null;
   coordinates: string; // WKT POLYGON
   is_active: boolean;
+  /**
+   * Whether the backend binds riders to this zone. Distinct from `is_active`:
+   * a fleet zone binds that fleet's drivers and not the individual owners
+   * riding the same roads. See {@link import('@/types').Zone.enforced}.
+   */
+  enforced?: boolean | null;
   created_at?: string;
 }
 
@@ -1427,6 +1597,9 @@ function mapApiZone(api: ApiZone): Zone {
     type:         toZoneType(api.type),
     speedLimitKmh: api.speed_limit ?? 0,
     active:       api.is_active,
+    // `?? undefined` on purpose: a payload without the flag says nothing about
+    // enforcement, and the card must not claim it either way.
+    enforced:     api.enforced ?? undefined,
     visible:      true,
     polygon:      wktToPoints(api.coordinates ?? ''),
     createdAt:    api.created_at ?? new Date().toISOString(),

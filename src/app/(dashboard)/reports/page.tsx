@@ -12,6 +12,7 @@ import { MonthlyRevenueChart } from '@/components/reports/MonthlyRevenueChart';
 import { CostAnalysisChart } from '@/components/reports/CostAnalysisChart';
 import { TopDriversLeaderboard } from '@/components/reports/TopDriversLeaderboard';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { reportsApi, dashboardApi } from '@/lib/api';
 import type {
@@ -27,6 +28,7 @@ type TopDriver     = { name: string; swaps: number; charges: number; activity: n
 
 export default function ReportsPage() {
   const { t, locale } = useI18n();
+  const { tv } = useVehicleTerm();
   const { formatMoney } = useFleetContext();
 
   const [loading, setLoading]               = useState(true);
@@ -82,7 +84,7 @@ export default function ReportsPage() {
   }, [t]);
 
   return (
-    <DashboardShell title={t('reports.title')} subtitle={t('reports.subtitle')}>
+    <DashboardShell title={t('reports.title')} subtitle={tv('reports.subtitle')}>
       {failedSections.length > 0 && (
         <div className="mb-3 flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
           <span>

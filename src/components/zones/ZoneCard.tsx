@@ -1,9 +1,10 @@
 'use client';
 
-import { Eye, EyeOff, Pencil, Trash2 } from 'lucide-react';
+import { Eye, EyeOff, Pencil, ShieldCheck, ShieldOff, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Switch } from '@/components/ui/Switch';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { ZONE_TYPES } from '@/lib/zone-types';
 import { cn } from '@/lib/cn';
 import type { Zone } from '@/types';
@@ -28,6 +29,7 @@ export function ZoneCard({
   onDelete,
 }: ZoneCardProps) {
   const { t } = useI18n();
+  const { tv } = useVehicleTerm();
   const config = ZONE_TYPES[zone.type];
 
   // Speed limit display — color depends on zone type
@@ -55,10 +57,35 @@ export function ZoneCard({
           <h3 className="truncate text-sm font-bold text-slate-900 dark:text-slate-50">
             {zone.name}
           </h3>
-          <div className="mt-1.5">
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <Badge tone={config.badgeTone}>
               {t(`zones.types.${config.labelKey}`)}
             </Badge>
+            {/*
+              Whether this zone binds anyone, stated separately from whether it
+              is switched on. Rendered only when the backend sent the flag — a
+              payload that omits `enforced` says nothing, and neither does this.
+            */}
+            {zone.enforced !== undefined && (
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                  zone.enforced
+                    ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300'
+                    : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
+                )}
+                title={
+                  zone.enforced
+                    ? tv('zones.enforcedFleetNote')
+                    : tv('zones.notEnforcedFleetNote')
+                }
+              >
+                {zone.enforced
+                  ? <ShieldCheck className="h-3 w-3" />
+                  : <ShieldOff className="h-3 w-3" />}
+                {zone.enforced ? t('zones.enforcedLabel') : t('zones.notEnforcedLabel')}
+              </span>
+            )}
           </div>
         </div>
         <button
@@ -122,7 +149,7 @@ export function ZoneCard({
         <span className={cn('font-bold tabular-nums', speedColor)}>
           {config.speedLabelOverride === 'no_riding'
             ? t('zones.noRiding')
-            : `${zone.speedLimitKmh} km/h`}
+            : `${zone.speedLimitKmh} ${t('common.kmh')}`}
         </span>
       </div>
     </div>
