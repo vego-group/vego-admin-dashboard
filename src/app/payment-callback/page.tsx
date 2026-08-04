@@ -4,15 +4,18 @@ import { useEffect, useState } from 'react';
 import { CheckCircle2, XCircle, Clock, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { walletApi } from '@/lib/api';
-import { formatCurrency } from '@/lib/format';
+import { useFleetContext } from '@/hooks/useFleetContext';
 import { logger } from '@/lib/logger';
 
 type Status = 'loading' | 'success' | 'failed' | 'pending';
 
 export default function PaymentCallbackPage() {
+  const { formatMoney } = useFleetContext();
   const [status, setStatus]     = useState<Status>('loading');
-  const [amount, setAmount]     = useState<number | null>(null);
-  const [balance, setBalance]   = useState<number | null>(null);
+  // Held as the raw fixed-precision strings the gateway/backend returned, and
+  // parsed at render time against the fleet's own decimal count.
+  const [amount, setAmount]     = useState<string | null>(null);
+  const [balance, setBalance]   = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState('The payment could not be processed. Please try again.');
 
   useEffect(() => {
@@ -24,10 +27,8 @@ export default function PaymentCallbackPage() {
     // Saved-card direct charge already settled server-side (wallet credited).
     // Show the result straight away — re-verifying would risk a double credit.
     if (params.get('settled') === '1' && urlStatus === 'paid') {
-      const a = parseFloat(params.get('amount')  ?? '');
-      const b = parseFloat(params.get('balance') ?? '');
-      setAmount(Number.isFinite(a) ? a : null);
-      setBalance(Number.isFinite(b) ? b : null);
+      setAmount(params.get('amount'));
+      setBalance(params.get('balance'));
       setStatus('success');
       return;
     }
@@ -49,8 +50,8 @@ export default function PaymentCallbackPage() {
       .then((result) => {
         const s = (result.status ?? '').toLowerCase();
         if (s === 'completed' || s === 'paid' || s === 'captured') {
-          setAmount(result.amount  ?? null);
-          setBalance(result.balance ?? null);
+          setAmount(result.amount  != null ? String(result.amount)  : null);
+          setBalance(result.balance != null ? String(result.balance) : null);
           setStatus('success');
         } else if (s === 'failed') {
           setStatus('failed');
@@ -86,14 +87,14 @@ export default function PaymentCallbackPage() {
             <h2 className="mt-4 text-xl font-bold text-slate-900 dark:text-slate-50">Payment Successful</h2>
             {amount != null && (
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                {formatCurrency(amount, 'en')} has been added to the driver&apos;s wallet.
+                {formatMoney(amount)} has been added to the driver&apos;s wallet.
               </p>
             )}
             {balance != null && (
               <div className="mt-3 rounded-xl bg-emerald-50 px-4 py-2.5 dark:bg-emerald-500/10">
                 <p className="text-xs text-slate-500 dark:text-slate-400">New wallet balance</p>
                 <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
-                  {formatCurrency(balance, 'en')}
+                  {formatMoney(balance)}
                 </p>
               </div>
             )}

@@ -11,6 +11,7 @@ import { BatteryHealthChart } from '@/components/dashboard/BatteryHealthChart';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { dashboardApi, fleetApi, stationsApi } from '@/lib/api';
 import type {
   DashboardMetrics,
@@ -58,6 +59,7 @@ const FALLBACK_HEALTH: BatteryHealthPoint[] = [
 
 export default function DashboardPage() {
   const { t } = useI18n();
+  const { tv } = useVehicleTerm();
 
   // KPI + Fleet Status — starts with zeros, replaced by real API data
   const [metrics, setMetrics] = useState<DashboardMetrics>(EMPTY_METRICS);
@@ -164,7 +166,7 @@ export default function DashboardPage() {
             <h2 className="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-50">
               {t('dashboard.liveFleetMap')}
             </h2>
-            <p className="text-xs text-slate-500">{t('dashboard.liveFleetMapSubtitle')}</p>
+            <p className="text-xs text-slate-500">{tv('dashboard.liveFleetMapSubtitle')}</p>
           </div>
           <LiveFleetMap vehicles={vehicles} stations={stations} />
         </Card>

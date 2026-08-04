@@ -10,14 +10,16 @@ import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { fleetApi, driversApi } from '@/lib/api';
 import type { Vehicle } from '@/types';
 import type { Driver } from '@/types';
-import type { MotorcycleBattery, MotorcycleStatistics, VehicleCommand, VehicleControlState } from '@/lib/api';
+import type { MotorcycleBattery, MotorcycleStatistics, VehicleCommand, VehicleCommandOutcome } from '@/lib/api';
 import { logger } from '@/lib/logger';
 
 export default function VehicleControlPage() {
   const { t } = useI18n();
+  const { tv } = useVehicleTerm();
 
   // ── Vehicle list ─────────────────────────────────────────────────────────
   const [vehicles, setVehicles]   = useState<Vehicle[]>([]);
@@ -145,19 +147,28 @@ export default function VehicleControlPage() {
       motorcycleId: string,
       action: VehicleCommand,
       speedLimit?: number,
-    ): Promise<VehicleControlState | null> => {
-      const state = await fleetApi.sendCommand(motorcycleId, action, speedLimit);
-      if (state) {
-        // Persist the authoritative control state onto the vehicle in the list.
+    ): Promise<VehicleCommandOutcome> => {
+      const outcome = await fleetApi.sendCommand(motorcycleId, action, speedLimit);
+      if (outcome.ok) {
+        // Persist only what the backend actually reported. A field it stayed
+        // silent about keeps the value the list already held — writing a
+        // fabricated default here is what used to make a lock response claim
+        // the engine had stopped.
+        const { state } = outcome;
         setVehicles((prev) =>
           prev.map((v) =>
             v.id === motorcycleId
-              ? { ...v, isLocked: state.isLocked, isEngineRunning: state.isEngineRunning, speedLimitKmh: state.speedLimitKmh }
+              ? {
+                  ...v,
+                  ...(state.isLocked        !== undefined ? { isLocked:        state.isLocked }        : {}),
+                  ...(state.isEngineRunning !== undefined ? { isEngineRunning: state.isEngineRunning } : {}),
+                  ...(state.speedLimitKmh   !== undefined ? { speedLimitKmh:   state.speedLimitKmh }   : {}),
+                }
               : v
           )
         );
       }
-      return state;
+      return outcome;
     },
     []
   );
@@ -167,7 +178,7 @@ export default function VehicleControlPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <DashboardShell title={t('vehicleControl.title')} subtitle={t('vehicleControl.subtitle')}>
+    <DashboardShell title={tv('vehicleControl.title')} subtitle={t('vehicleControl.subtitle')}>
       {loading ? (
         <div className="grid gap-4 lg:grid-cols-[320px_1fr_320px]">
           <Card className="p-5">
@@ -204,8 +215,8 @@ export default function VehicleControlPage() {
               <Card className="flex h-[600px] items-center justify-center">
                 <EmptyState
                   icon={<Bike className="h-6 w-6" />}
-                  title={t('vehicleControl.selectVehicle')}
-                  description={t('vehicleControl.selectVehicleDescription')}
+                  title={tv('vehicleControl.selectVehicle')}
+                  description={tv('vehicleControl.selectVehicleDescription')}
                 />
               </Card>
             )}

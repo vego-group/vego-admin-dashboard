@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { Logo } from './Logo';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { useAuthStore } from '@/store/auth';
 import { useNotificationStore } from '@/store/notifications';
 import { cn } from '@/lib/cn';
@@ -51,6 +52,7 @@ interface SidebarProps {
 export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { t } = useI18n();
+  const { tv } = useVehicleTerm();
   const router = useRouter();
   const signOut = useAuthStore((s) => s.signOut);
   const unreadCount        = useNotificationStore((s) => s.unreadCount);
@@ -110,7 +112,9 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                   )}
                 >
                   <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={isActive ? 2.2 : 1.8} />
-                  <span className="truncate">{t(item.key)}</span>
+                  {/* tv(), not t(): nav.vehicleControl carries the country's
+                      vehicle noun. Keys without one are unaffected. */}
+                  <span className="truncate">{tv(item.key)}</span>
                   {badge !== null && (
                     <span className="ms-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-bold text-white">
                       {badge}

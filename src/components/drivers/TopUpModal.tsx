@@ -1,14 +1,17 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Wallet, CreditCard, Shield, ChevronLeft, Plus, Trash2, Check, Loader2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import { formatCurrency } from '@/lib/format';
-import { walletApi } from '@/lib/api';
-import type { Driver, SavedCard } from '@/types';
+import { logger } from '@/lib/logger';
+import { amountStep, fractionDigitsOf, toMinorUnits } from '@/lib/money';
+import { useFleetContext } from '@/hooks/useFleetContext';
+import { topUpBelowMinimumFrom, walletApi } from '@/lib/api';
+import type { Driver, MinTopUpReason, Money, SavedCard, ServicePrice, TopUpOptions } from '@/types';
 
 interface TopUpModalProps {
   open: boolean;
@@ -16,8 +19,6 @@ interface TopUpModalProps {
   driver: Driver | null;
   onSuccess?: (updatedDriver: Driver) => void;
 }
-
-const QUICK_AMOUNTS = [50, 100, 200, 500];
 
 type Step = 'amount' | 'card';
 type CardMode = 'list' | 'new';
@@ -39,8 +40,26 @@ function brandLabel(brand: string): string {
 
 type PaymentData = Awaited<ReturnType<typeof walletApi.initiateTopUp>>['paymentData'];
 
+/**
+ * The payment gateway to name in the security footnote, or **null** to name none.
+ *
+ * Moyasar is a Saudi gateway. Printing "Secure payment by Moyasar" to a
+ * Jordanian fleet names a company that is not processing their money — so the
+ * gateway is only named where it is known, and the neutral wording is used
+ * everywhere else rather than a wrong one.
+ *
+ * CR-2 replaces this with the gateway the payment-methods endpoint declares per
+ * country (`jo_card`, `zaincash`, `orangemoney`, `efawateer`, …). Until that
+ * ships, the fleet's own country is the only fact available, and the honest
+ * answer for a non-SA fleet is "we don't know yet".
+ */
+function gatewayNameFor(isoCountryCode: string | null): string | null {
+  return isoCountryCode === 'SA' ? 'Moyasar' : null;
+}
+
 export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const { t, locale } = useI18n();
+  const { formatMoney, currency, currencyDecimals, currencyStatus, isoCountryCode } = useFleetContext();
 
   const [step, setStep]               = useState<Step>('amount');
 
@@ -64,8 +83,50 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const [fetchedBalance, setFetchedBalance]   = useState<number | null>(null);
   const [balanceLoading, setBalanceLoading]   = useState(false);
 
+  // Minimum + suggested chips, per driver
+  const [options, setOptions]               = useState<TopUpOptions | null>(null);
+  const [optionsLoading, setOptionsLoading] = useState(false);
+  /**
+   * The minimum the backend rejected a submission against (`422
+   * topup_below_minimum`). It outranks whatever `topup-options` returned when the
+   * modal opened — the balance moved underneath us, and the server's number is
+   * the one the next attempt will be judged by.
+   */
+  const [minOverride, setMinOverride] =
+    useState<{ minTopUp: Money; reason: MinTopUpReason | null } | null>(null);
+
   // Moyasar form container
   const moyasarRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Balance and top-up options, always together.
+   *
+   * The minimum is derived from the balance — a driver who cannot yet afford one
+   * swap has to top up further than one who can — so reading one without the
+   * other leaves the form stating a minimum that no longer applies. Every path
+   * that credits this wallet has to call this again.
+   */
+  const loadWallet = useCallback(async (driverId: string, fallbackBalance: number) => {
+    setBalanceLoading(true);
+    setOptionsLoading(true);
+
+    const balance = walletApi.getBalance(driverId)
+      .then((bal) => setFetchedBalance(bal))
+      .catch(() => setFetchedBalance(fallbackBalance))
+      .finally(() => setBalanceLoading(false));
+
+    const opts = walletApi.getTopUpOptions(driverId)
+      .then((next) => { setOptions(next); setMinOverride(null); })
+      .catch((err) => {
+        // No options means no chips and no stated minimum — never a guessed one.
+        // The backend still enforces its floor, and the 422 below reports it.
+        logger.warn('[TopUpModal] topup-options unavailable:', err);
+        setOptions(null);
+      })
+      .finally(() => setOptionsLoading(false));
+
+    await Promise.all([balance, opts]);
+  }, []);
 
   // Reset on open
   useEffect(() => {
@@ -76,16 +137,14 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     setApiError('');
     setPaymentData(null);
     setFetchedBalance(null);
+    setOptions(null);
+    setMinOverride(null);
     setSavedCards([]);
     setCardMode('new');
     setSelectedCardId(null);
     setCharging(false);
 
-    setBalanceLoading(true);
-    walletApi.getBalance(driver.id)
-      .then((bal) => setFetchedBalance(bal))
-      .catch(() => setFetchedBalance(driver.walletBalance ?? 0))
-      .finally(() => setBalanceLoading(false));
+    void loadWallet(driver.id, driver.walletBalance ?? 0);
 
     // Prefetch saved cards so the card step can default to the list view.
     setCardsLoading(true);
@@ -96,7 +155,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
       })
       .catch(() => setSavedCards([]))
       .finally(() => setCardsLoading(false));
-  }, [open, driver]);
+  }, [open, driver, loadWallet]);
 
   // Initialize Moyasar form once we're on the "new card" view and paymentData is ready
   useEffect(() => {
@@ -137,16 +196,106 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
 
   if (!driver) return null;
 
-  const numAmount      = parseFloat(amount) || 0;
   const currentBalance = fetchedBalance ?? driver.walletBalance ?? 0;
-  const newBalance     = currentBalance + numAmount;
+
+  // The currency this form is denominated in. The fleet profile is the primary
+  // source; `topup-options` states its own currency in the same response as the
+  // amounts, so it is an equally authoritative stand-in while the profile is
+  // still in flight — and it is never a guess.
+  const currencyLabel = currency ?? options?.currency ?? null;
+  const knownDecimals = currencyDecimals ?? options?.decimals ?? null;
+
+  // Amounts are held as the raw input string and converted through integer minor
+  // units — never parseFloat, so a three-decimal JOD total does not drift.
+  //
+  // Until the currency resolves we do not know its precision, so we scale to
+  // whatever the values themselves carry rather than assuming two decimals.
+  // That keeps both operands exact without inventing a currency.
+  const scaleDecimals = knownDecimals
+    ?? Math.max(fractionDigitsOf(amount), fractionDigitsOf(currentBalance));
+  const scale            = 10 ** scaleDecimals;
+  const amountMinorUnits = toMinorUnits(amount, scaleDecimals);
+  const numAmount        = amountMinorUnits / scale;
+  const newBalance       = (toMinorUnits(currentBalance, scaleDecimals) + amountMinorUnits) / scale;
+
+  /**
+   * Render an amount the backend sent as part of the top-up options.
+   *
+   * It carries its own currency and decimals, so the chips and the minimum stay
+   * legible even while `/fleet-admin/me` is still loading — where `formatMoney`
+   * would (correctly) refuse and render the pending placeholder.
+   */
+  const formatAmount = (money: Money): string =>
+    currencyStatus === 'resolved'
+      ? formatMoney(money.amount, locale)
+      : formatCurrency(money.amount, money.currency, money.decimals, locale);
+
+  /** Exact comparison against a backend amount, at whichever scale is finer. */
+  const compareToInput = (money: Money): number => {
+    const decimals = Math.max(scaleDecimals, money.decimals);
+    return toMinorUnits(amount, decimals) - toMinorUnits(money.amount, decimals);
+  };
+
+  const minTopUp   = minOverride?.minTopUp ?? options?.minTopUp ?? null;
+  const minReason  = minOverride ? minOverride.reason : options?.minTopUpReason ?? null;
+  // A zero/empty field is "nothing entered yet", not "below the minimum".
+  const belowMinimum = minTopUp != null && amountMinorUnits > 0 && compareToInput(minTopUp) < 0;
+
+  const minimumMessage = (money: Money, reason: MinTopUpReason | null): string =>
+    reason === 'below_service_price'
+      ? t('drivers.minTopUpBelowServicePrice', { amount: formatAmount(money) })
+      : t('drivers.minTopUpAbsoluteFloor',     { amount: formatAmount(money) });
+
+  // Named only where the gateway is known — never "Moyasar" to a Jordanian fleet.
+  const gateway = gatewayNameFor(isoCountryCode);
+  const securePaymentLabel = gateway
+    ? t('drivers.securePaymentBy', { gateway })
+    : t('drivers.securePayment');
+  const encryptedPaymentLabel = gateway
+    ? t('drivers.encryptedPaymentBy', { gateway })
+    : t('drivers.encryptedPayment');
+
+  const servicePriceLabel = (service: ServicePrice): string => {
+    const key = service.key.toLowerCase();
+    if (key.includes('swap'))   return t('drivers.servicePriceBatterySwap');
+    if (key.includes('charge')) return t('drivers.servicePriceFastCharge');
+    return service.label ?? service.key;
+  };
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   const validateAmount = (): boolean => {
-    const parsed = parseFloat(amount);
-    if (!amount.trim() || isNaN(parsed)) { setAmountError(t('drivers.topUpAmountRequired')); return false; }
-    if (parsed <= 0)                      { setAmountError(t('drivers.topUpAmountInvalid'));  return false; }
+    const trimmed = amount.trim();
+    const wellFormed = /^\d*(?:[.,]\d*)?$/.test(trimmed) && /\d/.test(trimmed);
+    if (!trimmed || !wellFormed)  { setAmountError(t('drivers.topUpAmountRequired')); return false; }
+    if (amountMinorUnits <= 0)    { setAmountError(t('drivers.topUpAmountInvalid'));  return false; }
+    if (belowMinimum && minTopUp) { setAmountError(minimumMessage(minTopUp, minReason)); return false; }
+    return true;
+  };
+
+  /**
+   * A `422 topup_below_minimum` is an amount that needs changing, not a failed
+   * payment: it belongs on the field, with the minimum the *backend* just quoted
+   * rather than the one this form was holding. Returns false for anything else,
+   * which the caller then handles as an ordinary failure.
+   */
+  const handledAsBelowMinimum = (err: unknown): boolean => {
+    const rejected = topUpBelowMinimumFrom(err);
+    if (!rejected) return false;
+
+    if (rejected.minTopUp) {
+      setMinOverride({ minTopUp: rejected.minTopUp, reason: rejected.reason });
+      setAmountError(minimumMessage(rejected.minTopUp, rejected.reason));
+    } else {
+      // No `meta.min_topup` to quote — the backend's own sentence is still better
+      // than a generic "payment failed".
+      setAmountError(rejected.message);
+    }
+
+    // The amount field lives on step 1; there is nothing to fix on the card step.
+    setApiError('');
+    setPaymentData(null);
+    setStep('amount');
     return true;
   };
 
@@ -161,7 +310,9 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
       const result = await walletApi.initiateTopUp({ driverId: driver.id, amount: numAmount, saveCard: true });
       setPaymentData(result.paymentData);
     } catch (err) {
-      setApiError(err instanceof Error ? err.message : 'Failed to initialize payment. Please try again.');
+      if (!handledAsBelowMinimum(err)) {
+        setApiError(err instanceof Error ? err.message : 'Failed to initialize payment. Please try again.');
+      }
     } finally {
       setInitiating(false);
     }
@@ -192,6 +343,12 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
       const s = res.status.toLowerCase();
       if (s === 'paid' || s === 'completed' || s === 'captured') {
         // Already settled server-side — show success without re-verifying (no double credit).
+        //
+        // The wallet has just been credited, so the balance and the minimum
+        // derived from it are both stale here. No `loadWallet()` call belongs on
+        // this line: every success path leaves the page for /payment-callback and
+        // returns via a fresh /drivers load, so the next open re-reads both. Wire
+        // it in if this ever settles without navigating away.
         const q = new URLSearchParams({ status: 'paid', settled: '1' });
         if (res.amount  != null) q.set('amount',  String(res.amount));
         if (res.balance != null) q.set('balance', String(res.balance));
@@ -200,7 +357,9 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
       }
       setApiError(t('drivers.chargeFailed'));
     } catch (err) {
-      setApiError(err instanceof Error ? err.message : t('drivers.chargeFailed'));
+      if (!handledAsBelowMinimum(err)) {
+        setApiError(err instanceof Error ? err.message : t('drivers.chargeFailed'));
+      }
     } finally {
       setCharging(false);
     }
@@ -269,7 +428,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                   <div className="h-4 w-16 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
                 ) : (
                   <p className={cn('text-sm font-bold tabular-nums', balanceColor(currentBalance))}>
-                    {formatCurrency(currentBalance, locale)}
+                    {formatMoney(currentBalance, locale)}
                   </p>
                 )}
               </div>
@@ -278,50 +437,100 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
             {/* Amount input */}
             <div>
               <label className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-300">
-                {t('drivers.topUpAmount')} <span className="text-rose-500">*</span>
+                {currencyLabel
+                  ? t('drivers.topUpAmountWithCurrency', { currency: currencyLabel })
+                  : t('drivers.topUpAmount')}{' '}
+                <span className="text-rose-500">*</span>
               </label>
               <div className="relative flex items-center">
-                <span className="pointer-events-none absolute start-3.5 text-sm font-medium text-slate-400">SAR</span>
+                {/* No unit at all until one is known — an unlabelled field beats a
+                    field labelled with the wrong currency. */}
+                {currencyLabel && (
+                  <span className="pointer-events-none absolute start-3.5 text-sm font-medium text-slate-400">
+                    {currencyLabel}
+                  </span>
+                )}
                 <input
                   type="number"
-                  placeholder="0.00"
+                  placeholder={t('drivers.topUpAmountPlaceholder')}
                   value={amount}
                   onChange={(e) => { setAmount(e.target.value); if (amountError) setAmountError(''); if (apiError) setApiError(''); }}
                   min="0"
-                  step="0.01"
+                  step={knownDecimals != null ? amountStep(knownDecimals) : 'any'}
                   className={cn(
-                    'h-11 w-full appearance-none rounded-xl border bg-white ps-14 pe-3.5 text-sm text-slate-700 transition-colors',
+                    'h-11 w-full appearance-none rounded-xl border bg-white pe-3.5 text-sm text-slate-700 transition-colors',
                     'focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20',
                     'dark:bg-slate-900/40 dark:text-slate-200',
-                    amountError ? 'border-rose-400' : '',
+                    currencyLabel ? 'ps-14' : 'ps-3.5',
+                    amountError || belowMinimum ? 'border-rose-400' : '',
                   )}
-                  style={!amountError ? { borderColor: 'rgb(var(--border))' } : undefined}
+                  style={!(amountError || belowMinimum) ? { borderColor: 'rgb(var(--border))' } : undefined}
                 />
               </div>
-              {amountError && <p className="mt-1 text-xs text-rose-600">{amountError}</p>}
+
+              {/* The minimum is stated up front, and becomes the error the moment
+                  the entered amount falls under it. */}
+              {amountError ? (
+                <p className="mt-1 text-xs text-rose-600">{amountError}</p>
+              ) : belowMinimum && minTopUp ? (
+                <p className="mt-1 text-xs text-rose-600">{minimumMessage(minTopUp, minReason)}</p>
+              ) : minTopUp ? (
+                <p className="mt-1 text-xs text-slate-400">
+                  {t('drivers.minTopUpHint', { amount: formatAmount(minTopUp) })}
+                </p>
+              ) : null}
+
+              {/* What the service-price floor is actually made of. */}
+              {minReason === 'below_service_price' && options && options.servicePrices.length > 0 && (
+                <p className="mt-1 text-[11px] text-slate-400">
+                  {t('drivers.servicePricesHint', {
+                    prices: options.servicePrices
+                      .map((s) => `${servicePriceLabel(s)} ${formatAmount(s.price)}`)
+                      .join(' · '),
+                  })}
+                </p>
+              )}
             </div>
 
-            {/* Quick amounts */}
-            <div>
-              <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">{t('drivers.quickAmounts')}</p>
-              <div className="flex flex-wrap gap-2">
-                {QUICK_AMOUNTS.map((qa) => (
-                  <button
-                    key={qa}
-                    type="button"
-                    onClick={() => { setAmount(String(qa)); if (amountError) setAmountError(''); if (apiError) setApiError(''); }}
-                    className={cn(
-                      'rounded-lg border px-4 py-1.5 text-xs font-semibold transition-all',
-                      numAmount === qa
-                        ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
-                        : 'border-transparent bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700',
-                    )}
-                  >
-                    {qa} SAR
-                  </button>
-                ))}
+            {/* Suggested amounts — rendered exactly as the backend ordered them.
+                It has already dropped the chips below the minimum and prepended
+                the minimum itself, so there is nothing left here to filter. */}
+            {optionsLoading ? (
+              <div>
+                <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">{t('drivers.quickAmounts')}</p>
+                <div className="flex flex-wrap gap-2">
+                  {[0, 1, 2, 3].map((i) => (
+                    <div key={i} className="h-7 w-20 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : options && options.suggestedAmounts.length > 0 ? (
+              <div>
+                <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">{t('drivers.quickAmounts')}</p>
+                <div className="flex flex-wrap gap-2">
+                  {options.suggestedAmounts.map((suggested, i) => (
+                    <button
+                      key={`${suggested.amount}-${i}`}
+                      type="button"
+                      onClick={() => {
+                        // The backend's own fixed-precision string, unrounded.
+                        setAmount(suggested.amount);
+                        if (amountError) setAmountError('');
+                        if (apiError) setApiError('');
+                      }}
+                      className={cn(
+                        'rounded-lg border px-4 py-1.5 text-xs font-semibold transition-all',
+                        amountMinorUnits > 0 && compareToInput(suggested) === 0
+                          ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+                          : 'border-transparent bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700',
+                      )}
+                    >
+                      {formatAmount(suggested)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             {/* Saved-cards hint */}
             {savedCards.length > 0 && (
@@ -349,20 +558,20 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500 dark:text-slate-400">{t('drivers.currentBalance')}</span>
                     <span className={cn('font-semibold tabular-nums', balanceColor(currentBalance))}>
-                      {formatCurrency(currentBalance, locale)}
+                      {formatMoney(currentBalance, locale)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500 dark:text-slate-400">+ {t('drivers.topUp')}</span>
                     <span className="font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
-                      +{formatCurrency(numAmount, locale)}
+                      +{formatMoney(numAmount, locale)}
                     </span>
                   </div>
                   <div className="border-t pt-2" style={{ borderColor: 'rgb(var(--border))' }}>
                     <div className="flex items-center justify-between">
                       <span className="font-semibold text-slate-700 dark:text-slate-200">{t('drivers.newBalance')}</span>
                       <span className={cn('text-base font-bold tabular-nums', balanceColor(newBalance))}>
-                        {formatCurrency(newBalance, locale)}
+                        {formatMoney(newBalance, locale)}
                       </span>
                     </div>
                   </div>
@@ -377,7 +586,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
           >
             <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
               <Shield className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-              <span>Secure payment by Moyasar</span>
+              <span>{securePaymentLabel}</span>
             </div>
             <div className="flex items-center gap-2">
               <Button type="button" variant="secondary" onClick={onClose} className="min-w-[90px]">
@@ -387,11 +596,14 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                 type="button"
                 variant="primary"
                 isLoading={initiating}
+                disabled={belowMinimum}
                 onClick={handleProceedToCard}
                 className="min-w-[160px]"
                 leftIcon={!initiating ? <CreditCard className="h-4 w-4" /> : undefined}
               >
-                {numAmount > 0 ? `Pay ${formatCurrency(numAmount, locale)}` : t('drivers.confirmTopUp')}
+                {numAmount > 0 && currencyStatus !== 'pending'
+                  ? t('drivers.payAmount', { amount: formatMoney(numAmount, locale) })
+                  : t('drivers.confirmTopUp')}
               </Button>
             </div>
           </div>
@@ -409,7 +621,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
               type="button"
               onClick={headerBack}
               className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 transition-colors dark:hover:bg-slate-800"
-              aria-label="Back"
+              aria-label={t('common.back')}
             >
               <ChevronLeft className="h-5 w-5" />
             </button>
@@ -421,7 +633,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                 {cardMode === 'list' ? t('drivers.savedCards') : t('drivers.addNewCardTitle')}
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {formatCurrency(numAmount, locale)} will be charged
+                {t('drivers.amountWillBeCharged', { amount: formatMoney(numAmount, locale) })}
               </p>
             </div>
           </div>
@@ -459,9 +671,10 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                           </p>
                           {(card.expMonth && card.expYear) ? (
                             <p className="text-[11px] text-slate-400">
-                              {t('drivers.expiresShort')
-                                .replace('{{month}}', String(card.expMonth).padStart(2, '0'))
-                                .replace('{{year}}', String(card.expYear).slice(-2))}
+                              {t('drivers.expiresShort', {
+                                month: String(card.expMonth).padStart(2, '0'),
+                                year:  String(card.expYear).slice(-2),
+                              })}
                             </p>
                           ) : card.name ? (
                             <p className="truncate text-[11px] text-slate-400">{card.name}</p>
@@ -515,12 +728,12 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                 className="mt-5 w-full"
                 leftIcon={!charging ? <CreditCard className="h-4 w-4" /> : undefined}
               >
-                {t('drivers.payWithCard').replace('{{amount}}', formatCurrency(numAmount, locale))}
+                {t('drivers.payWithCard', { amount: formatMoney(numAmount, locale) })}
               </Button>
 
               <div className="mt-3 flex items-center justify-center gap-2 text-xs text-slate-400">
                 <Shield className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                <span>Encrypted secure payment by Moyasar</span>
+                <span>{encryptedPaymentLabel}</span>
               </div>
             </div>
           )}
@@ -545,7 +758,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
 
               <div className="mt-4 flex items-center justify-center gap-2 rounded-xl bg-slate-50 py-2.5 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
                 <Shield className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                <span>Encrypted secure payment by Moyasar</span>
+                <span>{encryptedPaymentLabel}</span>
               </div>
             </div>
           )}

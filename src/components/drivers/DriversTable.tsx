@@ -6,9 +6,10 @@ import { Card } from '@/components/ui/Card';
 import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { cn } from '@/lib/cn';
 import type { Driver, DocumentStatus } from '@/types';
-import { formatCurrency } from '@/lib/format';
+import { useFleetContext } from '@/hooks/useFleetContext';
 
 interface DriversTableProps {
   drivers: Driver[];
@@ -72,6 +73,8 @@ function DocsCount(driver: Driver) {
 
 export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlockToggle, onAssignMotorcycle }: DriversTableProps) {
   const { t, locale } = useI18n();
+  const { tv } = useVehicleTerm();
+  const { formatMoney, currencyStatus } = useFleetContext();
 
   // Per-row loading state for toggle (active↔inactive)
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -144,7 +147,7 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
               <th className="px-5 py-4">{t('drivers.driverId')}</th>
               <th className="px-5 py-4">{t('drivers.name')}</th>
               <th className="px-5 py-4">{t('drivers.phone')}</th>
-              <th className="px-5 py-4">{t('drivers.vehicles')}</th>
+              <th className="px-5 py-4">{tv('drivers.vehicles')}</th>
               <th className="px-5 py-4">{t('drivers.status')}</th>
               <th className="px-5 py-4">{t('drivers.documents')}</th>
               <th className="px-5 py-4">{t('drivers.walletBalance')}</th>
@@ -183,7 +186,7 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
                         </div>
                       </div>
                     ) : (
-                      <span className="text-slate-400">{t('drivers.noMotorcycleAssigned')}</span>
+                      <span className="text-slate-400">{tv('drivers.noMotorcycleAssigned')}</span>
                     )}
                   </td>
                   <td className="px-5 py-4">
@@ -196,7 +199,7 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
                       <div className="flex items-center gap-1.5">
                         <DocDot status={d.documents.license.status}    Icon={IdCard}   label={t('drivers.drivingLicense')} />
                         <DocDot status={d.documents.customsCard.status} Icon={FileText} label={t('drivers.customsCard')} />
-                        <DocDot status={d.documents.plate.status}       Icon={Hash}     label={t('drivers.licensePlate')} />
+                        <DocDot status={d.documents.plate.status}       Icon={Hash}     label={tv('drivers.licensePlate')} />
                       </div>
                       <span className="text-[10px] tabular-nums text-slate-400">
                         {verified}/{total} verified
@@ -206,8 +209,15 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
 
                   {/* Wallet balance column */}
                   <td className="px-5 py-4">
-                    <span className={cn('font-bold tabular-nums text-sm', walletBalanceColor(d.walletBalance))}>
-                      {formatCurrency(d.walletBalance, locale)}
+                    <span className={cn(
+                      'font-bold tabular-nums text-sm',
+                      // No balance on screen yet — a red/green tint would imply a
+                      // judgment about a value we are not showing.
+                      currencyStatus === 'pending'
+                        ? 'text-slate-400 dark:text-slate-500'
+                        : walletBalanceColor(d.walletBalance),
+                    )}>
+                      {formatMoney(d.walletBalance, locale)}
                     </span>
                   </td>
 
@@ -215,7 +225,7 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
                     {d.trips}
                   </td>
                   <td className="px-5 py-4 font-semibold tabular-nums text-slate-700 dark:text-slate-200">
-                    {formatCurrency(d.totalCost, locale)}
+                    {formatMoney(d.totalCost, locale)}
                   </td>
 
                   {/* Actions column */}
@@ -269,8 +279,8 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
                           type="button"
                           onClick={() => onAssignMotorcycle(d)}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-indigo-600 transition-colors hover:bg-indigo-50 dark:hover:bg-indigo-500/10"
-                          aria-label={d.assignedMotorcycleId ? t('drivers.changeMotorcycleAction') : t('drivers.assignMotorcycleAction')}
-                          title={d.assignedMotorcycleId ? t('drivers.changeMotorcycleAction') : t('drivers.assignMotorcycleAction')}
+                          aria-label={d.assignedMotorcycleId ? tv('drivers.changeMotorcycleAction') : tv('drivers.assignMotorcycleAction')}
+                          title={d.assignedMotorcycleId ? tv('drivers.changeMotorcycleAction') : tv('drivers.assignMotorcycleAction')}
                         >
                           <Bike className="h-4 w-4" />
                         </button>

@@ -17,6 +17,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { cn } from '@/lib/cn';
 import type { Vehicle } from '@/types';
 import type { MotorcycleBattery, MotorcycleStatistics } from '@/lib/api';
@@ -35,6 +36,7 @@ export function VehicleDetails({
   loadingExtra,
 }: VehicleDetailsProps) {
   const { t } = useI18n();
+  const { tv } = useVehicleTerm();
 
   // Use real battery from dedicated endpoint if available, else fallback to list data
   const batteryLevel = battery?.level  ?? vehicle.batteryLevel;
@@ -93,7 +95,7 @@ export function VehicleDetails({
               {t('vehicleControl.estRange')}
             </p>
             <p className="text-2xl font-bold tabular-nums text-slate-900 dark:text-slate-50">
-              {rangeKm} km
+              {rangeKm} {t('common.kilometers')}
             </p>
           </div>
         </div>
@@ -156,7 +158,7 @@ export function VehicleDetails({
               icon={<Gauge className="h-4 w-4" />}
               iconCls="bg-amber-50 text-amber-500 dark:bg-amber-500/15"
               label={t('vehicleControl.statDistance')}
-              value={statistics != null ? `${statistics.totalDistanceKm} km` : (vehicle.totalDistanceKm > 0 ? `${vehicle.totalDistanceKm} km` : '—')}
+              value={statistics != null ? `${statistics.totalDistanceKm} ${t('common.kilometers')}` : (vehicle.totalDistanceKm > 0 ? `${vehicle.totalDistanceKm} ${t('common.kilometers')}` : '—')}
             />
           </div>
         )}
@@ -165,7 +167,7 @@ export function VehicleDetails({
       {/* Vehicle Information */}
       <Card className="p-5">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-50">
-          {t('vehicleControl.vehicleInformation')}
+          {tv('vehicleControl.vehicleInformation')}
         </h3>
 
         <ul className="mt-4 space-y-3 text-sm">
@@ -200,7 +202,7 @@ export function VehicleDetails({
                 {t('vehicleControl.currentSpeed')}
               </p>
               <p className="font-medium tabular-nums text-slate-900 dark:text-slate-100">
-                {vehicle.currentSpeedKmh} km/h
+                {vehicle.currentSpeedKmh} {t('common.kmh')}
               </p>
             </div>
           </li>

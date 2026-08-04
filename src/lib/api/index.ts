@@ -9,22 +9,51 @@
  * Auth prefix:  /fleet-admin/*
  */
 
-import { apiClient } from '@/lib/api/client';
+import { ApiError, apiClient } from '@/lib/api/client';
+import { isFieldLevelError } from '@/lib/api-errors';
+import {
+  SEEDED_COUNTRIES,
+  matchesPhoneRegex,
+  phoneLengthFromRegex,
+  seededCountries,
+  seededCurrencyFor,
+  toDialCode,
+  toIsoCountryCode,
+  toNationalNumber,
+  toVehicleTerm,
+} from '@/lib/country';
+import { logger } from '@/lib/logger';
+import {
+  decimalsForCurrency,
+  fractionDigitsOf,
+  fromMinorUnits,
+  moneyToNumber,
+  parseAmount,
+  readMoney,
+  type ApiMoneyFields,
+} from '@/lib/money';
 import type {
   BatteryDistribution,
   BatteryHealthPoint,
   Alarm,
+  MinTopUpReason,
+  Money,
+  ServicePrice,
+  TopUpOptions,
   AlarmSeverity,
   AlarmStatus,
   BatteryStation,
   CancelledSessions,
   CostBreakdown,
+  Country,
   DashboardMetrics,
   DeviceStatus,
+  DialCode,
   Driver,
   DriverDocuments,
   DriverSession,
   DriverStatusChangeResult,
+  FleetProfile,
   IoTDevice,
   SessionKind,
   SessionStatus,
@@ -36,6 +65,8 @@ import type {
   RevenuePoint,
   SavedCard,
   SwappingStation,
+  TransactionDirection,
+  TransactionType,
   UsagePoint,
   Vehicle,
   VehicleStatus,
@@ -55,6 +86,12 @@ interface ApiDriver {
   id: number | string;
   name: string;
   phone: string;
+  /** Not returned by the fleet-admin list today — mapped when it appears. */
+  created_at?: string | null;
+  /** Dial prefix, e.g. "+966" — despite the name this is NOT a country. */
+  country_code?: string | null;
+  /** ISO 3166-1 alpha-2, e.g. "SA" | "JO" — this is the country. */
+  iso_country_code?: string | null;
   email?: string | null;
   address?: string | null;
   city?: string | null;
@@ -66,9 +103,14 @@ interface ApiDriver {
   account_status?: string | null;
   account_type?: string;
   fleet_id?: number;
-  // Flat license fields — real API returns these directly in list & show
+  // Flat license fields — real API returns these directly in list & show.
+  // `driving_license_expiry` and `plate_number` are columns on the user row: the
+  // fallback for a driver with no reviewable document yet. The nested blocks
+  // below are the truth wherever a document exists.
   driving_license_number?: string | null;
+  driving_license_expiry?: string | null;
   driving_license_file?: string | null;
+  plate_number?: string | null;
   has_license?: boolean;
   // Document status on list rows (added with the upload feature)
   driving_license_status?: string | null;
@@ -81,9 +123,10 @@ interface ApiDriver {
   total_cost?: number;
   charges_count?: number;
   swaps_count?: number;
-  // Wallet balance — list response includes flat wallet_balance (SAR)
-  wallet_balance?: number;
-  wallet?: { balance_sar?: number; balance?: number };
+  // Wallet balance — the show endpoint returns the money object; the list
+  // response still carries a flat scalar in the fleet's own currency.
+  wallet_balance?: string | number;
+  wallet?: ApiMoneyFields;
   // Document objects — real API (show endpoint) returns these with the upload feature.
   driving_license?: {
     status?: string;
@@ -126,6 +169,8 @@ interface ApiMotorcycle {
     // Real API nests the latest telemetry
     latest_gps?: { latitude?: number | string; longitude?: number | string; speed?: number; gps_signal?: string };
     latest_battery?: { soc?: number; relative_soc?: number; soh?: number; voltage?: number };
+    /** Device-twin capability list, when the device advertises one. */
+    supported_commands?: unknown;
   };
   // Real API: assigned_user; legacy: driver
   assigned_user?: { id: number | string; name: string } | null;
@@ -136,6 +181,8 @@ interface ApiMotorcycle {
   speed_limit_kmh?: number;
   is_locked?: boolean;
   is_engine_running?: boolean;
+  /** Commands this vehicle's device advertises, if the payload lists them. */
+  supported_commands?: unknown;
 }
 
 interface ApiCabinet {
@@ -214,9 +261,24 @@ interface ApiTransaction {
   created_at?: string;
   /** Backend sends "credit" | "debit" (or legacy "top_up" | "charging" | "swap") */
   type?: string;
-  amount_sar?: number;
-  /** Backend returns amount as a string e.g. "100.00" */
+  /**
+   * Confirmed direction of the movement — "in" (credit, refund) or "out"
+   * (debit). Added alongside `signed_amount`; absent on older payloads.
+   */
+  direction?: string | null;
+  /**
+   * Money object: amount is a fixed-precision string ("100.000") accompanied by
+   * currency / minor_units / decimals.
+   *
+   * **`amount` is always the magnitude.** A debit arrives positive with
+   * `type: "debit"`; the backend normalises a negative to its magnitude on write.
+   */
   amount?: number | string;
+  /** The same value with the sign applied, e.g. "-3.250". Exact decimal string. */
+  signed_amount?: number | string | null;
+  currency?: string | null;
+  minor_units?: number | null;
+  decimals?: number | null;
   status?: string;
   description?: string;
   note?: string;
@@ -350,12 +412,17 @@ function mapDriver(d: ApiDriver): Driver {
           ? 'pending'
           : 'not_uploaded';
 
+  // The document block is the truth and the flat column is the fallback, in that
+  // order: a detail edited on a driver who has a licence or plate on file is
+  // written onto that record, and only a driver with no document yet keeps it on
+  // the user row. Reading the flat column first would show a stale date for
+  // every driver who has ever uploaded a licence.
   const documents: DriverDocuments = {
     license: {
       status:          licenseStatus,
       hasLicense,
       number:          licenseNum,
-      expiryDate:      license?.expiry_date,
+      expiryDate:      license?.expiry_date ?? d.driving_license_expiry ?? undefined,
       fileUrl:         license?.file_url,
       backFileUrl:     license?.back_file_url,
       rejectionReason: license?.rejection_reason ?? undefined,
@@ -363,7 +430,7 @@ function mapDriver(d: ApiDriver): Driver {
     customsCard: { status: toDocStatus(customs?.status) },
     plate: {
       status:          toDocStatus(plate?.status ?? d.plate_status ?? undefined),
-      number:          plate?.number ?? plate?.plate_number,
+      number:          plate?.number ?? plate?.plate_number ?? d.plate_number ?? undefined,
       fileUrl:         plate?.file_url,
       rejectionReason: plate?.rejection_reason ?? undefined,
     },
@@ -387,9 +454,30 @@ function mapDriver(d: ApiDriver): Driver {
     totalCost:    d.total_cost ?? 0,
     charges:      d.charges_count ?? 0,
     swaps:        d.swaps_count ?? 0,
-    walletBalance: d.wallet_balance ?? d.wallet?.balance_sar ?? d.wallet?.balance ?? 0,
+    walletBalance: moneyToNumber(readMoney(d.wallet, { amount: d.wallet_balance })),
+    dialCode:       toDialCode(d.country_code),
+    isoCountryCode: toIsoCountryCode(d.iso_country_code),
+    createdAt:     d.created_at ?? undefined,
     documents,
   };
+}
+
+/**
+ * The device's advertised command list, or **undefined** when it advertises
+ * none.
+ *
+ * The distinction matters: undefined means "this payload says nothing about
+ * capabilities", and the controls stay enabled on that basis. An empty array is
+ * a device that positively accepts nothing, and greys them out. Collapsing the
+ * two would disable every control on every backend that has not shipped the
+ * field yet.
+ */
+function toSupportedCommands(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  return raw
+    .filter((c): c is string => typeof c === 'string')
+    .map((c) => c.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 function mapMotorcycle(m: ApiMotorcycle): Vehicle {
@@ -399,8 +487,17 @@ function mapMotorcycle(m: ApiMotorcycle): Vehicle {
   const model = [m.brand, m.model_name ?? m.model].filter(Boolean).join(' ').trim() || 'VegoMax Pro';
   // Real API driver is `assigned_user`; older shape used `driver`.
   const driver = m.assigned_user ?? m.driver ?? undefined;
-  const lat = num(gps?.latitude) ?? num(m.current_lat) ?? iot?.latitude ?? 24.7136;
-  const lng = num(gps?.longitude) ?? num(m.current_lng) ?? iot?.longitude ?? 46.6753;
+
+  // Position, or nothing. This used to fall back to 24.7136 / 46.6753 — central
+  // Riyadh — which silently relocated every vehicle that had never reported GPS.
+  // For a Jordanian fleet that put the whole offline half of the fleet in another
+  // country. A missing position is now missing: the maps drop the marker and the
+  // lists say so. Latitude 0 / longitude 0 are legal values, so the guard tests
+  // for `undefined`, not falsiness.
+  const lat = num(gps?.latitude)  ?? num(m.current_lat) ?? num(iot?.latitude);
+  const lng = num(gps?.longitude) ?? num(m.current_lng) ?? num(iot?.longitude);
+  const coordinates = lat !== undefined && lng !== undefined ? { lat, lng } : undefined;
+
   return {
     id:                 String(m.id),
     plateNumber:        m.plate_number ?? `VH-${m.id}`,
@@ -409,39 +506,88 @@ function mapMotorcycle(m: ApiMotorcycle): Vehicle {
     // Real API: battery.battery_percentage is the SOC.
     batteryLevel:       m.battery?.battery_percentage ?? m.battery?.soc_pct ?? 0,
     location:           m.city ?? '',
-    coordinates:        { lat, lng },
+    coordinates,
     assignedDriverId:   driver ? String(driver.id) : undefined,
     assignedDriverName: driver?.name,
     lastTripAt:         m.last_trip_at ?? new Date().toISOString(),
     totalDistanceKm:    m.total_distance_km ?? 0,
     currentSpeedKmh:    gps?.speed ?? iot?.speed_kmh ?? 0,
     estimatedRangeKm:   m.estimated_range_km ?? 0,
-    speedLimitKmh:      m.speed_limit_kmh ?? 80,
+    // No default. This was `?? 80` — a ceiling no fleet had set, shown back to
+    // the operator as theirs, on a slider that stopped at 45. Unknown is
+    // unknown; the control panel says so rather than picking a number.
+    speedLimitKmh:      m.speed_limit_kmh ?? undefined,
     isLocked:           m.is_locked ?? false,
     isEngineRunning:    m.is_engine_running ?? false,
     gpsSignal:          (gps?.gps_signal ?? iot?.gps_signal ?? 'strong') as Vehicle['gpsSignal'],
     isOnline:           iot?.is_online ?? false,
+    supportedCommands:  toSupportedCommands(m.supported_commands ?? iot?.supported_commands),
   };
 }
 
-function mapCabinet(c: ApiCabinet): SwappingStation {
-  // Coordinates: backend returns lat/lng as strings ("24.71360000")
-  const lat = typeof c.lat === 'string' ? parseFloat(c.lat) : (c.lat ?? c.latitude ?? 24.7136);
-  const lng = typeof c.lng === 'string' ? parseFloat(c.lng) : (c.lng ?? c.longitude ?? 46.6753);
+/**
+ * The position a site record carries, or **undefined**.
+ *
+ * Cabinets and piles used to fall back to 24.7136 / 46.6753 — central Riyadh —
+ * exactly as vehicles did, in three separate copies of the same expression. A
+ * site with no coordinate is unlocated; it is dropped from maps and labelled in
+ * lists. Both fields must resolve: a lone latitude is not a position.
+ *
+ * The backend sends these as strings ("24.71360000"), hence `num()`.
+ */
+function readSiteCoordinates(
+  s: { lat?: string | number; lng?: string | number; latitude?: number; longitude?: number },
+): { lat: number; lng: number } | undefined {
+  const lat = num(s.lat) ?? num(s.latitude);
+  const lng = num(s.lng) ?? num(s.longitude);
+  return lat !== undefined && lng !== undefined ? { lat, lng } : undefined;
+}
 
+function mapCabinet(c: ApiCabinet): SwappingStation {
   return {
     id:                 String(c.id),
     cabinetId:          c.cabinet_id ?? `#CF-${String(c.id).padStart(4, '0')}`,
     name:               c.name ?? `Cabinet ${c.id}`,
     district:           c.district ?? c.address ?? c.location ?? '',
-    city:               c.city ?? 'Riyadh',
-    coordinates:        { lat, lng },
+    // No 'Riyadh' default. Stamping a city name onto a record is worse than
+    // stamping a coordinate: the wrong *name* reads as fact in a list, an export
+    // and a search, and nothing about it looks like a placeholder.
+    city:               c.city ?? '',
+    coordinates:        readSiteCoordinates(c),
     readyBatteries:     c.ready_batteries     ?? c.ready_batteries_count     ?? 0,
     chargingBatteries:  c.charging_batteries  ?? c.charging_batteries_count  ?? 0,
     emptySlots:         c.empty_slots         ?? c.empty_slots_count         ?? 0,
     totalCapacity:      c.total_capacity      ?? c.total_slots               ?? 0,
     avgWaitTimeMinutes: c.avg_wait_time_minutes ?? c.avg_wait_minutes        ?? 0,
     todaySwaps:         c.today_swaps         ?? c.today_swaps_count         ?? 0,
+  };
+}
+
+/**
+ * `BatteryStation` — the shape the live map speaks — as a projection of the
+ * swapping station.
+ *
+ * `stationsApi.list` used to re-map `ApiCabinet` by hand, which is how a third
+ * copy of the Riyadh fallback survived the first two being noticed. It is a
+ * strict subset: every field here is either a rename of a `SwappingStation`
+ * field or a constant, so there is nothing left to drift.
+ */
+function toBatteryStation(s: SwappingStation): BatteryStation {
+  return {
+    id:                 s.id,
+    name:               s.name,
+    district:           s.district,
+    city:               s.city,
+    coordinates:        s.coordinates,
+    available:          s.readyBatteries,
+    charging:           s.chargingBatteries,
+    // The cabinet endpoint reports no in-use count; ready + charging is the whole
+    // picture it gives us.
+    inUse:              0,
+    totalCapacity:      s.totalCapacity,
+    avgWaitTimeMinutes: s.avgWaitTimeMinutes,
+    todaySwaps:         s.todaySwaps,
+    type:               'swap',
   };
 }
 
@@ -459,17 +605,13 @@ function mapPile(p: ApiPile): FastChargingCabinet {
   const totalPorts = p.total_ports
     ?? (chargers.length || (p.charger_count ?? 0));
 
-  // Coordinates: backend returns lat/lng as strings ("24.71400000")
-  const lat = typeof p.lat === 'string' ? parseFloat(p.lat) : (p.lat ?? p.latitude ?? 24.7136);
-  const lng = typeof p.lng === 'string' ? parseFloat(p.lng) : (p.lng ?? p.longitude ?? 46.6753);
-
   return {
     id:                   String(p.id),
     cabinetId:            p.pile_id ?? p.dev_id ?? `FC-${String(p.id).padStart(5, '0')}`,
     name:                 p.name ?? `Pile ${p.id}`,
     district:             p.district ?? p.address ?? p.location ?? '',
-    city:                 p.city ?? 'Riyadh',
-    coordinates:          { lat, lng },
+    city:                 p.city ?? '',
+    coordinates:          readSiteCoordinates(p),
     availablePorts:       available,
     chargingPorts:        charging,
     errorPorts:           error,
@@ -478,6 +620,27 @@ function mapPile(p: ApiPile): FastChargingCabinet {
     todaySessions:        p.today_sessions ?? p.today_sessions_count ?? 0,
     status:               toFcStatus(p.status ?? p.live_status),
   };
+}
+
+/** Transaction `type` values that move money **out** of the wallet. */
+const DEBIT_TYPES = new Set([
+  'debit', 'fast_charging', 'fast_charge', 'charging', 'swap', 'battery_swap',
+]);
+
+/**
+ * Which way the money moved.
+ *
+ * The backend's `direction` is authoritative when present. Otherwise the *type*
+ * decides — never the sign of the amount. Confirmed convention (§8 of
+ * dashboard-country-currency-answers-updated.md): a debit arrives as a
+ * **positive** amount with `type: "debit"`, and a negative passed in is
+ * normalised to its magnitude on write. Reading the sign was exactly why debits
+ * rendered green as credits.
+ */
+function toDirection(tx: ApiTransaction): TransactionDirection {
+  const raw = (tx.direction ?? '').toLowerCase();
+  if (raw === 'in' || raw === 'out') return raw;
+  return DEBIT_TYPES.has(tx.type ?? '') ? 'out' : 'in';
 }
 
 function mapTransaction(tx: ApiTransaction): WalletTransaction {
@@ -499,16 +662,30 @@ function mapTransaction(tx: ApiTransaction): WalletTransaction {
   // Driver may be nested under wallet.user, or directly on tx.user / tx.driver
   const driver = tx.wallet?.user ?? tx.user ?? tx.driver;
 
-  // Backend sends amount as string "100.00" — always parse to number
-  const rawAmount = tx.amount_sar ?? tx.amount ?? 0;
-  const amount = typeof rawAmount === 'string' ? parseFloat(rawAmount) : rawAmount;
+  // Fixed-precision money object — resolved through integer minor units.
+  // `amount` is the magnitude by contract, but a legacy row that still carries a
+  // negative must not become a negative magnitude, so take the absolute value.
+  const raw   = readMoney(tx);
+  const money = raw.minorUnits < 0
+    ? { ...raw, minorUnits: -raw.minorUnits, amount: fromMinorUnits(-raw.minorUnits, raw.decimals) }
+    : raw;
+
+  const direction = toDirection(tx);
+  // Prefer the backend's own signed string; otherwise apply the sign ourselves so
+  // the field is always present and always consistent with `direction`.
+  const signedAmount = tx.signed_amount != null && tx.signed_amount !== ''
+    ? String(tx.signed_amount)
+    : (direction === 'out' && money.minorUnits !== 0 ? `-${money.amount}` : money.amount);
 
   return {
     id:            String(tx.id),
     createdAt:     tx.created_at ?? new Date().toISOString(),
     driverId:      String(driver?.id ?? ''),
     driverName:    driver?.name ?? '',
-    amount,
+    amount:        moneyToNumber(money),
+    money,
+    direction,
+    signedAmount,
     type,
     paymentMethod: tx.payment_method,
     note:          tx.note ?? tx.description,
@@ -527,6 +704,273 @@ function mapNotification(n: ApiNotification): Notification {
     read:        !!n.read_at,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Countries — GET /countries
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One country as the roster endpoint returns it.
+ *
+ * Field names are given generously because this payload is consumed by three
+ * clients and has already been renamed once: `phone_example` used to hold the
+ * mask that is now `phone_placeholder`, and an environment that has not picked
+ * up the repair migration still sends the old meaning.
+ *
+ * The two are not interchangeable and are read for different jobs:
+ *
+ *   phone_placeholder  "5X XXX XXXX"     the input mask — the field's placeholder
+ *   phone_example      "+966512345678"   a real E.164 number — the "e.g." in an error
+ */
+interface ApiCountry {
+  code?: string | null;
+  iso_code?: string | null;
+  iso_country_code?: string | null;
+  name?: string | null;
+  name_en?: string | null;
+  name_ar?: string | null;
+  /** Dial prefix, e.g. "+962". On this payload `country_code` is an alias for it. */
+  dial_code?: string | null;
+  country_code?: string | null;
+  currency?: string | null;
+  currency_code?: string | null;
+  currency_decimals?: number | null;
+  decimals?: number | null;
+  phone_regex?: string | null;
+  phone_placeholder?: string | null;
+  /** Real E.164 number since the reseed; a format mask on older environments. */
+  phone_example?: string | null;
+  phone_example_national?: string | null;
+  national_number_length?: number | null;
+  is_active?: boolean | null;
+  /** What this market calls the vehicle — `{ ar, en }`. Seeded per country. */
+  vehicle_term?: { ar?: string | null; en?: string | null } | null;
+}
+
+/** Does this look like a format mask ("5X XXX XXXX") rather than a number? */
+function looksLikeMask(value: string): boolean {
+  return /[Xx#]/.test(value);
+}
+
+function mapCountry(c: ApiCountry): Country | null {
+  const isoCountryCode = toIsoCountryCode(c.code ?? c.iso_code ?? c.iso_country_code);
+  if (!isoCountryCode) return null;
+
+  // The seed is the backstop for any fact this environment omits — never a
+  // hardcoded assumption at the point of use.
+  const seed = SEEDED_COUNTRIES[isoCountryCode];
+
+  const dialCode = toDialCode(c.dial_code ?? c.country_code) ?? seed?.dialCode;
+  if (!dialCode) return null;
+
+  const rawExample = c.phone_example ?? '';
+  const currency   = c.currency ?? c.currency_code ?? seed?.currency ?? undefined;
+  const phoneRegex = c.phone_regex ?? seed?.phoneRegex ?? '';
+
+  // The length is read off `phone_regex` first — the rule the number is actually
+  // validated against, and so the one value that cannot disagree with it. The
+  // backend now derives its own the same way and reports 9; the fallback stays
+  // because it is the right order independent of that fix.
+  //
+  // `national_number_length` is **null** where nothing can be derived, which
+  // means "unknown, use your own" — not zero. Only a positive integer is taken;
+  // anything else falls through to the seed rather than capping the field short.
+  const reportedLength =
+    typeof c.national_number_length === 'number' && c.national_number_length > 0
+      ? Math.floor(c.national_number_length)
+      : undefined;
+
+  // The "e.g." in a validation message has to be a number the operator could
+  // actually type — the national form of the real example, never the mask. The
+  // national field leads; `phone_example` is now a real E.164 number, so it is
+  // reduced to its national digits when the national field is missing.
+  const exampleFromE164 = rawExample && !looksLikeMask(rawExample)
+    ? toNationalNumber(rawExample, dialCode)
+    : '';
+  const exampleNational = [c.phone_example_national ?? '', exampleFromE164]
+    .find((candidate) => candidate && matchesPhoneRegex(candidate, phoneRegex));
+
+  return {
+    isoCountryCode,
+    dialCode,
+    nameEn: c.name_en ?? c.name ?? seed?.nameEn ?? isoCountryCode,
+    nameAr: c.name_ar ?? seed?.nameAr ?? c.name_en ?? isoCountryCode,
+    currency,
+    currencyDecimals:
+      c.currency_decimals ?? c.decimals ?? seed?.currencyDecimals ?? decimalsForCurrency(currency),
+    phoneRegex,
+    // `phone_placeholder` is the mask, and it is what the input's placeholder
+    // shows. `phone_example` is only a fallback while an environment still holds
+    // a mask there — never once it holds a real number.
+    phonePlaceholder:
+      c.phone_placeholder ||
+      (rawExample && looksLikeMask(rawExample) ? rawExample : '') ||
+      seed?.phonePlaceholder ||
+      '',
+    phoneExampleNational: exampleNational ?? seed?.phoneExampleNational ?? '',
+    nationalNumberLength:
+      phoneLengthFromRegex(phoneRegex) ??
+      reportedLength ??
+      seed?.nationalNumberLength ??
+      15,
+    // The vehicle noun is this market's, never the app's. Left undefined when
+    // neither the payload nor the seed has one, so callers fall through to the
+    // neutral term instead of inheriting another country's word.
+    vehicleTerm: toVehicleTerm(c.vehicle_term) ?? seed?.vehicleTerm,
+  };
+}
+
+export const countriesApi = {
+  /**
+   * The country roster: `GET /countries`, at the **API root** and with no token —
+   * it has to render on the login screen, before there is a session.
+   *
+   * Never throws. An unreachable backend and a successful-but-empty response are
+   * the same outcome for the caller — no roster — and both fall back to the
+   * offline seed. The shared environment currently returns zero countries, which
+   * is why the empty case is a warning and not an error: a login screen with no
+   * country to pick would be worse than one seeded with the two live markets.
+   */
+  async list(): Promise<Country[]> {
+    let mapped: Country[] = [];
+
+    try {
+      const raw = await apiClient.get<unknown>('/countries');
+      mapped = extractList<ApiCountry>(raw)
+        .filter((c) => c.is_active !== false)
+        .map(mapCountry)
+        .filter((c): c is Country => c !== null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        `[countriesApi] GET /countries failed (${message}) — falling back to the ` +
+        'seeded SA/JO roster.',
+      );
+      return seededCountries();
+    }
+
+    if (mapped.length === 0) {
+      logger.warn(
+        '[countriesApi] GET /countries returned no usable countries — falling back ' +
+        'to the seeded SA/JO roster.',
+      );
+      return seededCountries();
+    }
+
+    return mapped;
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fleet self-profile — GET /fleet-admin/me
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `GET /fleet-admin/me`, across the shapes it is documented and observed in.
+ *
+ * The currency and the country sit at **two levels**: some payloads carry them
+ * on `fleet`, the documented one carries `currency` / `currency_decimals` at the
+ * top and the country as a sibling `country` block. Both are read, fleet-first,
+ * because a field that moved must not silently become "unresolved".
+ *
+ * `country.vehicle_term` is the only place this app can learn what this market
+ * calls the vehicle, which is why the `country` block is read at all.
+ *
+ * Note `fleet.country_code`: on a **user** that name means the dial prefix, but
+ * on the fleet block the backend puts an ISO code ("JO") in it. `toIsoCountryCode`
+ * rejects "+962" outright, so reading both here cannot mistake one for the other.
+ */
+interface ApiFleetMe {
+  fleet?: {
+    id?: number | string;
+    name?: string;
+    company_name?: string | null;
+    iso_country_code?: string | null;
+    /** ISO code on this block, despite the name. Dial prefixes are rejected. */
+    country_code?: string | null;
+    currency?: string | null;
+    currency_decimals?: number | null;
+    max_drivers?: number | null;
+    status?: string | null;
+  };
+  /** The fleet's country — the source of `vehicle_term`. */
+  country?: {
+    code?: string | null;
+    iso_code?: string | null;
+    name_en?: string | null;
+    dial_code?: string | null;
+    vehicle_term?: { ar?: string | null; en?: string | null } | null;
+  } | null;
+  currency?: string | null;
+  currency_decimals?: number | null;
+  /** A zero in the fleet's currency, e.g. `{ amount: "0.000", decimals: 3 }`. */
+  money_format?: { currency?: string | null; decimals?: number | null } | null;
+  user?: {
+    id?: number | string;
+    name?: string;
+    email?: string | null;
+  };
+}
+
+export const fleetAdminApi = {
+  /**
+   * The fleet's own profile: which country it belongs to and which currency its
+   * money is denominated in.
+   *
+   * This is the single source of truth for both. A fleet's country lives on its
+   * fleet record and is not client-selectable — the Fleet Admin realm rejects a
+   * `?country=` parameter with a 422, so never send one.
+   */
+  async getMe(): Promise<FleetProfile> {
+    const raw = await apiClient.get<{ data?: ApiFleetMe } & ApiFleetMe>('/fleet-admin/me');
+    const body = (raw.data && typeof raw.data === 'object') ? raw.data : raw;
+    const fleet   = body.fleet ?? {};
+    const country = body.country ?? {};
+
+    const isoCountryCode =
+      toIsoCountryCode(fleet.iso_country_code)
+      ?? toIsoCountryCode(fleet.country_code)
+      ?? toIsoCountryCode(country.code ?? country.iso_code)
+      ?? null;
+
+    // Prefer the fleet's declared currency, then the top-level block the
+    // documented payload uses, then `money_format`'s own example, and only then
+    // the country seed.
+    const seeded   = seededCurrencyFor(isoCountryCode);
+    const currency =
+      fleet.currency ?? body.currency ?? body.money_format?.currency ?? seeded?.currency;
+    const decimals =
+      fleet.currency_decimals
+      ?? body.currency_decimals
+      ?? body.money_format?.decimals
+      ?? seeded?.currencyDecimals
+      ?? decimalsForCurrency(currency);
+
+    // A profile without a currency is not a profile we can format money against.
+    // Fail loudly rather than substituting a default — callers treat the throw as
+    // "unresolved" and render amounts unlabelled, which is the honest outcome.
+    if (!currency || decimals == null) {
+      throw new Error(
+        'GET /fleet-admin/me returned no currency for this fleet ' +
+        `(currency=${String(fleet.currency)}, iso_country_code=${String(fleet.iso_country_code)}).`,
+      );
+    }
+
+    return {
+      id:               String(fleet.id ?? ''),
+      name:             fleet.name ?? fleet.company_name ?? '',
+      isoCountryCode,
+      currency,
+      currencyDecimals: decimals,
+      maxDrivers:       fleet.max_drivers ?? undefined,
+      status:           fleet.status ?? undefined,
+      // Unlike the currency, a missing vehicle term is not fatal: the UI falls
+      // back to the country seed and then to a neutral noun. See
+      // `resolveVehicleTerm()` in @/hooks/useVehicleTerm.
+      vehicleTerm:      toVehicleTerm(country.vehicle_term),
+    };
+  },
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fleet API
@@ -563,13 +1007,78 @@ export interface MotorcycleStatistics {
   totalDistanceKm: number;
 }
 
-// Vehicle control commands (POST /fleet-admin/motorcycles/{id}/command)
+// ── Vehicle control commands ─────────────────────────────────────────────────
+//
+// POST /fleet-admin/motorcycles/{id}/command — the fleet-admin realm's own route
+// for the IoT command layer. SuperAdmin drives the same hardware through
+// POST /iot-devices/{imei}/{action}; that route is keyed by IMEI, which a
+// fleet motorcycle payload does not carry, and is scoped to a realm this app's
+// token does not hold. Fleet Admin commands go through here.
+
 export type VehicleCommand = 'lock' | 'unlock' | 'start' | 'stop' | 'emergency_stop' | 'set_speed_limit';
 
+/**
+ * Control state as the backend reports it — **every field optional**.
+ *
+ * Each field used to be defaulted (`is_locked ?? false`) and then adopted as
+ * authoritative. A 2xx that named only the field it changed therefore made the
+ * panel announce that the engine was stopped and the speed limit was 0, neither
+ * of which the backend had said. An absent field now stays absent, and the
+ * caller keeps the value it already had.
+ */
 export interface VehicleControlState {
-  isLocked: boolean;
-  isEngineRunning: boolean;
-  speedLimitKmh: number;
+  isLocked?: boolean;
+  isEngineRunning?: boolean;
+  speedLimitKmh?: number;
+}
+
+/**
+ * What a control command did.
+ *
+ * `unsupported` is kept distinct from `failed` because they need different
+ * words and different consequences: a device that cannot lock will never lock,
+ * so that control is disabled from then on, while a failure is worth retrying.
+ * Collapsing both into `null` — which is what this returned before — meant an
+ * operator retried a command the hardware does not implement, indefinitely.
+ */
+export type VehicleCommandOutcome =
+  | { ok: true;  state: VehicleControlState }
+  | { ok: false; reason: 'unsupported' | 'failed'; message: string | null };
+
+/**
+ * Does this failure mean the device cannot do this, rather than that the attempt
+ * went wrong?
+ *
+ * `422 command_not_supported` is the backend's explicit signal. A 404/405/501 on
+ * the command route is the same thing said structurally — the action is not a
+ * thing this deployment can do — and must not be dressed up as a transient
+ * error the operator should retry.
+ */
+function isUnsupportedCommand(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  if (err.code === 'command_not_supported') return true;
+  return err.status === 404 || err.status === 405 || err.status === 501;
+}
+
+/**
+ * The state a successful command implies about the field it acted on.
+ *
+ * A 2xx for `lock` means the vehicle is locked — that is what the response
+ * *means*, so it is not an assumption. It says nothing about the engine, which
+ * is why nothing else is filled in here.
+ */
+function intendedState(action: VehicleCommand, speedLimit?: number): VehicleControlState {
+  switch (action) {
+    case 'lock':            return { isLocked: true };
+    case 'unlock':          return { isLocked: false };
+    case 'start':           return { isEngineRunning: true };
+    case 'stop':            return { isEngineRunning: false };
+    // Only the engine. Whether an emergency stop also engages the lock is
+    // backend behaviour we have not confirmed, and "locked" is a security claim
+    // — if it locks, the response says so and that wins.
+    case 'emergency_stop':  return { isEngineRunning: false };
+    case 'set_speed_limit': return speedLimit != null ? { speedLimitKmh: speedLimit } : {};
+  }
 }
 
 export const fleetApi = {
@@ -653,13 +1162,17 @@ export const fleetApi = {
   /**
    * Send a control command to a motorcycle.
    * Endpoint: POST /fleet-admin/motorcycles/{id}/command
-   * Returns the authoritative control state the backend persisted, or null on error.
+   *
+   * These buttons cut a moving vehicle's engine, so the one thing this must
+   * never do is report a success it did not get. Every failure is classified and
+   * returned — see {@link VehicleCommandOutcome} — instead of being flattened
+   * into a single `null` the UI could only describe as "command failed".
    */
   async sendCommand(
     motorcycleId: string,
     action: VehicleCommand,
     speedLimit?: number,
-  ): Promise<VehicleControlState | null> {
+  ): Promise<VehicleCommandOutcome> {
     try {
       const res = await apiClient.post<{
         data?: { is_locked?: boolean; is_engine_running?: boolean; speed_limit_kmh?: number };
@@ -667,14 +1180,34 @@ export const fleetApi = {
         action,
         ...(action === 'set_speed_limit' && speedLimit != null ? { speed_limit: speedLimit } : {}),
       });
-      const d = res.data ?? {};
+
+      const d = res?.data ?? {};
+      // What the backend reported wins; what the command *means* fills only the
+      // gaps it left. A field neither of them mentions stays undefined, and the
+      // caller keeps whatever it already knew.
       return {
-        isLocked:        d.is_locked ?? false,
-        isEngineRunning: d.is_engine_running ?? false,
-        speedLimitKmh:   d.speed_limit_kmh ?? speedLimit ?? 0,
+        ok: true,
+        state: {
+          ...intendedState(action, speedLimit),
+          ...(d.is_locked         !== undefined ? { isLocked:        d.is_locked }         : {}),
+          ...(d.is_engine_running !== undefined ? { isEngineRunning: d.is_engine_running } : {}),
+          ...(d.speed_limit_kmh   !== undefined ? { speedLimitKmh:   d.speed_limit_kmh }   : {}),
+        },
       };
-    } catch {
-      return null;
+    } catch (err) {
+      const unsupported = isUnsupportedCommand(err);
+      logger.warn(
+        `[fleetApi] Command "${action}" on motorcycle ${motorcycleId} ` +
+        `${unsupported ? 'is not supported by this device' : 'failed'}:`,
+        err,
+      );
+      return {
+        ok: false,
+        reason: unsupported ? 'unsupported' : 'failed',
+        // The backend's own sentence when it wrote one — it knows more about why
+        // than any message this layer could compose.
+        message: err instanceof ApiError && err.message ? err.message : null,
+      };
     }
   },
 };
@@ -686,24 +1219,8 @@ export const fleetApi = {
 export const stationsApi = {
   async list(): Promise<BatteryStation[]> {
     const raw = await apiClient.get<unknown>('/fleet-admin/cabinets');
-    return extractList<ApiCabinet>(raw).map((c) => {
-      const lat = typeof c.lat === 'string' ? parseFloat(c.lat) : (c.lat ?? c.latitude ?? 24.7136);
-      const lng = typeof c.lng === 'string' ? parseFloat(c.lng) : (c.lng ?? c.longitude ?? 46.6753);
-      return {
-        id:                 String(c.id),
-        name:               c.name ?? `Cabinet ${c.id}`,
-        district:           c.district ?? c.address ?? c.location ?? '',
-        city:               c.city ?? 'Riyadh',
-        coordinates:        { lat, lng },
-        available:          c.ready_batteries    ?? c.ready_batteries_count    ?? 0,
-        charging:           c.charging_batteries ?? c.charging_batteries_count ?? 0,
-        inUse:              0,
-        totalCapacity:      c.total_capacity     ?? c.total_slots              ?? 0,
-        avgWaitTimeMinutes: c.avg_wait_time_minutes ?? c.avg_wait_minutes      ?? 0,
-        todaySwaps:         c.today_swaps        ?? c.today_swaps_count        ?? 0,
-        type:               'swap' as const,
-      };
-    });
+    // One cabinet mapper, then a projection — see toBatteryStation.
+    return extractList<ApiCabinet>(raw).map(mapCabinet).map(toBatteryStation);
   },
 };
 
@@ -713,15 +1230,33 @@ export const stationsApi = {
 
 export interface DriverCreateInput {
   name: string;
+  /** Full E.164, e.g. '+962791234567'. Build it with `toE164()`. */
   phone: string;
+  /**
+   * Dial prefix for `phone`, sent as the API's `country_code`.
+   *
+   * On a **user** `country_code` is the dial prefix, not an ISO code — the ISO
+   * code lives in `iso_country_code`. A fleet's drivers are always in the fleet's
+   * country, so this is the fleet's dial code, never a per-driver choice.
+   */
+  dialCode?: DialCode;
   email?: string;
   address?: string;
   city?: string;
-  vehicleModel: string;
-  status: Driver['status'];
   documents?: DriverDocuments;
 }
 
+/**
+ * Deliberately absent from both inputs:
+ *
+ * - **`status`** — `POST`/`PUT /fleet-admin/drivers` do not accept it. Status is
+ *   owned by `/toggle-status`, `/block` and `/unblock`, which also return the
+ *   sessions they cancelled. A `status` on this body was collected by the form
+ *   and dropped on the floor.
+ * - **`vehicleModel`** — a motorcycle is assigned with
+ *   `POST /fleet-admin/motorcycles/{id}/assign-driver`, by id. A model *name* is
+ *   not an assignment and was never sent.
+ */
 export type DriverUpdateInput = Partial<DriverCreateInput>;
 
 /** Files + fields for POST /fleet-admin/drivers/{id}/documents (any subset). */
@@ -757,6 +1292,7 @@ export const driversApi = {
       name:  input.name,
       phone: input.phone,
     };
+    if (input.dialCode)                          body['country_code']           = input.dialCode;
     if (input.email)                             body['email']                  = input.email;
     if (input.address)                           body['address']                = input.address;
     if (input.city)                              body['city']                   = input.city;
@@ -772,18 +1308,45 @@ export const driversApi = {
 
   async update(id: string, updates: DriverUpdateInput): Promise<Driver | null> {
     try {
-      // PUT /fleet-admin/drivers/:id — send updatable fields only
+      // PUT /fleet-admin/drivers/:id — send every field the caller supplied.
+      //
+      // The guards are `!== undefined`, not truthiness. Truthiness meant `''` was
+      // indistinguishable from "not supplied", so an operator could never clear
+      // an email, address or city: the field was dropped and the old value
+      // survived, with the form showing the clear as if it had saved. `undefined`
+      // is "leave alone"; `''` is "clear this", and it is sent as `''`.
+      //
+      // Confirmed: `''` and `null` both clear, for every nullable field here, so
+      // the `''` we already send is right. The two exceptions are `name` and
+      // `phone` — a blank one is a 422 naming the field rather than a silent wipe
+      // (a driver with no phone cannot log in). The form blocks both before they
+      // get here; if one slips through, the 422 is rethrown onto its field below.
       const body: Record<string, string | undefined> = {};
-      if (updates.name)    body['name']    = updates.name;
-      if (updates.email)   body['email']   = updates.email;
-      if (updates.address) body['address'] = updates.address;
-      if (updates.city)    body['city']    = updates.city;
-      if (updates.documents?.license?.number) body['driving_license_number'] = updates.documents.license.number;
+      if (updates.name     !== undefined) body['name']         = updates.name;
+      if (updates.phone    !== undefined) body['phone']        = updates.phone;
+      if (updates.dialCode !== undefined) body['country_code'] = updates.dialCode;
+      if (updates.email    !== undefined) body['email']        = updates.email;
+      if (updates.address  !== undefined) body['address']      = updates.address;
+      if (updates.city     !== undefined) body['city']         = updates.city;
+
+      // Licence expiry and plate number were accepted by `create` and silently
+      // dropped by `update`. Editing either one alone was a no-op unless the
+      // operator also happened to attach a file, because only the multipart
+      // documents endpoint carried them.
+      const license = updates.documents?.license;
+      const plate   = updates.documents?.plate;
+      if (license?.number     !== undefined) body['driving_license_number'] = license.number;
+      if (license?.expiryDate !== undefined) body['driving_license_expiry'] = license.expiryDate;
+      if (plate?.number       !== undefined) body['plate_number']           = plate.number;
 
       const res = await apiClient.put<{ data: ApiDriver } | ApiDriver>(`/fleet-admin/drivers/${id}`, body);
       const raw = (res as { data?: ApiDriver }).data ?? (res as ApiDriver);
       return mapDriver(raw);
-    } catch {
+    } catch (err) {
+      // A rejected country or phone is the operator's to fix, and the form can
+      // only show it next to the field if it survives this catch. Everything else
+      // keeps the historical null-on-failure contract.
+      if (isFieldLevelError(err)) throw err;
       return null;
     }
   },
@@ -980,6 +1543,12 @@ interface ApiZone {
   speed_limit: number | null;
   coordinates: string; // WKT POLYGON
   is_active: boolean;
+  /**
+   * Whether the backend binds riders to this zone. Distinct from `is_active`:
+   * a fleet zone binds that fleet's drivers and not the individual owners
+   * riding the same roads. See {@link import('@/types').Zone.enforced}.
+   */
+  enforced?: boolean | null;
   created_at?: string;
 }
 
@@ -1010,6 +1579,46 @@ function pointsToWkt(points: ZonePoint[]): string {
   return `POLYGON((${closed.map((p) => `${p.lng} ${p.lat}`).join(', ')}))`;
 }
 
+/**
+ * Every zone type the app can render. `ZONE_TYPES` in @/lib/zone-types is keyed
+ * by exactly these, and the zone cards index it unguarded — anything outside the
+ * union reaches `cfg.labelKey` as `undefined.labelKey` and throws.
+ */
+const ZONE_TYPE_VALUES: readonly ZoneType[] = ['normal', 'slow', 'restricted'];
+
+/**
+ * Names the backend has used for a zone type that are not the union's own.
+ * `operational` was the old default written here — it is the permissive zone,
+ * i.e. `normal`.
+ */
+const ZONE_TYPE_ALIASES: Record<string, ZoneType> = {
+  operational: 'normal',
+  standard:    'normal',
+  low_speed:   'slow',
+  slow_zone:   'slow',
+  no_ride:     'restricted',
+  noride:      'restricted',
+  forbidden:   'restricted',
+  prohibited:  'restricted',
+};
+
+/**
+ * Total over the real {@link ZoneType} union — there is no input that can make
+ * this return something the zone cards cannot render.
+ *
+ * An unrecognised type falls back to `normal` rather than `restricted`: a zone
+ * we cannot classify must not be presented as a no-riding zone the fleet's
+ * drivers are barred from, and the warning below is how the mismatch surfaces.
+ */
+function toZoneType(raw: unknown): ZoneType {
+  const key = String(raw ?? '').trim().toLowerCase();
+  if ((ZONE_TYPE_VALUES as readonly string[]).includes(key)) return key as ZoneType;
+  const alias = ZONE_TYPE_ALIASES[key];
+  if (alias) return alias;
+  if (key) logger.warn(`[Zones] Unknown zone type "${key}" — rendering as "normal".`);
+  return 'normal';
+}
+
 function mapApiZone(api: ApiZone): Zone {
   const nameEn = api.name_en ?? '';
   return {
@@ -1017,9 +1626,12 @@ function mapApiZone(api: ApiZone): Zone {
     name:         nameEn || api.name_ar || 'Unnamed',
     name_en:      nameEn,
     name_ar:      api.name_ar ?? '',
-    type:         (api.type as ZoneType) || 'operational',
+    type:         toZoneType(api.type),
     speedLimitKmh: api.speed_limit ?? 0,
     active:       api.is_active,
+    // `?? undefined` on purpose: a payload without the flag says nothing about
+    // enforcement, and the card must not claim it either way.
+    enforced:     api.enforced ?? undefined,
     visible:      true,
     polygon:      wktToPoints(api.coordinates ?? ''),
     createdAt:    api.created_at ?? new Date().toISOString(),
@@ -1106,7 +1718,8 @@ interface ApiDashboard {
   avg_trip_duration_minutes?: number;
   /** Backend returns null when no trips have occurred */
   success_rate?: number | null;
-  average_cost_per_motorcycle?: number;
+  /** Money: a scalar on older responses, a currency-aware object on current ones. */
+  average_cost_per_motorcycle?: number | string | ApiMoneyFields | null;
   // Confirmed new counters
   total_drivers?: number;
   active_trips?: number;
@@ -1145,6 +1758,17 @@ export const dashboardApi = {
     const raw = await apiClient.get<{ data?: ApiDashboard } & ApiDashboard>('/fleet-admin/dashboard');
     // Backend may wrap in { data: {...} } or return the flat object directly
     const res: ApiDashboard = (raw.data && typeof raw.data === 'object') ? raw.data : raw;
+
+    // Average cost per vehicle is money. It arrives either as a bare scalar or as
+    // the currency-aware object, and rendering the object would print
+    // "[object Object]" — resolve both through integer minor units.
+    const rawAvgCost = res.average_cost_per_motorcycle;
+    const avgCost = readMoney(
+      rawAvgCost !== null && typeof rawAvgCost === 'object'
+        ? rawAvgCost
+        : { amount: rawAvgCost ?? 0 },
+    );
+
     return {
       activeFleet:             res.total_motorcycles ?? 0,
       availableBatteries:      res.available_batteries ?? 0,
@@ -1154,7 +1778,7 @@ export const dashboardApi = {
       totalTripsToday:         res.total_trips_today ?? 0,
       avgTripDurationMinutes:  res.avg_trip_duration_minutes ?? 0,
       successRate:             res.success_rate ?? 0,
-      averageCostPerVehicle:   res.average_cost_per_motorcycle ?? 0,
+      averageCostPerVehicle:   moneyToNumber(avgCost),
       // Trend fields — backend uses short names (fleet_trend, batteries_trend…)
       // Fall back to legacy long names in case the API version changes
       fleetTrend:              res.fleet_trend     ?? res.total_motorcycles_trend         ?? 0,
@@ -1200,16 +1824,20 @@ interface ApiWeeklyTrip {
   label?: string;
   trips_count?: number;
   trips?: number;
-  revenue_sar?: number;
-  revenue?: number;
+  /** Fixed-precision string in the fleet's currency. */
+  revenue?: string | number;
+  currency?: string | null;
+  decimals?: number | null;
 }
 
 interface ApiMonthlyRevenue {
   month?: string;
   date?: string;
   label?: string;
-  revenue_sar?: number;
-  revenue?: number;
+  /** Fixed-precision string in the fleet's currency. */
+  revenue?: string | number;
+  currency?: string | null;
+  decimals?: number | null;
   trips_count?: number;
   trips?: number;
 }
@@ -1225,8 +1853,11 @@ interface ApiBatteryBucket {
 interface ApiCostItem {
   category?: string;
   label?: string;
-  amount_sar?: number;
-  value?: number;
+  /** Fixed-precision string in the fleet's currency. */
+  amount?: string | number;
+  value?: string | number;
+  currency?: string | null;
+  decimals?: number | null;
   color?: string;
 }
 
@@ -1236,8 +1867,6 @@ interface ApiTopDriver {
   name?: string;
   trips_count?: number;
   trips?: number;
-  earnings_sar?: number;
-  earnings?: number;
   swaps_count?: number;
   swaps?: number;
   charges_count?: number;
@@ -1253,7 +1882,7 @@ export const reportsApi = {
     return extractList<ApiWeeklyTrip>(raw).map((r) => ({
       day:     r.label ?? r.day ?? '',
       trips:   r.trips_count ?? r.trips ?? 0,
-      revenue: r.revenue_sar ?? r.revenue ?? 0,
+      revenue: moneyToNumber(readMoney({ amount: r.revenue, currency: r.currency, decimals: r.decimals })),
     }));
   },
 
@@ -1265,7 +1894,7 @@ export const reportsApi = {
     const raw = await apiClient.get<unknown>(`/fleet-admin/reports/monthly-revenue?from=${from}&to=${to}`);
     return extractList<ApiMonthlyRevenue>(raw).map((r) => ({
       date:    r.label ?? r.month ?? r.date ?? '',
-      revenue: r.revenue_sar ?? r.revenue ?? 0,
+      revenue: moneyToNumber(readMoney({ amount: r.revenue, currency: r.currency, decimals: r.decimals })),
       trips:   r.trips_count ?? r.trips ?? 0,
     }));
   },
@@ -1283,7 +1912,7 @@ export const reportsApi = {
     const raw = await apiClient.get<unknown>('/fleet-admin/reports/cost-analysis');
     return extractList<ApiCostItem>(raw).map((c, i) => ({
       category: c.label ?? c.category ?? `Category ${i + 1}`,
-      value:    c.amount_sar ?? c.value ?? 0,
+      value:    moneyToNumber(readMoney({ amount: c.amount ?? c.value, currency: c.currency, decimals: c.decimals })),
       color:    c.color ?? COST_COLORS[i % COST_COLORS.length],
     }));
   },
@@ -1367,6 +1996,170 @@ export const fastChargingApi = {
 // Wallet API
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Rows per request when the caller doesn't say. Matches the table's page size. */
+const DEFAULT_PER_PAGE = 15;
+/** Rows per request when walking the paginator — fewer round trips. */
+const MAX_PER_PAGE = 100;
+/**
+ * Hard stop when walking the paginator: 50 × 100 = 5 000 rows.
+ *
+ * A backstop, not a business rule. Hitting it is reported to the caller and
+ * logged, never swallowed — an export that quietly stops at the cap reads as
+ * "this is the whole ledger" when it isn't.
+ */
+const MAX_TRANSACTION_PAGES = 50;
+
+/** Pagination state of one response. */
+export interface PageMeta {
+  currentPage: number;
+  lastPage: number;
+  perPage: number;
+  /** Rows matching the filters across all pages. */
+  total: number;
+}
+
+/**
+ * Every `type` the transactions endpoint honours — its whole table, nothing else.
+ *
+ * The sub-kinds are resolved server-side: `battery_swap` and `fast_charge` are
+ * complete filters over the debits that reference a swap or a charging session,
+ * and `top_up` over the credits. `credit` / `debit` are the raw column values.
+ *
+ * A value outside this table is a **422 naming the parameter** — it used to be
+ * ignored, which returned the entire unfiltered ledger under a filter label. So
+ * nothing else may ever be sent: {@link walletQueryString} refuses it before it
+ * reaches the wire.
+ */
+export const WALLET_TRANSACTION_TYPES = [
+  'top_up', 'battery_swap', 'fast_charge', 'refund', 'credit', 'debit',
+] as const;
+
+export type WalletTransactionTypeParam = typeof WALLET_TRANSACTION_TYPES[number];
+
+/**
+ * Filters `GET /fleet-admin/wallet/transactions` accepts.
+ *
+ * `from`, `to`, `driver_id`, `type`, `status` and `per_page` are the documented
+ * set; `page` is the Laravel paginator's own cursor. `type` takes the backend's
+ * vocabulary — see {@link WALLET_TRANSACTION_TYPES}.
+ */
+export interface WalletTransactionQuery {
+  from?: string;
+  to?: string;
+  driverId?: string;
+  type?: WalletTransactionTypeParam;
+  status?: string;
+  perPage?: number;
+  page?: number;
+}
+
+function walletQueryString(params: WalletTransactionQuery): string {
+  const qs = new URLSearchParams();
+  if (params.from)     qs.set('from',      params.from);
+  if (params.to)       qs.set('to',        params.to);
+  if (params.driverId) qs.set('driver_id', params.driverId);
+  if (params.type) {
+    // The compiler already narrows `type` to the table; this catches a value
+    // arriving from untyped code. Dropping it instead would ask for a filtered
+    // ledger and silently render the whole one.
+    if (!(WALLET_TRANSACTION_TYPES as readonly string[]).includes(params.type)) {
+      throw new Error(
+        `[Wallet] Refusing to send type=${params.type}: the endpoint honours only ` +
+        `${WALLET_TRANSACTION_TYPES.join(', ')} and rejects anything else with a 422.`,
+      );
+    }
+    qs.set('type', params.type);
+  }
+  if (params.status && params.status !== 'all') qs.set('status', params.status);
+  // `per_page` is hard-capped at 100 server-side. Asking for more would be
+  // silently reduced, and every page-count derived from it would be wrong.
+  qs.set('per_page', String(Math.min(params.perPage ?? DEFAULT_PER_PAGE, MAX_PER_PAGE)));
+  if (params.page && params.page > 1) qs.set('page', String(params.page));
+  return qs.toString();
+}
+
+/** Query parameters this endpoint validates, in the order we report them. */
+const WALLET_QUERY_PARAMS = ['type', 'status', 'from', 'to', 'driver_id', 'per_page', 'page'] as const;
+
+/**
+ * The `422` a rejected filter comes back as, or **null** for any other failure.
+ *
+ * A filter the endpoint cannot honour is refused by name rather than ignored, so
+ * this is an operator-visible fact — the table is empty *because the filter was
+ * rejected*, not because the fleet has no such activity. Silence here would put
+ * those two states on screen identically.
+ */
+export function walletFilterErrorFrom(
+  err: unknown,
+): { param: string | null; message: string } | null {
+  if (!(err instanceof ApiError) || err.status !== 422) return null;
+
+  for (const param of WALLET_QUERY_PARAMS) {
+    const messages = err.errors?.[param];
+    if (messages?.length) return { param, message: messages[0] };
+  }
+  // A 422 on a read-only listing is a rejected parameter even when the body does
+  // not break it out per field.
+  return { param: null, message: err.message };
+}
+
+/**
+ * Pagination state, from the one place this endpoint puts it.
+ *
+ * Confirmed contract: the response is **always** a wrapped Laravel paginator —
+ * `{ success, data: { data: [rows], current_page, last_page, per_page, total } }`.
+ * The counts sit alongside the rows inside `data`; there is no `meta` envelope
+ * and it is never a bare array, so nothing else is looked at. `data.total` and
+ * `data.last_page` are what the table pages against.
+ */
+function extractPageMeta(raw: unknown, rowCount: number, perPage: number): PageMeta {
+  const envelope = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const page = (envelope['data'] && typeof envelope['data'] === 'object' && !Array.isArray(envelope['data']))
+    ? envelope['data'] as Record<string, unknown>
+    : undefined;
+
+  if (!page || !('current_page' in page)) {
+    logger.warn(
+      '[Wallet] The transactions response is not the documented paginator ' +
+      '({ data: { data: [...], current_page, last_page, per_page, total } }); ' +
+      'treating what arrived as a single complete page.',
+    );
+    return { currentPage: 1, lastPage: 1, perPage, total: rowCount };
+  }
+
+  const readInt = (v: unknown, fallback: number): number => {
+    const n = num(v);
+    return n !== undefined && n > 0 ? Math.floor(n) : fallback;
+  };
+  return {
+    currentPage: readInt(page['current_page'], 1),
+    lastPage:    readInt(page['last_page'], 1),
+    perPage:     readInt(page['per_page'], perPage),
+    total:       readInt(page['total'], rowCount),
+  };
+}
+
+/**
+ * Our UI category in the backend's own `type` vocabulary.
+ *
+ * Every category is an exact server-side filter: the sub-kinds are resolved
+ * where the `reference_type` lives, so `battery_swap` matches every swap debit
+ * across the whole set rather than the ones that happened to land on the page
+ * we fetched. There is no local refinement pass any more.
+ */
+export function apiTransactionType(
+  uiType: TransactionType | 'all',
+): WalletTransactionTypeParam | undefined {
+  switch (uiType) {
+    case 'top_up':       return 'top_up';
+    case 'refund':       return 'refund';
+    case 'fast_charge':  return 'fast_charge';
+    case 'battery_swap': return 'battery_swap';
+    case 'all':
+    default:             return undefined;
+  }
+}
+
 interface ApiWalletStats {
   current_month_top_ups?: number;
   total_top_ups?: number;
@@ -1378,6 +2171,97 @@ interface ApiWalletStats {
   budget_used_pct?: number;
   budget_used_percent?: number;
   active_drivers_count?: number;
+}
+
+// ── Top-up options (minimum + suggested chips) ───────────────────────────────
+
+/** `GET /fleet-admin/wallet/topup-options` as the backend serialises it. */
+interface ApiTopUpOptions {
+  currency?:         string | null;
+  decimals?:         number | null;
+  balance?:          ApiMoneyFields | string | number | null;
+  min_topup?:        ApiMoneyFields | string | number | null;
+  min_topup_reason?: string | null;
+  suggested_amounts?: Array<ApiMoneyFields | string | number> | null;
+  service_prices?:   unknown;
+}
+
+/**
+ * Read one amount out of the options envelope.
+ *
+ * Each field may arrive either as a full money object or as a bare
+ * fixed-precision string alongside the envelope's own `currency`/`decimals`.
+ * The envelope only ever fills gaps — a nested object that states its own
+ * currency wins, exactly as {@link readMoney} treats `decimals`.
+ */
+function readEnvelopeMoney(
+  value: ApiMoneyFields | string | number | null | undefined,
+  currency: string | null,
+  decimals: number | null,
+): Money {
+  if (value !== null && typeof value === 'object') {
+    return readMoney({
+      ...value,
+      currency: value.currency ?? currency,
+      decimals: value.decimals ?? decimals,
+    });
+  }
+  return readMoney({ amount: value ?? null, currency, decimals });
+}
+
+function readMinTopUpReason(raw: unknown): MinTopUpReason | null {
+  return raw === 'below_service_price' || raw === 'absolute_floor' ? raw : null;
+}
+
+/**
+ * `service_prices` in either shape the backend might send: a keyed map
+ * (`{ battery_swap: "1.500" }`) or a list of records. Unknown keys survive —
+ * the modal falls back to the backend's own label for anything it cannot name.
+ */
+function mapServicePrices(raw: unknown, currency: string | null, decimals: number | null): ServicePrice[] {
+  if (!raw || typeof raw !== 'object') return [];
+
+  const entries: Array<[string, unknown]> = Array.isArray(raw)
+    ? raw.map((item, i) => {
+        const rec = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+        const key = rec.key ?? rec.service ?? rec.type ?? rec.name ?? i;
+        return [String(key), item];
+      })
+    : Object.entries(raw as Record<string, unknown>);
+
+  return entries.map(([key, value]) => {
+    const rec = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+    const label = typeof rec.label === 'string' ? rec.label : undefined;
+    // A list entry holds its amount under `price`/`amount`; a map entry *is* the amount.
+    const amount = (rec.price ?? value) as ApiMoneyFields | string | number | null;
+    return { key, label, price: readEnvelopeMoney(amount, currency, decimals) };
+  });
+}
+
+/**
+ * The `422 topup_below_minimum` a top-up is rejected with, or **null** for any
+ * other failure.
+ *
+ * The backend states the current minimum in `meta.min_topup`, so this belongs on
+ * the amount field with that number — never on a generic error banner, and never
+ * with the stale minimum the form happened to be holding.
+ */
+export function topUpBelowMinimumFrom(
+  err: unknown,
+): { minTopUp: Money | null; reason: MinTopUpReason | null; message: string } | null {
+  if (!(err instanceof ApiError) || err.status !== 422) return null;
+  if (err.code !== 'topup_below_minimum') return null;
+
+  const meta     = err.meta ?? {};
+  const currency = typeof meta.currency === 'string' ? meta.currency : null;
+  const decimals = typeof meta.decimals === 'number' ? meta.decimals : null;
+  const raw      = meta.min_topup as ApiMoneyFields | string | number | null | undefined;
+
+  return {
+    minTopUp: raw != null ? readEnvelopeMoney(raw, currency, decimals) : null,
+    reason:   readMinTopUpReason(meta.min_topup_reason),
+    message:  err.message,
+  };
 }
 
 export const walletApi = {
@@ -1397,37 +2281,102 @@ export const walletApi = {
     };
   },
 
-  async getTransactions(params?: {
-    from?: string;
-    to?: string;
-    driverId?: string;
-    type?: string;
-    status?: string;
-    perPage?: number;
-  }): Promise<WalletTransaction[]> {
-    const qs = new URLSearchParams();
-    if (params?.from)     qs.set('from',      params.from);
-    if (params?.to)       qs.set('to',        params.to);
-    if (params?.driverId) qs.set('driver_id', params.driverId);
-    if (params?.type && params.type !== 'all')   qs.set('type',   params.type);
-    if (params?.status && params.status !== 'all') qs.set('status', params.status);
-    qs.set('per_page', String(params?.perPage ?? 100));
-
+  /**
+   * One page of transactions, with the paginator's own totals.
+   *
+   * Rows come from `data.data` — the confirmed contract, and the only place they
+   * are. Every filter this takes is honoured server-side, so the page on screen
+   * is a true window onto the filtered set rather than a filtered window onto
+   * one page.
+   */
+  async getTransactions(
+    params: WalletTransactionQuery = {},
+  ): Promise<{ rows: WalletTransaction[]; page: PageMeta }> {
     const raw = await apiClient.get<unknown>(
-      `/fleet-admin/wallet/transactions?${qs.toString()}`,
+      `/fleet-admin/wallet/transactions?${walletQueryString(params)}`,
     );
-    return extractList<ApiTransaction>(raw).map(mapTransaction);
+    const envelope = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const inner = (envelope['data'] ?? {}) as Record<string, unknown>;
+    const rows = (Array.isArray(inner['data']) ? inner['data'] as ApiTransaction[] : [])
+      .map(mapTransaction);
+    return { rows, page: extractPageMeta(raw, rows.length, params.perPage ?? DEFAULT_PER_PAGE) };
+  },
+
+  /**
+   * Every transaction matching `params`, by walking the paginator.
+   *
+   * For the CSV export, which is the ledger rather than the page on screen.
+   * `truncated` is true when the page cap was reached — the caller must surface
+   * that rather than present a short export as the whole ledger.
+   */
+  async getAllTransactions(
+    params: WalletTransactionQuery = {},
+    maxPages = MAX_TRANSACTION_PAGES,
+  ): Promise<{ rows: WalletTransaction[]; truncated: boolean }> {
+    const perPage = params.perPage ?? MAX_PER_PAGE;
+    const rows: WalletTransaction[] = [];
+
+    let page = 1;
+    let lastPage = 1;
+    do {
+      const res = await walletApi.getTransactions({ ...params, perPage, page });
+      rows.push(...res.rows);
+      lastPage = res.page.lastPage;
+      // A backend that ignores `page` would hand back page 1 forever; stopping on
+      // an empty response keeps that from spinning.
+      if (res.rows.length === 0) break;
+      page += 1;
+    } while (page <= lastPage && page <= maxPages);
+
+    const truncated = lastPage > maxPages;
+    if (truncated) {
+      logger.warn(
+        `[Wallet] Stopped after ${maxPages} pages of ${lastPage}; ` +
+        'the result is incomplete. Narrow the date range.',
+      );
+    }
+    return { rows, truncated };
   },
 
   async getBalance(driverId: string): Promise<number> {
-    const res = await apiClient.get<{
-      data?: { balance?: number; balance_sar?: number };
-      balance_sar?: number;
-      balance?: number;
-    }>(`/fleet-admin/wallet/balance/${driverId}`);
-    // Backend wraps response: { success, data: { driver_id, name, balance, currency } }
+    const res = await apiClient.get<{ data?: ApiMoneyFields } & ApiMoneyFields>(
+      `/fleet-admin/wallet/balance/${driverId}`,
+    );
+    // Backend wraps response:
+    // { success, data: { driver_id, name, balance, currency, minor_units, decimals } }
     const inner = (res.data && typeof res.data === 'object') ? res.data : res;
-    return inner.balance_sar ?? inner.balance ?? 0;
+    return moneyToNumber(readMoney(inner));
+  },
+
+  /**
+   * Everything the top-up form needs for one driver: the minimum, why it is what
+   * it is, and the quick-amount chips.
+   *
+   * `suggested_amounts` is passed through untouched. The backend has already
+   * removed the chips below the minimum and prepended the minimum itself, so
+   * filtering or re-sorting here would only produce a set the server disagrees
+   * with — and in a three-decimal currency that disagreement is invisible until
+   * a payment is rejected.
+   */
+  async getTopUpOptions(driverId: string): Promise<TopUpOptions> {
+    const res = await apiClient.get<{ data?: ApiTopUpOptions } & ApiTopUpOptions>(
+      `/fleet-admin/wallet/topup-options?driver_id=${encodeURIComponent(driverId)}`,
+    );
+    const d: ApiTopUpOptions = (res.data && typeof res.data === 'object') ? res.data : res;
+
+    const currency = d.currency ?? null;
+    const decimals = typeof d.decimals === 'number' ? d.decimals : null;
+
+    return {
+      currency,
+      decimals,
+      balance:        readEnvelopeMoney(d.balance,   currency, decimals),
+      minTopUp:       readEnvelopeMoney(d.min_topup, currency, decimals),
+      minTopUpReason: readMinTopUpReason(d.min_topup_reason),
+      suggestedAmounts: (Array.isArray(d.suggested_amounts) ? d.suggested_amounts : [])
+        .map((a) => readEnvelopeMoney(a, currency, decimals)),
+      servicePrices:  mapServicePrices(d.service_prices, currency, decimals),
+    };
   },
 
   /**
@@ -1476,11 +2425,21 @@ export const walletApi = {
     const d  = res.data ?? {};
     const pd = d.payment_data ?? {};
 
+    // A payment must never proceed on a guessed currency. Defaulting to SAR here
+    // would hand the gateway "SAR" for a JOD charge — an actual mischarge, not a
+    // rendering bug — so fail before any payment is attempted.
+    if (!pd.currency) {
+      throw new Error(
+        'Top-up initiation returned no currency (data.payment_data.currency is missing). ' +
+        'Refusing to start a payment without one.',
+      );
+    }
+
     return {
       walletTransactionUuid: d.wallet_transaction_uuid ?? '',
       paymentData: {
         amount:         pd.amount         ?? 0,
-        currency:       pd.currency       ?? 'SAR',
+        currency:       pd.currency,
         description:    pd.description    ?? 'Driver wallet top-up',
         publishableKey: pd.publishable_key ?? '',
         callbackUrl:    pd.callback_url   ?? '',
@@ -1600,12 +2559,21 @@ export const walletApi = {
     note?: string,
   ): Promise<Driver> {
     const res = await apiClient.post<{
-      data?: { driver_id?: number | string; balance?: number; balance_sar?: number };
+      data?: { driver_id?: number | string } & ApiMoneyFields;
     }>('/fleet-admin/wallet/top-up', { driver_id: Number(driverId), amount, note });
-    // Response: { success, data: { driver_id, name, amount, balance, currency, note } }
+    // Response: { success, data: { driver_id, name, amount, balance, currency,
+    //                              minor_units, decimals, note } }
     // No full driver object — extract the new balance and return a stub for merging
     const data = (res.data && typeof res.data === 'object') ? res.data : {};
-    const newBalance = data.balance ?? data.balance_sar ?? amount;
+    // `balance` is the post-top-up total; fall back to the amount we just sent.
+    // `minor_units` on this payload describes the top-up amount, not the balance,
+    // so it is deliberately not forwarded here.
+    const newBalance = data.balance != null
+      ? parseAmount(
+          data.balance,
+          data.decimals ?? decimalsForCurrency(data.currency) ?? fractionDigitsOf(data.balance),
+        )
+      : amount;
     return {
       id:           String(data.driver_id ?? driverId),
       name:         '',

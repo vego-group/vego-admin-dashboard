@@ -1,14 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AlertTriangle, ChevronDown, Map as MapIcon, Save } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Map as MapIcon, Save, Users } from 'lucide-react';
 import { Drawer, DrawerHeader } from '@/components/ui/Drawer';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { ZONE_TYPES, ZONE_TYPE_LIST } from '@/lib/zone-types';
 import { isArabicOnly, isEnglishOnly } from '@/lib/text-script';
+import { VEHICLE_SPEED_LIMIT_MAX } from '@/lib/vehicle-speed';
 import { cn } from '@/lib/cn';
 import type { Zone, ZonePoint, ZoneType } from '@/types';
 
@@ -30,7 +32,12 @@ interface ZoneFormDrawerProps {
   onSubmit: (values: ZoneFormValues, zoneId?: string) => void | Promise<void>;
 }
 
-const MAX_SPEED = 100;
+/**
+ * A zone speed limit and a vehicle speed limit are the same quantity, so they
+ * are drawn against the same ceiling — previously this slider went to 100 while
+ * the vehicle control slider went to 45. See @/lib/vehicle-speed.
+ */
+const MAX_SPEED = VEHICLE_SPEED_LIMIT_MAX;
 
 export function ZoneFormDrawer({
   open,
@@ -40,6 +47,7 @@ export function ZoneFormDrawer({
   onSubmit,
 }: ZoneFormDrawerProps) {
   const { t } = useI18n();
+  const { tv } = useVehicleTerm();
   const isEdit = !!zone;
 
   const [values, setValues] = useState<ZoneFormValues>({
@@ -206,7 +214,7 @@ export function ZoneFormDrawer({
                 color: typeConfig.color,
               }}
             >
-              {t(`zones.types.${typeConfig.descriptionKey}`)}
+              {tv(`zones.types.${typeConfig.descriptionKey}`)}
             </div>
           </div>
 
@@ -230,17 +238,17 @@ export function ZoneFormDrawer({
                     <span className="text-2xl font-bold tabular-nums text-slate-900 dark:text-slate-50">
                       {values.speedLimitKmh}
                     </span>
-                    <span className="ms-1 text-xs font-medium text-slate-500">km/h</span>
+                    <span className="ms-1 text-xs font-medium text-slate-500">{t('common.kmh')}</span>
                   </div>
                 </div>
                 <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
-                  <span>0 km/h</span>
+                  <span>0 {t('common.kmh')}</span>
                   <span className="font-semibold text-brand-600">{speedLabel}</span>
-                  <span>{MAX_SPEED} km/h</span>
+                  <span>{MAX_SPEED} {t('common.kmh')}</span>
                 </div>
               </div>
               <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                {t('zones.speedHint')}
+                {tv('zones.speedHint')}
               </p>
             </Field>
           </div>
@@ -269,8 +277,16 @@ export function ZoneFormDrawer({
             </div>
           </div>
 
+          {/* Who this zone actually binds. An operator drawing a polygon on a
+              public road reasonably assumes it covers everyone riding there; it
+              covers their own drivers. */}
+          <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50/70 p-3 text-xs text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
+            <Users className="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
+            <p>{tv('zones.enforcementScopeNote')}</p>
+          </div>
+
           {/* Notice banner */}
-          <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <div className="mt-3 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
             <p>
               <span className="font-semibold">{t('zones.notice')}: </span>

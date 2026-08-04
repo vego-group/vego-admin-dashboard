@@ -3,6 +3,7 @@
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useRef, useState } from 'react';
 import type { Map as LeafletMap, Marker as LeafletMarker } from 'leaflet';
+import { fitToPoints, type LatLngTuple } from '@/lib/map-fit';
 import type { Vehicle, BatteryStation } from '@/types';
 
 export interface LiveFleetMapProps {
@@ -94,6 +95,7 @@ export default function LiveFleetMapInner({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef       = useRef<LeafletMap | null>(null);
   const markersRef   = useRef<LeafletMarker[]>([]);
+  const hasFittedRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
 
   /* Initialize map once */
@@ -106,6 +108,8 @@ export default function LiveFleetMapInner({
       const L = (await import('leaflet')) as any;
       if (cancelled || !containerRef.current) return;
 
+      // Placeholder viewport only — replaced by fitBounds() over the real
+      // markers as soon as any arrive. Never used to place a marker.
       const map: LeafletMap = L.map(containerRef.current, {
         center: [24.74, 46.672],
         zoom: 13,
@@ -130,6 +134,7 @@ export default function LiveFleetMapInner({
       cancelled = true;
       mapRef.current?.remove();
       mapRef.current = null;
+      hasFittedRef.current = false;
       setMapReady(false);
     };
   }, []);
@@ -148,8 +153,9 @@ export default function LiveFleetMapInner({
       markersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
 
-      /* Station markers */
+      /* Station markers — same rule as vehicles: no position, no pin. */
       for (const s of stations) {
+        if (!s.coordinates) continue;
         const icon = L.divIcon({
           className: '',
           html: pinHtml(40, '#38bdf8,#0284c7', 'rgba(56,189,248,0.25)', BAT_SVG),
@@ -170,8 +176,13 @@ export default function LiveFleetMapInner({
         markersRef.current.push(m);
       }
 
-      /* Vehicle markers */
+      /* Vehicle markers — only for vehicles that have actually reported a
+         position. There is no fallback coordinate: an offline bike used to be
+         drawn on a hardcoded central-Riyadh point, which put a Jordanian fleet's
+         offline half in another country. Unlocated vehicles are surfaced in the
+         fleet list instead (see LocationLabel). */
       for (const v of vehicles) {
+        if (!v.coordinates) continue;
         const c = VEHICLE_COLORS[v.status] ?? VEHICLE_COLORS.active;
         const icon = L.divIcon({
           className: '',
@@ -191,6 +202,15 @@ export default function LiveFleetMapInner({
         });
         m.addTo(map);
         markersRef.current.push(m);
+      }
+
+      /* Frame what is actually on the map — once. See @/lib/map-fit. */
+      if (!hasFittedRef.current) {
+        const points = markersRef.current.map((m) => {
+          const ll = m.getLatLng();
+          return [ll.lat, ll.lng] as LatLngTuple;
+        });
+        hasFittedRef.current = fitToPoints(L, map, points);
       }
     })();
   }, [mapReady, vehicles, stations]);

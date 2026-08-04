@@ -17,15 +17,45 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Pagination } from '@/components/ui/Pagination';
 import { SuccessDialog } from '@/components/ui/SuccessDialog';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useVehicleTerm } from '@/hooks/useVehicleTerm';
+import { useCountries } from '@/hooks/useCountries';
+import { useFleetContext } from '@/hooks/useFleetContext';
 import { driversApi, fleetApi } from '@/lib/api';
-import type { CancelledSessions, Driver, DriverStatus, Vehicle } from '@/types';
+import { toE164 } from '@/lib/country';
+import type { CancelledSessions, DialCode, Driver, DriverStatus, Vehicle } from '@/types';
 import { logger } from '@/lib/logger';
 
 type TabValue = 'all' | DriverStatus;
+type SortValue = 'newest' | 'oldest';
 type FormMode = { kind: 'closed' } | { kind: 'add' } | { kind: 'edit'; driver: Driver };
+
+/**
+ * Creation order for a driver, as a sortable number.
+ *
+ * `GET /fleet-admin/drivers` returns no `created_at`, so the autoincrement id is
+ * the ordering key — it *is* creation order, by construction. `createdAt` is
+ * preferred the moment the backend starts sending it. Non-numeric ids (fixtures
+ * like 'Driv-1001') fall back to 0 and keep their incoming relative order,
+ * because the sort below is stable.
+ */
+function recencyKey(d: Driver): number {
+  if (d.createdAt) {
+    const ms = Date.parse(d.createdAt);
+    if (Number.isFinite(ms)) return ms;
+  }
+  const id = Number(d.id);
+  return Number.isFinite(id) ? id : 0;
+}
 
 export default function DriversPage() {
   const { t } = useI18n();
+  const { tv } = useVehicleTerm();
+
+  // A driver is created in the fleet's country — fleets do not span countries —
+  // so the dial code that builds the E.164 number comes from the fleet profile.
+  const { isoCountryCode: fleetIso } = useFleetContext();
+  const { byIso } = useCountries();
+  const fleetDialCode: DialCode | undefined = byIso(fleetIso)?.dialCode;
 
   // Data
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -35,7 +65,7 @@ export default function DriversPage() {
   // Filters
   const [tab, setTab] = useState<TabValue>('all');
   const [query, setQuery] = useState('');
-  const [sort, setSort] = useState('newest');
+  const [sort, setSort] = useState<SortValue>('newest');
   const [page, setPage] = useState(1);
 
   // Modals
@@ -86,8 +116,11 @@ export default function DriversPage() {
         (d) => d.name.toLowerCase().includes(q) || d.id.toLowerCase().includes(q)
       );
     }
-    return result;
-  }, [drivers, tab, query]);
+    // The dropdown used to set state nobody read, so the list never reordered.
+    // Copy before sorting — `result` can still be the `drivers` array itself.
+    const dir = sort === 'oldest' ? 1 : -1;
+    return [...result].sort((a, b) => dir * (recencyKey(a) - recencyKey(b)));
+  }, [drivers, tab, query, sort]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -109,13 +142,13 @@ export default function DriversPage() {
 
   const handleAddSubmit = async (values: DriverFormValues) => {
     const created = await driversApi.create({
-      name: values.fullName,
-      phone: '966' + values.phone,
+      name: values.fullName.trim(),
+      // Full E.164 plus the dial code, instead of the old hardcoded '966' + phone.
+      phone: toE164(values.phone, fleetDialCode),
+      dialCode: fleetDialCode,
       email: values.email || undefined,
       address: values.address || undefined,
       city: values.city || undefined,
-      vehicleModel: values.vehicleModel,
-      status: values.status,
       documents: {
         license: {
           status: values.licenseFrontName ? 'pending' : 'not_uploaded',
@@ -141,13 +174,30 @@ export default function DriversPage() {
   const handleEditSubmit = async (values: DriverFormValues, driverId?: string) => {
     if (!driverId) return;
 
+    // On edit, `''` is a deliberate clear and must reach the request body — the
+    // `|| undefined` that create uses would turn it back into "not supplied" and
+    // the old value would survive. `driversApi.update` guards on `!== undefined`.
+    // `name` and `phone` are the exceptions: they are not clearable, the form
+    // will not submit either one blank, and a blank would be a 422 by name.
     const updated = await driversApi.update(driverId, {
-      name: values.fullName,
-      phone: '966' + values.phone,
-      email: values.email || undefined,
-      address: values.address || undefined,
-      city: values.city || undefined,
-      vehicleModel: values.vehicleModel,
+      name: values.fullName.trim(),
+      phone: toE164(values.phone, fleetDialCode),
+      dialCode: fleetDialCode,
+      email: values.email.trim(),
+      address: values.address.trim(),
+      city: values.city.trim(),
+      // Licence expiry and plate number are text fields on this form; they must
+      // be sent whether or not the operator also picked a new image.
+      documents: {
+        license: {
+          status:     'not_uploaded',
+          hasLicense: values.hasLicense,
+          number:     values.licenseNumber.trim(),
+          expiryDate: values.licenseExpiry.trim(),
+        },
+        customsCard: { status: 'not_uploaded' },
+        plate: { status: 'not_uploaded', number: values.plateNumber.trim() },
+      },
     });
 
     if (updated) {
@@ -256,7 +306,7 @@ export default function DriversPage() {
     );
     setSuccessDialog({
       kind: 'statusChanged',
-      title: t('drivers.motorcycleAssignedTitle'),
+      title: tv('drivers.motorcycleAssignedTitle'),
       description: t('drivers.motorcycleAssignedDescription', { motorcycle: plate, driver: driver?.name ?? driverId }),
     });
     return true;
@@ -279,8 +329,8 @@ export default function DriversPage() {
     );
     setSuccessDialog({
       kind: 'statusChanged',
-      title: t('drivers.motorcycleUnassignedTitle'),
-      description: t('drivers.motorcycleUnassignedDescription', { driver: driver?.name ?? driverId }),
+      title: tv('drivers.motorcycleUnassignedTitle'),
+      description: tv('drivers.motorcycleUnassignedDescription', { driver: driver?.name ?? driverId }),
     });
     return true;
   };
@@ -354,7 +404,7 @@ export default function DriversPage() {
           </div>
           <Select
             value={sort}
-            onChange={(e) => setSort(e.target.value)}
+            onChange={(e) => { setSort(e.target.value as SortValue); setPage(1); }}
             options={[
               { value: 'newest', label: t('common.newestFirst') },
               { value: 'oldest', label: t('common.oldestFirst') },

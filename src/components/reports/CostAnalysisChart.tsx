@@ -4,7 +4,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useI18n } from '@/i18n/I18nProvider';
-import { formatCurrency } from '@/lib/format';
+import { useFleetContext } from '@/hooks/useFleetContext';
 import type { CostBreakdown } from '@/types';
 
 interface Props {
@@ -14,6 +14,7 @@ interface Props {
 
 export function CostAnalysisChart({ data, loading }: Props) {
   const { t, locale } = useI18n();
+  const { formatMoney } = useFleetContext();
   const total = data.reduce((sum, c) => sum + c.value, 0);
 
   // Translate the categories we know about; otherwise show the backend's own
@@ -65,7 +66,7 @@ export function CostAnalysisChart({ data, loading }: Props) {
                 {t('reports.total')}
               </span>
               <span className="mt-0.5 text-xs font-bold text-slate-900 dark:text-slate-100">
-                {formatCurrency(total, locale)}
+                {formatMoney(total, locale)}
               </span>
             </div>
           </div>
@@ -76,7 +77,7 @@ export function CostAnalysisChart({ data, loading }: Props) {
                 <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
                 <span className="text-slate-600 dark:text-slate-300">{displayLabel(item.category)}</span>
                 <span className="ms-auto font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-                  {formatCurrency(item.value, locale)}
+                  {formatMoney(item.value, locale)}
                 </span>
               </li>
             ))}

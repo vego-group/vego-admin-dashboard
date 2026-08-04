@@ -6,6 +6,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { cn } from '@/lib/cn';
 import type { Driver, Vehicle } from '@/types';
 
@@ -36,6 +37,7 @@ export function AssignMotorcycleModal({
   onUnassign,
 }: AssignMotorcycleModalProps) {
   const { t } = useI18n();
+  const { tv } = useVehicleTerm();
 
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState('');
@@ -77,7 +79,7 @@ export function AssignMotorcycleModal({
     const ok = await onAssign(selectedId, driver.id);
     setBusy(null);
     if (ok) onClose();
-    else setError(t('drivers.assignMotorcycleFailed'));
+    else setError(tv('drivers.assignMotorcycleFailed'));
   };
 
   const handleUnassign = async () => {
@@ -87,7 +89,7 @@ export function AssignMotorcycleModal({
     const ok = await onUnassign(currentId, driver.id);
     setBusy(null);
     if (ok) onClose();
-    else setError(t('drivers.unassignMotorcycleFailed'));
+    else setError(tv('drivers.unassignMotorcycleFailed'));
   };
 
   return (
@@ -100,7 +102,7 @@ export function AssignMotorcycleModal({
           </div>
           <div className="min-w-0">
             <h2 className="text-lg font-bold text-slate-900 dark:text-slate-50">
-              {isAssigned ? t('drivers.changeMotorcycle') : t('drivers.assignMotorcycle')}
+              {isAssigned ? tv('drivers.changeMotorcycle') : tv('drivers.assignMotorcycle')}
             </h2>
             <p className="truncate text-sm text-slate-500 dark:text-slate-400">{driver.name}</p>
           </div>
@@ -116,7 +118,7 @@ export function AssignMotorcycleModal({
               <Bike className="h-4 w-4" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-xs text-slate-400">{t('drivers.currentMotorcycle')}</p>
+              <p className="text-xs text-slate-400">{tv('drivers.currentMotorcycle')}</p>
               <p className="truncate font-semibold text-slate-900 dark:text-slate-100">
                 {driver.assignedMotorcyclePlate ?? `#${currentId}`}
                 {driver.vehicleModel ? <span className="ms-1 text-xs font-normal text-slate-400">· {driver.vehicleModel}</span> : null}
@@ -138,7 +140,7 @@ export function AssignMotorcycleModal({
         {/* Motorcycle picker */}
         <div className="mt-5">
           <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
-            {isAssigned ? t('drivers.changeMotorcycle') : t('drivers.selectMotorcycle')}
+            {isAssigned ? tv('drivers.changeMotorcycle') : tv('drivers.selectMotorcycle')}
           </p>
           <Input
             placeholder={t('drivers.searchMotorcycles')}
@@ -153,7 +155,7 @@ export function AssignMotorcycleModal({
           >
             {candidates.length === 0 ? (
               <p className="px-3 py-6 text-center text-sm text-slate-400">
-                {t('drivers.noAvailableMotorcycles')}
+                {tv('drivers.noAvailableMotorcycles')}
               </p>
             ) : (
               candidates.map((m) => {
@@ -203,7 +205,7 @@ export function AssignMotorcycleModal({
             disabled={!selectedId || !!busy}
             leftIcon={busy === 'assign' ? undefined : <Bike className="h-4 w-4" />}
           >
-            {isAssigned ? t('drivers.changeMotorcycle') : t('drivers.assignMotorcycle')}
+            {isAssigned ? tv('drivers.changeMotorcycle') : tv('drivers.assignMotorcycle')}
           </Button>
         </div>
       </div>

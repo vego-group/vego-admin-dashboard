@@ -16,6 +16,7 @@ import { Pagination } from '@/components/ui/Pagination';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { SuccessDialog } from '@/components/ui/SuccessDialog';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { fleetApi, driversApi } from '@/lib/api';
 import type { Driver, Vehicle, VehicleStatus } from '@/types';
 import { logger } from '@/lib/logger';
@@ -26,6 +27,7 @@ const PAGE_SIZE = 12;
 
 export default function FleetPage() {
   const { t } = useI18n();
+  const { tv } = useVehicleTerm();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,7 +86,9 @@ export default function FleetPage() {
     );
     setSuccessDialog({
       title: t('fleet.assignSuccessTitle'),
-      description: t('fleet.assignSuccessDescription', { driver: driverName, vehicle: motorcycleId }),
+      // `plate`, not `vehicle`: `{{vehicle}}` is the country's noun for the
+      // type, bound by tv(). This names one specific machine.
+      description: tv('fleet.assignSuccessDescription', { driver: driverName, plate: motorcycleId }),
     });
     return true;
   };
@@ -101,7 +105,7 @@ export default function FleetPage() {
     );
     setSuccessDialog({
       title: t('fleet.unassignSuccessTitle'),
-      description: t('fleet.unassignSuccessDescription', { vehicle: motorcycleId }),
+      description: tv('fleet.unassignSuccessDescription', { plate: motorcycleId }),
     });
     return true;
   };
@@ -140,7 +144,7 @@ export default function FleetPage() {
   const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
-    <DashboardShell title={t('fleet.title')} subtitle={t('fleet.subtitle')}>
+    <DashboardShell title={t('fleet.title')} subtitle={tv('fleet.subtitle')}>
       {apiError && (
         <div className="mb-3 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
           <span>{apiError}</span>

@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { cn } from '@/lib/cn';
 import type { DocumentStatus, DriverRegistrationRequest } from '@/types';
 
@@ -225,6 +226,7 @@ function ViewDetailsModal({
   onClose: () => void; onApprove: () => void; onReject: () => void;
 }) {
   const { t } = useI18n();
+  const { tv } = useVehicleTerm();
   const timeAgo = useTimeAgo();
   const docs = req.documents;
   const uploadedCount = [docs.license.status, docs.customsCard.status, docs.plate.status].filter(
@@ -346,7 +348,7 @@ function ViewDetailsModal({
                   </div>
                   <div>
                     <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
-                      {t('drivers.licensePlate')}
+                      {tv('drivers.licensePlate')}
                     </p>
                     {docs.plate.number && (
                       <p className="text-xs text-slate-400">{docs.plate.number}</p>
@@ -391,6 +393,7 @@ type ConfirmState =
 
 export function PendingRequestsTable({ requests, onApprove, onReject }: PendingRequestsTableProps) {
   const { t } = useI18n();
+  const { tv } = useVehicleTerm();
   const timeAgo = useTimeAgo();
 
   const [viewReq, setViewReq]   = useState<DriverRegistrationRequest | null>(null);
@@ -501,7 +504,7 @@ export function PendingRequestsTable({ requests, onApprove, onReject }: PendingR
                         <div className="flex items-center gap-1.5">
                           <DocDot status={docs.license.status}     Icon={IdCard}   docName={t('drivers.drivingLicense')} />
                           <DocDot status={docs.customsCard.status} Icon={FileText} docName={t('drivers.customsCard')} />
-                          <DocDot status={docs.plate.status}       Icon={Hash}     docName={t('drivers.licensePlate')} />
+                          <DocDot status={docs.plate.status}       Icon={Hash}     docName={tv('drivers.licensePlate')} />
                         </div>
                         <span className="text-[10px] tabular-nums text-slate-400">
                           {t('drivers.uploadedCount', { count: uploadedCount })}

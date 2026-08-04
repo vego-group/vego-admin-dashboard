@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Pagination } from '@/components/ui/Pagination';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { iotDevicesApi } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
@@ -29,6 +30,7 @@ const GPS_TONE: Record<IoTDevice['gpsSignal'], { tone: 'success' | 'warning' | '
 
 export default function IoTDevicesPage() {
   const { t, locale } = useI18n();
+  const { tv } = useVehicleTerm();
   const [devices, setDevices] = useState<IoTDevice[]>([]);
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState<string | null>(null);
@@ -112,7 +114,7 @@ export default function IoTDevicesPage() {
           />
           <div className="min-w-[240px] flex-1 sm:max-w-xs">
             <Input
-              placeholder={t('iotDevices.searchPlaceholder')}
+              placeholder={tv('iotDevices.searchPlaceholder')}
               value={query}
               onChange={(e) => { setQuery(e.target.value); setPage(1); }}
               leftIcon={<Search className="h-4 w-4" />}
@@ -136,7 +138,7 @@ export default function IoTDevicesPage() {
                 <thead>
                   <tr className="border-b text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 rtl:text-right" style={{ borderColor: 'rgb(var(--border))' }}>
                     <th className="px-5 py-4">{t('iotDevices.deviceId')}</th>
-                    <th className="px-5 py-4">{t('iotDevices.motorcycle')}</th>
+                    <th className="px-5 py-4">{tv('iotDevices.motorcycle')}</th>
                     <th className="px-5 py-4">{t('iotDevices.status')}</th>
                     <th className="px-5 py-4">{t('iotDevices.battery')}</th>
                     <th className="px-5 py-4">{t('iotDevices.gps')}</th>

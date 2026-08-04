@@ -2,7 +2,8 @@
 
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { Clock, MapPin, TrendingUp } from 'lucide-react';
+import { Clock, TrendingUp } from 'lucide-react';
+import { LocationLabel } from '@/components/ui/LocationLabel';
 import { useI18n } from '@/i18n/I18nProvider';
 import type { BatteryStation } from '@/types';
 import { cn } from '@/lib/cn';
@@ -39,10 +40,11 @@ export function StationCard({ station, onClick }: StationCardProps) {
           <h3 className="truncate text-sm font-bold text-slate-900 dark:text-slate-50">
             {station.name}
           </h3>
-          <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-slate-500">
-            <MapPin className="h-3 w-3" />
-            <span className="truncate">{station.district}, {station.city}</span>
-          </p>
+          <LocationLabel
+            coordinates={station.coordinates}
+            parts={[station.district, station.city]}
+            className="mt-0.5 flex text-xs text-slate-500"
+          />
         </div>
         <Badge tone={tone}>{availability}%</Badge>
       </div>

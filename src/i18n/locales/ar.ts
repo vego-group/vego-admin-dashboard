@@ -1,5 +1,33 @@
 import type { Translations } from './en';
 
+/**
+ * Arabic copy.
+ *
+ * The vehicle noun is **server-driven per country** (`vehicle_term.ar` on
+ * `GET /countries` and `GET /fleet-admin/me`): `دباب` in Saudi Arabia,
+ * `دراجة نارية` in Jordan, something else again in the next market. None of
+ * those words may be written into this file. `tv()` from `useVehicleTerm()`
+ * fills in the placeholders below.
+ *
+ * Three Arabic forms, because the article cannot be glued on by concatenation:
+ *
+ *   {{vehicle}}     indefinite   دباب      / دراجة نارية
+ *   {{alVehicle}}   definite     الدباب    / الدراجة النارية
+ *   {{lilVehicle}}  after لِ      للدباب    / للدراجة النارية
+ *
+ * **Do not write `ال{{vehicle}}`.** It is right for the one-word Saudi term and
+ * wrong for the two-word Jordanian one — Arabic puts the article on the noun
+ * *and* its adjective, so it would render `الدراجة نارية`. Likewise `لل{{vehicle}}`
+ * would render `للدراجة نارية`, and `ل{{alVehicle}}` would render `لالدباب`.
+ * Use the derived forms; `useVehicleTerm` owns the morphology.
+ *
+ * `{{Vehicle}}` / `{{Vehicles}}` exist so English can title-case and pluralise.
+ * In Arabic they resolve to the same singular, so prefer `{{alVehicle}}` and
+ * phrase around the plural rather than reaching for `{{vehicles}}`.
+ *
+ * The word «سكوتر» is not Arabic for any of these machines and appeared in three
+ * zone descriptions. It is gone; do not reintroduce it.
+ */
 const ar: Translations = {
   common: {
     appName: 'ماي فيجو',
@@ -20,10 +48,13 @@ const ar: Translations = {
     add: 'إضافة',
     confirm: 'تأكيد',
     close: 'إغلاق',
+    back: 'رجوع',
     undo: 'تراجع',
     optional: 'اختياري',
     loading: 'جارٍ التحميل...',
     noData: 'لا توجد بيانات',
+    locationUnknown: 'الموقع غير معروف',
+    locationUnknownHint: 'لم يُبلَّغ عن أي موقع — لا يظهر على الخريطة',
     error: 'حدث خطأ ما',
     retry: 'إعادة المحاولة',
     today: 'اليوم',
@@ -32,6 +63,7 @@ const ar: Translations = {
     lastUpdate: 'آخر تحديث الآن',
     minutes: 'دقيقة',
     kilometers: 'كم',
+    kmh: 'كم/س',
     minAgo: 'منذ دقائق',
     hourAgo: 'منذ ساعة',
     daysAgo: 'منذ أيام',
@@ -48,7 +80,7 @@ const ar: Translations = {
     fastCharging: 'الشحن السريع',
     drivers: 'السائقون',
     sessions: 'الجلسات',
-    vehicleControl: 'التحكم بالمركبات',
+    vehicleControl: 'التحكم ب{{alVehicle}}',
     iotDevices: 'أجهزة التتبع',
     zones: 'النطاقات',
     alarms: 'الإنذارات',
@@ -63,10 +95,10 @@ const ar: Translations = {
     online: 'متصل',
     offline: 'غير متصل',
     weakGps: 'إشارة GPS ضعيفة / منعدمة',
-    searchPlaceholder: 'ابحث برقم الجهاز أو الموتوسيكل…',
+    searchPlaceholder: 'ابحث برقم الجهاز أو {{alVehicle}}…',
     empty: 'لا توجد أجهزة مطابقة للفلاتر الحالية.',
     deviceId: 'رقم الجهاز',
-    motorcycle: 'الموتوسيكل',
+    motorcycle: '{{alVehicle}}',
     status: 'الحالة',
     battery: 'البطارية',
     gps: 'GPS',
@@ -78,7 +110,7 @@ const ar: Translations = {
   },
   alarms: {
     title: 'الإنذارات',
-    subtitle: 'راجع وحُلّ إنذارات الأجهزة والمركبات',
+    subtitle: 'راجع وحُلّ إنذارات الأجهزة و{{alVehicle}}',
     unresolved: 'غير محلولة',
     criticalOpen: 'حرجة (مفتوحة)',
     resolved: 'محلولة',
@@ -115,12 +147,12 @@ const ar: Translations = {
     totalTripsToday: 'إجمالي الرحلات اليوم',
     avgTripDuration: 'متوسط مدة الرحلة',
     liveFleetMap: 'خريطة الأسطول المباشرة',
-    liveFleetMapSubtitle: 'الموقع الفعلي للدراجات ومحطات البطاريات',
+    liveFleetMapSubtitle: 'الموقع الفعلي {{lilVehicle}} ومحطات البطاريات',
     fleetStatus: 'حالة الأسطول',
     chargingBattery: 'بطارية قيد الشحن',
     averageSoc: 'متوسط الشحن',
     lowBattery: 'بطارية منخفضة',
-    averageCostVehicle: 'متوسط التكلفة لكل مركبة',
+    averageCostVehicle: 'متوسط التكلفة لكل {{vehicle}}',
     successRate: 'معدل النجاح',
     totalDrivers: 'إجمالي السائقين',
     activeTrips: 'الرحلات النشطة',
@@ -137,7 +169,7 @@ const ar: Translations = {
   },
   fleet: {
     title: 'إدارة الأسطول',
-    subtitle: 'راقب وأدر أسطول الدراجات الكهربائية بالكامل',
+    subtitle: 'راقب وأدر أسطول {{alVehicle}} الكهربائية بالكامل',
     active: 'نشطة',
     charging: 'قيد الشحن',
     idle: 'خاملة',
@@ -145,7 +177,7 @@ const ar: Translations = {
     battery: 'البطارية',
     lastTrip: 'آخر رحلة',
     totalDistance: 'المسافة الإجمالية',
-    vehicleId: 'معرف المركبة',
+    vehicleId: 'معرف {{alVehicle}}',
     plateNumber: 'رقم اللوحة',
     model: 'الموديل',
     assignedDriver: 'السائق المعين',
@@ -160,9 +192,10 @@ const ar: Translations = {
     searchDrivers: 'ابحث عن سائق بالاسم أو الهاتف…',
     noActiveDrivers: 'لا يوجد سائقون نشطون متاحون للتعيين.',
     assignSuccessTitle: 'تم تعيين السائق',
-    assignSuccessDescription: 'تم تعيين {{driver}} للمركبة {{vehicle}}.',
+    // ‏{{plate}} رقم لوحة مركبة بعينها، بينما {{vehicle}} اسم النوع في هذه الدولة.
+    assignSuccessDescription: 'تم تعيين {{driver}} {{lilVehicle}} {{plate}}.',
     unassignSuccessTitle: 'تم إلغاء تعيين السائق',
-    unassignSuccessDescription: 'لم يعد للمركبة {{vehicle}} سائق معيَّن.',
+    unassignSuccessDescription: 'لم يعد {{lilVehicle}} {{plate}} سائق معيَّن.',
   },
   stations: {
     title: 'محطات البطاريات',
@@ -173,7 +206,7 @@ const ar: Translations = {
     totalCapacity: 'السعة الإجمالية',
     readyForUse: 'جاهزة للاستخدام الفوري',
     currentlyCharging: 'قيد الشحن حالياً',
-    currentlyInScooters: 'حالياً في الدراجات',
+    currentlyInVehicles: 'حالياً في {{alVehicle}}',
     acrossStations: 'عبر {{count}} محطات',
     stationLocations: 'مواقع المحطات',
     realtimeMap: 'خريطة توفر البطاريات في الوقت الفعلي',
@@ -190,7 +223,7 @@ const ar: Translations = {
     driverId: 'معرف السائق',
     name: 'الاسم',
     phone: 'الهاتف',
-    vehicles: 'المركبات',
+    vehicles: '{{alVehicle}}',
     status: 'الحالة',
     trips: 'الرحلات',
     charges: 'الشحنات',
@@ -198,26 +231,33 @@ const ar: Translations = {
     actions: 'الإجراءات',
     addNewDriver: 'إضافة سائق جديد',
     addDriver: 'إضافة سائق',
-    addDriverDescription: 'أدخل بيانات السائق وقم بتعيين مركبة',
+    addDriverDescription: 'أدخل بيانات السائق وقم بتعيين {{vehicle}}',
     editDriver: 'تعديل السائق',
     updateDriver: 'تحديث السائق',
-    editDriverDescription: 'تحديث بيانات السائق وتعيين المركبة',
+    editDriverDescription: 'تحديث بيانات السائق وتعيين {{alVehicle}}',
     personalInformation: 'المعلومات الشخصية',
     fullName: 'الاسم الكامل',
+    country: 'الدولة',
+    countryFixedByFleet: 'محدّدة من أسطولك — السائقون يتبعون دولة الأسطول',
+    countryUnresolved: 'تعذّر تحميل دولة الأسطول',
     phoneNumber: 'رقم الهاتف',
     emailAddress: 'البريد الإلكتروني',
     address: 'العنوان',
     city: 'المدينة',
-    vehicleAssignment: 'تعيين المركبة',
-    assignVehicle: 'تعيين مركبة',
-    noVehicleAssigned: 'لا توجد مركبة معيّنة',
+    vehicleAssignment: 'تعيين {{alVehicle}}',
+    assignVehicle: 'تعيين {{vehicle}}',
+    assignedVehicle: '{{alVehicle}} المعيّنة',
+    assignVehicleElsewhere:
+      'يتم التعيين من إجراء «تعيين {{vehicle}}» في قائمة السائقين، وليس من هذا النموذج.',
+    noVehicleAssigned: 'لا توجد {{vehicle}} معيّنة',
     noteLabel: 'ملاحظة',
     assignmentHint:
-      'بمجرد تعيين مركبة لهذا السائق، سيتمكن من بدء الرحلات باستخدامها. يمكنك تغيير تعيين المركبة في أي وقت.',
+      'استخدم إجراء «تعيين {{vehicle}}» في قائمة السائقين لتعيين {{vehicle}} لهذا السائق. بعد التعيين سيتمكن من بدء الرحلات باستخدامها، ويمكنك تغيير التعيين في أي وقت.',
     fullNameRequired: 'الاسم الكامل مطلوب',
     phoneRequired: 'رقم الهاتف مطلوب',
     phoneInvalid: 'الرجاء إدخال رقم هاتف صحيح',
-    phoneInvalidSaudi: 'أدخل رقم جوال سعودي صحيح (مثال: 512345678)',
+    phoneInvalidForCountry: 'أدخل رقم جوال صحيحًا في {{country}} (مثال: {{example}})',
+    phoneInvalidForCountryShort: 'أدخل رقم جوال صحيحًا في {{country}}',
     emailInvalid: 'الرجاء إدخال بريد إلكتروني صحيح',
     userAddedSuccessfully: 'تمت الإضافة بنجاح',
     userAddedDescription: 'تمت إضافة المستخدم إلى النظام بنجاح.',
@@ -240,7 +280,7 @@ const ar: Translations = {
     licenseNumber: 'رقم الرخصة',
     licenseExpiry: 'تاريخ الانتهاء',
     customsCard: 'البطاقة الجمركية',
-    licensePlate: 'لوحة الدباب',
+    licensePlate: 'لوحة {{alVehicle}}',
     plateNumber: 'رقم اللوحة',
     uploadFile: 'انقر للرفع',
     changeFile: 'تغيير الملف',
@@ -308,30 +348,34 @@ const ar: Translations = {
     swapSessionsCancelled: 'تم إلغاء {{count}} عمليات تبديل بطارية نشطة.',
     chargingSessionCancelled: 'تم إلغاء {{count}} عملية شحن نشطة.',
     chargingSessionsCancelled: 'تم إلغاء {{count}} عمليات شحن نشطة.',
-    // تعيين الموتوسيكل (من ناحية السائق)
-    assignMotorcycle: 'تعيين موتوسيكل',
-    changeMotorcycle: 'تغيير الموتوسيكل',
+    // تعيين {{alVehicle}} (من ناحية السائق).
+    // ‏{{motorcycle}} رقم لوحة مركبة بعينها، لا اسم النوع.
+    assignMotorcycle: 'تعيين {{vehicle}}',
+    changeMotorcycle: 'تغيير {{alVehicle}}',
     viewCurrentImage: 'عرض الصورة الحالية',
     viewBackImage: 'عرض صورة الخلف',
     rejectionReason: 'سبب الرفض',
-    assignMotorcycleAction: 'تعيين موتوسيكل',
-    changeMotorcycleAction: 'تغيير الموتوسيكل',
+    assignMotorcycleAction: 'تعيين {{vehicle}}',
+    changeMotorcycleAction: 'تغيير {{alVehicle}}',
     unassignMotorcycle: 'إلغاء التعيين',
-    currentMotorcycle: 'الموتوسيكل الحالي',
-    selectMotorcycle: 'اختر موتوسيكل',
+    currentMotorcycle: '{{alVehicle}} الحالية',
+    selectMotorcycle: 'اختر {{vehicle}}',
     searchMotorcycles: 'ابحث باللوحة أو الرقم أو الموديل…',
-    noAvailableMotorcycles: 'لا توجد موتوسيكلات غير معيَّنة متاحة.',
-    noMotorcycleAssigned: 'بدون موتوسيكل',
-    assignMotorcycleFailed: 'فشل تعيين الموتوسيكل. حاول مرة أخرى.',
-    unassignMotorcycleFailed: 'فشل إلغاء تعيين الموتوسيكل. حاول مرة أخرى.',
-    motorcycleAssignedTitle: 'تم تعيين الموتوسيكل',
+    noAvailableMotorcycles: 'لا توجد {{vehicle}} غير معيَّنة متاحة.',
+    noMotorcycleAssigned: 'بدون {{vehicle}}',
+    assignMotorcycleFailed: 'فشل تعيين {{alVehicle}}. حاول مرة أخرى.',
+    unassignMotorcycleFailed: 'فشل إلغاء تعيين {{alVehicle}}. حاول مرة أخرى.',
+    motorcycleAssignedTitle: 'تم تعيين {{alVehicle}}',
     motorcycleAssignedDescription: 'تم تعيين {{motorcycle}} للسائق {{driver}}.',
-    motorcycleUnassignedTitle: 'تم إلغاء تعيين الموتوسيكل',
-    motorcycleUnassignedDescription: 'لم يعد للسائق {{driver}} موتوسيكل معيَّن.',
+    motorcycleUnassignedTitle: 'تم إلغاء تعيين {{alVehicle}}',
+    motorcycleUnassignedDescription: 'لم يعد للسائق {{driver}} {{vehicle}} معيَّنة.',
     topUpWallet: 'شحن المحفظة',
     topUpWalletDescription: 'إضافة رصيد إلى محفظة السائق',
     currentBalance: 'الرصيد الحالي',
-    topUpAmount: 'المبلغ (ريال)',
+    // عملة الأسطول نفسها (SAR أو JOD …) ولا تُفترض أبداً — يُستخدم الشكل بدون
+    // عملة إلى أن يُحسم `/fleet-admin/me`.
+    topUpAmount: 'المبلغ',
+    topUpAmountWithCurrency: 'المبلغ ({{currency}})',
     topUpAmountPlaceholder: '0.00',
     quickAmounts: 'مبالغ سريعة',
     paymentMethod: 'طريقة الدفع',
@@ -347,6 +391,14 @@ const ar: Translations = {
     topUpSuccessDescription: 'تم شحن محفظة {{name}} بمبلغ {{amount}} بنجاح.',
     topUpAmountRequired: 'الرجاء إدخال مبلغ صحيح',
     topUpAmountInvalid: 'يجب أن يكون المبلغ أكبر من صفر',
+    // الحد الأدنى للشحن — المبلغ يأتي من الخادم ولا يُحسب هنا إطلاقاً.
+    minTopUpHint: 'الحد الأدنى للشحن: {{amount}}',
+    minTopUpAbsoluteFloor: 'الحد الأدنى للشحن هو {{amount}}.',
+    minTopUpBelowServicePrice:
+      'الحد الأدنى للشحن هو {{amount}} — يجب أن يكفي رصيد المحفظة بعد الشحن لتبديل بطارية واحد أو شحن سريع واحد على الأقل.',
+    servicePricesHint: 'الأسعار الحالية — {{prices}}',
+    servicePriceBatterySwap: 'تبديل بطارية',
+    servicePriceFastCharge: 'شحن سريع',
     // Saved cards
     savedCards: 'البطاقات المحفوظة',
     savedCardsLoading: 'جارٍ تحميل البطاقات المحفوظة…',
@@ -360,16 +412,25 @@ const ar: Translations = {
     removeCardConfirm: 'إزالة هذه البطاقة المحفوظة؟',
     saveCardHint: 'يمكنك اختيار حفظ هذه البطاقة في الخطوة التالية لتسريع عمليات الشحن المستقبلية.',
     chargeFailed: 'تعذّر إتمام الدفع. حاول مرة أخرى أو استخدم بطاقة أخرى.',
+    // كانت هذه النصوص مكتوبة بالإنجليزية داخل TopUpModal، ولا يطالها تبديل اللغة.
+    // واسم «Moyasar» بوابة سعودية فقط، فصار اسم البوابة وسيطاً لا يُذكر إلا حين
+    // يكون معروفاً — راجع gatewayName في TopUpModal.
+    payAmount: 'ادفع {{amount}}',
+    amountWillBeCharged: 'سيتم خصم {{amount}}',
+    securePaymentBy: 'دفع آمن عبر {{gateway}}',
+    securePayment: 'دفع آمن',
+    encryptedPaymentBy: 'دفع آمن ومشفَّر عبر {{gateway}}',
+    encryptedPayment: 'دفع آمن ومشفَّر',
   },
   vehicleControl: {
-    title: 'التحكم بالمركبات',
+    title: 'التحكم ب{{alVehicle}}',
     subtitle: 'مراقبة الأسطول والتحليلات في الوقت الفعلي',
-    selectVehicle: 'اختر مركبة',
-    selectVehicleDescription: 'اختر مركبة من القائمة لعرض التفاصيل والتحكم',
+    selectVehicle: 'اختر {{vehicle}}',
+    selectVehicleDescription: 'اختر {{vehicle}} من القائمة لعرض التفاصيل والتحكم',
     batteryStatus: 'حالة البطارية',
     currentLevel: 'المستوى الحالي',
     estRange: 'المدى التقديري',
-    vehicleInformation: 'معلومات المركبة',
+    vehicleInformation: 'معلومات {{alVehicle}}',
     location: 'الموقع',
     assignedDriver: 'السائق المعين',
     currentSpeed: 'السرعة الحالية',
@@ -393,6 +454,8 @@ const ar: Translations = {
     gpsSignal: 'إشارة GPS',
     strong: 'قوية',
     weak: 'ضعيفة',
+    // كانت تُعرَض شرطة فقط، وهي تعني «لم نتحقق» لا «الجهاز لا يلتقط إشارة».
+    gpsNone: 'لا توجد إشارة',
     connection: 'الاتصال',
     online: 'متصل',
     offline: 'غير متصل',
@@ -404,13 +467,32 @@ const ar: Translations = {
     statDistance: 'إجمالي المسافة',
     // Driver assignment card
     driverAssignment: 'تعيين السائق',
-    noDriverAssigned: 'لا يوجد سائق معين حالياً لهذه المركبة.',
+    noDriverAssigned: 'لا يوجد سائق معين حالياً لهذه {{alVehicle}}.',
     selectDriver: 'اختر سائقاً…',
     assignDriver: 'تعيين سائق',
     unassignDriver: 'إلغاء تعيين السائق',
     assignFailed: 'فشل تعيين السائق. حاول مرة أخرى.',
     unassignFailed: 'فشل إلغاء تعيين السائق. حاول مرة أخرى.',
-    commandFailed: 'تعذّر إرسال الأمر إلى المركبة. حاول مرة أخرى.',
+    commandFailed: 'لم يصل الأمر إلى {{alVehicle}}. لم يتغيّر شيء — حاول مرة أخرى.',
+
+    // ── ملكية أدوات التحكم (CR-7.1) ─────────────────────────────────────────
+    // المالك الفرد يملك هذه الأدوات في تطبيقه، فيسأل مشغّل الأسطول لماذا لا
+    // يملكها سائقوه. الفرق مكتوب هنا بدل تركه لفريق الدعم.
+    fleetControlledTitle: 'تحت تحكم أسطولك',
+    fleetControlledNote:
+      'المحرك والقفل وحد السرعة ملك للأسطول في {{alVehicle}} التي تملكها. تطبيق السائق لا يستطيع تشغيل هذه {{alVehicle}} ولا فتح قفلها ولا رفع حد سرعتها — المشغّل من هنا فقط. أما المالك الفرد الذي يقود {{vehicle}} يملكها بنفسه فتبقى هذه الأدوات في تطبيقه.',
+
+    // ── نتائج الأوامر (CR-7.2) ──────────────────────────────────────────────
+    commandUnsupported: 'جهاز هذه {{alVehicle}} لا يدعم هذا الأمر.',
+    commandUnsupportedTooltip: 'غير مدعوم في جهاز هذه {{alVehicle}}.',
+    commandOffline: 'هذه {{alVehicle}} غير متصلة — لا يمكن للأوامر الوصول إليها الآن.',
+    emergencyStopConfirmTitle: 'قطع الطاقة عن هذه {{alVehicle}}؟',
+    emergencyStopConfirmDescription:
+      'الإيقاف الطارئ يقطع المحرك ويقفل {{alVehicle}} فوراً أينما كانت. وإن كان سائق يقودها فستتوقف تحته. لا تستخدمه إلا حين يجب ألا تستمر {{alVehicle}} في الحركة.',
+    emergencyStopConfirmAction: 'إيقاف طارئ',
+    speedLimitUnknown: 'غير مُبلَّغ عنه',
+    speedLimitUnknownHint:
+      'لم تُبلِّغ هذه {{alVehicle}} عن حد سرعة. تحديد حد أدناه يرسله إلى الجهاز.',
   },
   zones: {
     title: 'إدارة النطاقات',
@@ -446,10 +528,22 @@ const ar: Translations = {
     speedNormalLabel: 'سرعة عادية',
     speedSlowLabel: 'بطيئة',
     speedNoRideLabel: 'ممنوع القيادة',
-    speedHint: 'سيتم تحديد سرعة جميع المركبات في هذا النطاق تلقائياً وفق هذا الحد الأقصى',
+    speedHint: 'سيتم تحديد سرعة جميع {{vehicle}} الأسطول في هذا النطاق تلقائياً وفق هذا الحد الأقصى',
     statusLabel: 'الحالة',
-    statusActiveDescription: 'قواعد النطاق مفروضة',
+    statusActiveDescription: 'قواعد النطاق مُفعَّلة',
     statusInactiveDescription: 'قواعد النطاق متوقفة',
+
+    // ── من يلتزم بالنطاق (CR-7.4) ───────────────────────────────────────────
+    // ‏enforced ليست active: الأولى «هل تُلزِم الخادمُ السائقين بها»، والثانية
+    // «هل القواعد مُفعَّلة». ونطاقات الأسطول تُلزِم سائقيه وحدهم.
+    enforcedLabel: 'مفروض',
+    notEnforcedLabel: 'إرشادي',
+    enforcedFleetNote:
+      'مفروض على سائقي أسطولك: تُحدَّد سرعة {{vehicle}}هم تلقائياً داخل هذا النطاق.',
+    notEnforcedFleetNote:
+      'غير مفروض — يظهر النطاق على الخريطة لكنه لا يحدّ سرعة أي {{vehicle}}.',
+    enforcementScopeNote:
+      'نطاقاتك تُلزِم سائقيك أنت. أما المالك الفرد الذي يقود {{vehicle}} يملكها على الطرق نفسها فلا تسري عليه.',
     saveZone: 'حفظ النطاق',
     cancel: 'إلغاء',
     notice: 'تنبيه',
@@ -459,13 +553,13 @@ const ar: Translations = {
     types: {
       normal: 'عادي',
       normalLong: 'نطاق عادي',
-      normalDescription: 'السكوتر يعمل بشكل طبيعي بدون أي قيود',
+      normalDescription: '{{alVehicle}} تعمل بشكل طبيعي بدون أي قيود',
       slow: 'نطاق بطيء',
       slowLong: 'نطاق بطيء',
-      slowDescription: 'السرعة محدودة — السكوتر مقيد بالحد الأقصى المحدد',
+      slowDescription: 'السرعة محدودة — {{alVehicle}} مقيدة بالحد الأقصى المحدد',
       restricted: 'مقيد',
       restrictedLong: 'نطاق مقيد',
-      restrictedDescription: 'السكوتر متوقف — القيادة غير مسموحة داخل هذا النطاق',
+      restrictedDescription: '{{alVehicle}} متوقفة — القيادة غير مسموحة داخل هذا النطاق',
     },
 
     nameRequired: 'اسم النطاق مطلوب',
@@ -517,7 +611,7 @@ const ar: Translations = {
   },
   reports: {
     title: 'إدارة التقارير',
-    subtitle: 'راقب وأدر أسطول الدراجات الكهربائية بالكامل',
+    subtitle: 'راقب وأدر أسطول {{alVehicle}} الكهربائية بالكامل',
     partialLoad: 'تعذّر تحميل بعض بيانات التقارير:',
     sectionMetrics: 'المؤشرات الرئيسية',
     sectionWeeklyTrips: 'الرحلات الأسبوعية',
@@ -680,6 +774,9 @@ const ar: Translations = {
     status: 'الحالة',
     admin: 'المشرف',
     showing: 'عرض {{count}} من {{total}} معاملة',
+    resultTruncated:
+      'عدد المعاملات المطابقة أكبر من أن يُحمَّل بالكامل — هذا العرض وملف CSV غير مكتملين. يُرجى تضييق النطاق الزمني.',
+    filterRejected: 'رفض الخادم هذا الفلتر، لذلك تعذّر تحميل أي معاملات:',
     typeTopUp: 'شحن رصيد',
     typeFastCharge: 'شحن سريع',
     typeBatterySwap: 'تبديل بطارية',

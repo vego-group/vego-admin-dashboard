@@ -26,13 +26,42 @@ function getToken(): string | null {
   }
 }
 
+/**
+ * The machine-readable half of an error response.
+ *
+ * The backend answers a rejected request with
+ * `{ success: false, error_code: "phone_invalid_for_country", meta: {…} }`, and
+ * Laravel's own validator answers with `{ message, errors: { phone: [...] } }`.
+ * Both carry enough to decide whether a failure belongs on one form field or on
+ * the page, so both are parsed — a 422 that is really "this phone is wrong" must
+ * never reach the global error surface. See @/lib/api-errors.
+ */
+export interface ApiErrorBody {
+  message?: string;
+  error_code?: string;
+  code?: string;
+  meta?: Record<string, unknown>;
+  errors?: Record<string, string[]>;
+}
+
 export class ApiError extends Error {
+  /** Backend `error_code`, e.g. 'country_not_supported'. Null when absent. */
+  public readonly code: string | null;
+  /** Backend `meta` — expected_format, example, supported, … */
+  public readonly meta: Record<string, unknown> | null;
+  /** Laravel per-field validation messages, keyed by request field name. */
+  public readonly errors: Record<string, string[]> | null;
+
   constructor(
     public readonly status: number,
     message: string,
+    body?: ApiErrorBody | null,
   ) {
     super(message);
     this.name = 'ApiError';
+    this.code   = body?.error_code ?? body?.code ?? null;
+    this.meta   = body?.meta ?? null;
+    this.errors = body?.errors ?? null;
   }
 }
 
@@ -77,13 +106,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
+    let body: ApiErrorBody | null = null;
     try {
-      const body = (await res.json()) as { message?: string };
+      body = (await res.json()) as ApiErrorBody;
       if (body.message) message = body.message;
     } catch {
       // ignore JSON parse failures — keep the status-code message
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, body);
   }
 
   // 204 No Content — return undefined rather than trying to parse an empty body
