@@ -795,6 +795,18 @@ const ar: Translations = {
     noTransactions: 'لا توجد معاملات',
     noTransactionsHint: 'حاول تعديل الفلاتر أو نطاق التاريخ.',
   },
+  paymentCallback: {
+    verifying: 'جارٍ التحقق من الدفع…',
+    pleaseWait: 'يُرجى الانتظار لحظة',
+    successTitle: 'تم الدفع بنجاح',
+    amountAdded: 'تمت إضافة {{amount}} إلى محفظة السائق.',
+    newBalance: 'رصيد المحفظة الجديد',
+    backToDrivers: 'العودة إلى السائقين',
+    failedTitle: 'فشل الدفع',
+    failedDefault: 'تعذّرت معالجة الدفع. يُرجى المحاولة مرة أخرى.',
+    processingTitle: 'جارٍ معالجة الدفع',
+    processingBody: 'جارٍ معالجة دفعتك. سيتم تحديث رصيد المحفظة قريبًا.',
+  },
 };
 
 export default ar;

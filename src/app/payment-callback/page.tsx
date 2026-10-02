@@ -5,18 +5,22 @@ import { CheckCircle2, XCircle, Clock, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { walletApi } from '@/lib/api';
 import { useFleetContext } from '@/hooks/useFleetContext';
+import { useI18n } from '@/i18n/I18nProvider';
 import { logger } from '@/lib/logger';
 
 type Status = 'loading' | 'success' | 'failed' | 'pending';
 
 export default function PaymentCallbackPage() {
+  const { t, locale, dir } = useI18n();
   const { formatMoney } = useFleetContext();
   const [status, setStatus]     = useState<Status>('loading');
   // Held as the raw fixed-precision strings the gateway/backend returned, and
   // parsed at render time against the fleet's own decimal count.
   const [amount, setAmount]     = useState<string | null>(null);
   const [balance, setBalance]   = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState('The payment could not be processed. Please try again.');
+  // The gateway's own failure message, verbatim. Without one, the localised
+  // default is shown.
+  const [gatewayMsg, setGatewayMsg] = useState<string | null>(null);
 
   useEffect(() => {
     const params    = new URLSearchParams(window.location.search);
@@ -40,7 +44,7 @@ export default function PaymentCallbackPage() {
 
     // Moyasar says it failed — show immediately, no verify needed
     if (urlStatus === 'failed') {
-      if (urlMsg) setErrorMsg(decodeURIComponent(urlMsg).replace(/\+/g, ' '));
+      if (urlMsg) setGatewayMsg(decodeURIComponent(urlMsg).replace(/\+/g, ' '));
       setStatus('failed');
       return;
     }
@@ -68,14 +72,14 @@ export default function PaymentCallbackPage() {
   const goToDrivers = () => { window.location.href = '/drivers'; };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
+    <div dir={dir} className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
       <div className="w-full max-w-sm rounded-2xl border bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
 
         {status === 'loading' && (
           <>
             <Loader2 className="mx-auto h-12 w-12 animate-spin text-indigo-500" />
-            <p className="mt-4 text-base font-semibold text-slate-900 dark:text-slate-50">Verifying payment…</p>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Please wait a moment</p>
+            <p className="mt-4 text-base font-semibold text-slate-900 dark:text-slate-50">{t('paymentCallback.verifying')}</p>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('paymentCallback.pleaseWait')}</p>
           </>
         )}
 
@@ -84,22 +88,22 @@ export default function PaymentCallbackPage() {
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-500/10">
               <CheckCircle2 className="h-8 w-8 text-emerald-500" />
             </div>
-            <h2 className="mt-4 text-xl font-bold text-slate-900 dark:text-slate-50">Payment Successful</h2>
+            <h2 className="mt-4 text-xl font-bold text-slate-900 dark:text-slate-50">{t('paymentCallback.successTitle')}</h2>
             {amount != null && (
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                {formatMoney(amount)} has been added to the driver&apos;s wallet.
+                {t('paymentCallback.amountAdded', { amount: formatMoney(amount, locale) })}
               </p>
             )}
             {balance != null && (
               <div className="mt-3 rounded-xl bg-emerald-50 px-4 py-2.5 dark:bg-emerald-500/10">
-                <p className="text-xs text-slate-500 dark:text-slate-400">New wallet balance</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{t('paymentCallback.newBalance')}</p>
                 <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
-                  {formatMoney(balance)}
+                  {formatMoney(balance, locale)}
                 </p>
               </div>
             )}
             <Button variant="primary" className="mt-6 w-full" onClick={goToDrivers}>
-              Back to Drivers
+              {t('paymentCallback.backToDrivers')}
             </Button>
           </>
         )}
@@ -109,9 +113,9 @@ export default function PaymentCallbackPage() {
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-rose-50 dark:bg-rose-500/10">
               <XCircle className="h-8 w-8 text-rose-500" />
             </div>
-            <h2 className="mt-4 text-xl font-bold text-slate-900 dark:text-slate-50">Payment Failed</h2>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{errorMsg}</p>
-            <Button variant="primary" className="mt-6 w-full" onClick={goToDrivers}>Back to Drivers</Button>
+            <h2 className="mt-4 text-xl font-bold text-slate-900 dark:text-slate-50">{t('paymentCallback.failedTitle')}</h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{gatewayMsg ?? t('paymentCallback.failedDefault')}</p>
+            <Button variant="primary" className="mt-6 w-full" onClick={goToDrivers}>{t('paymentCallback.backToDrivers')}</Button>
           </>
         )}
 
@@ -120,11 +124,11 @@ export default function PaymentCallbackPage() {
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-amber-50 dark:bg-amber-500/10">
               <Clock className="h-8 w-8 text-amber-500" />
             </div>
-            <h2 className="mt-4 text-xl font-bold text-slate-900 dark:text-slate-50">Payment Processing</h2>
+            <h2 className="mt-4 text-xl font-bold text-slate-900 dark:text-slate-50">{t('paymentCallback.processingTitle')}</h2>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              Your payment is being processed. The wallet balance will update shortly.
+              {t('paymentCallback.processingBody')}
             </p>
-            <Button variant="primary" className="mt-6 w-full" onClick={goToDrivers}>Back to Drivers</Button>
+            <Button variant="primary" className="mt-6 w-full" onClick={goToDrivers}>{t('paymentCallback.backToDrivers')}</Button>
           </>
         )}
 

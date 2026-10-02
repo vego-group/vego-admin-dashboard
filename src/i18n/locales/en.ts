@@ -788,6 +788,18 @@ const en = {
     noTransactions: 'No transactions found',
     noTransactionsHint: 'Try adjusting your filters or date range.',
   },
+  paymentCallback: {
+    verifying: 'Verifying payment…',
+    pleaseWait: 'Please wait a moment',
+    successTitle: 'Payment Successful',
+    amountAdded: "{{amount}} has been added to the driver's wallet.",
+    newBalance: 'New wallet balance',
+    backToDrivers: 'Back to Drivers',
+    failedTitle: 'Payment Failed',
+    failedDefault: 'The payment could not be processed. Please try again.',
+    processingTitle: 'Payment Processing',
+    processingBody: 'Your payment is being processed. The wallet balance will update shortly.',
+  },
 };
 
 export default en;
