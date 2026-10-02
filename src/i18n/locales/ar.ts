@@ -782,6 +782,8 @@ const ar: Translations = {
     typeFastCharge: 'شحن سريع',
     typeBatterySwap: 'تبديل بطارية',
     typeRefund: 'استرداد',
+    typeBonus: 'مكافأة',
+    typeOther: 'أخرى ({{value}})',
     statusCompleted: 'مكتمل',
     statusPending: 'قيد الانتظار',
     statusFailed: 'فشل',

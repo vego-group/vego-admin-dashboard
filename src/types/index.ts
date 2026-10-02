@@ -465,7 +465,13 @@ export interface DriverSession {
 
 // ----- Wallet ----------------------------------------------------------------
 
-export type TransactionType   = 'top_up' | 'fast_charge' | 'battery_swap' | 'refund';
+/**
+ * - `bonus` — a credit the backend marks as a bonus (`BONUS_TX_TYPES`).
+ * - `other` — a backend `type`, or a debit's `reference_type`, that no backend
+ *   document names. Never relabelled as a kind it might not be; the value as
+ *   sent is kept in {@link WalletTransaction.rawType}.
+ */
+export type TransactionType   = 'top_up' | 'fast_charge' | 'battery_swap' | 'refund' | 'bonus' | 'other';
 /**
  * The four statuses the backend stores, plus `'unknown'` — ours, not the
  * backend's — for anything else it sends. The value it actually sent is kept in
@@ -509,6 +515,11 @@ export interface WalletTransaction {
    */
   signedAmount: string;
   type: TransactionType;
+  /**
+   * The backend value behind a `bonus` or `other` row, verbatim — its `type`, or
+   * the `reference_type` that decided it. Unset for the documented kinds.
+   */
+  rawType?: string;
   paymentMethod?: string;
   note?: string;
   status: TransactionStatus;

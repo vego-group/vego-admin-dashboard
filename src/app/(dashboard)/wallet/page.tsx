@@ -27,19 +27,37 @@ const PAGE_SIZE = 8;
 
 // ── Config maps ───────────────────────────────────────────────────────────
 
+// `other` is neutral and keeps the backend's own casing — the raw value is the
+// point of the badge, so it isn't uppercased like the known kinds.
 const TYPE_CLASS: Record<TransactionType, string> = {
   top_up:       'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400',
+  bonus:        'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400',
   fast_charge:  'bg-blue-100   text-blue-700   dark:bg-blue-500/15   dark:text-blue-400',
   battery_swap: 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400',
   refund:       'bg-amber-100  text-amber-700  dark:bg-amber-500/15  dark:text-amber-400',
+  other:        'bg-slate-100  text-slate-700  dark:bg-slate-500/15  dark:text-slate-300 normal-case tracking-normal',
 };
 
 const TYPE_I18N: Record<TransactionType, string> = {
   top_up:       'wallet.typeTopUp',
+  bonus:        'wallet.typeBonus',
   fast_charge:  'wallet.typeFastCharge',
   battery_swap: 'wallet.typeBatterySwap',
   refund:       'wallet.typeRefund',
+  other:        'wallet.typeOther',
 };
+
+/** "Top-Up", or "Other (mystery)" for a type no backend document names. */
+function typeLabel(tx: WalletTransaction, t: (key: string, params?: Record<string, string>) => string): string {
+  const key = TYPE_I18N[tx.type];
+  if (key && tx.type !== 'other') return t(key);
+  return t('wallet.typeOther', { value: bidiIsolate(tx.rawType || '—') });
+}
+
+/** The CSV's Type column: our kind, or the backend's own value when we have none. */
+function csvType(tx: WalletTransaction): string {
+  return tx.type === 'other' ? (tx.rawType ?? '') : tx.type;
+}
 
 // `unknown` is a status the backend sent that we don't know. It renders neutral,
 // with the raw value in its label — see `statusLabel`.
@@ -153,7 +171,7 @@ function exportCsv(
     r.driverName,
     csvAmount(r, decimals),
     r.money?.currency ?? currency ?? '',
-    r.type,
+    csvType(r),
     r.paymentMethod ?? '',
     r.note ?? '',
     rawStatusOf(r),
@@ -558,9 +576,9 @@ export default function WalletPage() {
                       <td className="px-5 py-4">
                         <span className={cn(
                           'inline-flex items-center rounded-md px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide',
-                          TYPE_CLASS[tx.type],
+                          TYPE_CLASS[tx.type] ?? TYPE_CLASS.other,
                         )}>
-                          {t(TYPE_I18N[tx.type])}
+                          {typeLabel(tx, t)}
                         </span>
                       </td>
                       <td className="px-5 py-4 text-slate-600 dark:text-slate-300">

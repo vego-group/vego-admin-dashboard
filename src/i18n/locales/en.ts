@@ -775,6 +775,8 @@ const en = {
     typeFastCharge: 'Fast Charge',
     typeBatterySwap: 'Battery Swap',
     typeRefund: 'Refund',
+    typeBonus: 'Bonus',
+    typeOther: 'Other ({{value}})',
     statusCompleted: 'Completed',
     statusPending: 'Pending',
     statusFailed: 'Failed',

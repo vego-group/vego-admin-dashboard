@@ -664,22 +664,77 @@ function toTransactionStatus(raw: string | undefined): Pick<WalletTransaction, '
     : { status: 'unknown', rawStatus: raw };
 }
 
-function mapTransaction(tx: ApiTransaction): WalletTransaction {
-  const rawType = tx.type ?? '';
-  let type: WalletTransaction['type'] = 'top_up';
-  if (rawType === 'debit') {
-    // debit transactions are spending — use reference_type to distinguish
-    const ref = tx.reference_type ?? '';
-    type = (ref === 'fast_charge' || ref === 'fast_charging' || ref === 'charging') ? 'fast_charge' : 'battery_swap';
-  } else if (rawType === 'fast_charging' || rawType === 'fast_charge' || rawType === 'charging') {
-    type = 'fast_charge';
-  } else if (rawType === 'swap' || rawType === 'battery_swap') {
-    type = 'battery_swap';
-  } else if (rawType === 'refund') {
-    type = 'refund';
-  }
-  // "credit" or "top_up" stays as 'top_up'
+/**
+ * Every transaction `type` a backend document names, and what it means here.
+ *
+ * - `credit` / `debit` are the stored values (fleet-admin-pending-confirmations-
+ *   answers §4; dashboard-country-currency-answers-updated §8).
+ * - `top_up`, `charging`, `swap` are legacy row values (API_CONTRACT §11).
+ * - The rest are the sub-kind names of the endpoint's own `type` filter
+ *   (pending-confirmations §4).
+ *
+ * `debit` is not here: what it paid for comes from {@link DEBIT_REFERENCE_KINDS}.
+ * Anything not listed is `other` — guessing "Top-Up" is how a bonus credit would
+ * have been shown, and exported, as fleet-funded money.
+ */
+const DOCUMENTED_TX_KINDS: ReadonlyMap<string, TransactionType> = new Map([
+  ['credit',        'top_up'],
+  ['top_up',        'top_up'],
+  ['topup',         'top_up'],
+  ['refund',        'refund'],
+  ['swap',          'battery_swap'],
+  ['battery_swap',  'battery_swap'],
+  ['charging',      'fast_charge'],
+  ['fast_charge',   'fast_charge'],
+  ['fast_charging', 'fast_charge'],
+]);
 
+/**
+ * What a debit paid for, by its `reference_type`.
+ *
+ * No document names a `reference_type` value literally. These are the names the
+ * endpoint's `type` filter documents for "debits referencing a swap / charging
+ * session" (pending-confirmations §4) — the vocabulary this mapper has always
+ * read. Any other value is `other`, not "Battery Swap" by default.
+ */
+const DEBIT_REFERENCE_KINDS: ReadonlyMap<string, TransactionType> = new Map([
+  ['swap',          'battery_swap'],
+  ['battery_swap',  'battery_swap'],
+  ['charging',      'fast_charge'],
+  ['fast_charge',   'fast_charge'],
+  ['fast_charging', 'fast_charge'],
+]);
+
+/**
+ * Backend values that mark a bonus credit. **Empty until the backend names it** —
+ * `topup_bonus` appears in the docs only as an example of a rejected filter.
+ *
+ * Matched against `type`, and against `reference_type` on a `credit` row, since
+ * the backend has not said which of the two will carry it. There is deliberately
+ * no filter option for bonuses: the endpoint has no `type` value for them and
+ * answers an unknown one with a 422.
+ */
+export const BONUS_TX_TYPES: string[] = [];
+
+function toTransactionType(tx: ApiTransaction): Pick<WalletTransaction, 'type' | 'rawType'> {
+  const rawType = tx.type ?? '';
+  const ref     = tx.reference_type ?? '';
+
+  if (BONUS_TX_TYPES.includes(rawType)) return { type: 'bonus', rawType };
+  if (rawType === 'credit' && ref && BONUS_TX_TYPES.includes(ref)) return { type: 'bonus', rawType: ref };
+
+  if (rawType === 'debit') {
+    // Spending — reference_type says on what. An unknown one stays a debit (the
+    // direction is unaffected) but is labelled with the value we were given.
+    const kind = DEBIT_REFERENCE_KINDS.get(ref);
+    return kind ? { type: kind } : { type: 'other', rawType: ref || rawType };
+  }
+
+  const kind = DOCUMENTED_TX_KINDS.get(rawType);
+  return kind ? { type: kind } : { type: 'other', rawType };
+}
+
+function mapTransaction(tx: ApiTransaction): WalletTransaction {
   // Driver may be nested under wallet.user, or directly on tx.user / tx.driver
   const driver = tx.wallet?.user ?? tx.user ?? tx.driver;
 
@@ -707,7 +762,7 @@ function mapTransaction(tx: ApiTransaction): WalletTransaction {
     money,
     direction,
     signedAmount,
-    type,
+    ...toTransactionType(tx),
     paymentMethod: tx.payment_method,
     note:          tx.note ?? tx.description,
     ...toTransactionStatus(tx.status),
