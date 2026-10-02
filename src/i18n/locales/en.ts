@@ -777,6 +777,7 @@ const en = {
     typeBatterySwap: 'Battery Swap',
     typeRefund: 'Refund',
     typeBonus: 'Bonus',
+    typeBonusReversal: 'Bonus reversal',
     typeOther: 'Other ({{value}})',
     statusCompleted: 'Completed',
     statusPending: 'Pending',

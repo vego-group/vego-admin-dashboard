@@ -784,6 +784,7 @@ const ar: Translations = {
     typeBatterySwap: 'تبديل بطارية',
     typeRefund: 'استرداد',
     typeBonus: 'مكافأة',
+    typeBonusReversal: 'عكس مكافأة',
     typeOther: 'أخرى ({{value}})',
     statusCompleted: 'مكتمل',
     statusPending: 'قيد الانتظار',

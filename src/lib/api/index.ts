@@ -284,6 +284,11 @@ interface ApiTransaction {
   note?: string;
   payment_method?: string;
   reference_type?: string | null;
+  /**
+   * The ledger's own classification — `bonus` / `bonus_reversal` — when the row
+   * is one. Seen on the mobile transactions endpoint; expected to match here.
+   */
+  ledger_type?: string | null;
   /** Driver may be directly on the transaction or nested inside wallet */
   user?: { id: number | string; name: string };
   driver?: { id: number | string; name: string };
@@ -624,7 +629,7 @@ function mapPile(p: ApiPile): FastChargingCabinet {
 
 /** Transaction `type` values that move money **out** of the wallet. */
 const DEBIT_TYPES = new Set([
-  'debit', 'fast_charging', 'fast_charge', 'charging', 'swap', 'battery_swap',
+  'debit', 'fast_charging', 'fast_charge', 'charging', 'swap', 'battery_swap', 'bonus_reversal',
 ]);
 
 /**
@@ -640,7 +645,7 @@ const DEBIT_TYPES = new Set([
 function toDirection(tx: ApiTransaction): TransactionDirection {
   const raw = (tx.direction ?? '').toLowerCase();
   if (raw === 'in' || raw === 'out') return raw;
-  return DEBIT_TYPES.has(tx.type ?? '') ? 'out' : 'in';
+  return DEBIT_TYPES.has(tx.type ?? '') || tx.ledger_type === 'bonus_reversal' ? 'out' : 'in';
 }
 
 /**
@@ -712,21 +717,26 @@ function debitKind(referenceType: string): TransactionType | undefined {
 }
 
 /**
- * Backend values that mark a bonus credit. **Empty until the backend names it** —
- * `topup_bonus` appears in the docs only as an example of a rejected filter.
+ * Backend `type` values that mark a bonus credit. The backend's status report
+ * names `bonus` (with `reference_type: TopupBonusGrant`); `ledger_type: "bonus"`
+ * marks one too, see {@link toTransactionType}.
  *
- * Matched against `type`, and against `reference_type` on a `credit` row, since
- * the backend has not said which of the two will carry it. There is deliberately
- * no filter option for bonuses: the endpoint has no `type` value for them and
- * answers an unknown one with a 422.
+ * Also matched against `reference_type` on a `credit` row. There is deliberately
+ * no filter option for bonuses: the server-side filter value isn't confirmed,
+ * and the endpoint answers an unknown one with a 422.
  */
-export const BONUS_TX_TYPES: string[] = [];
+export const BONUS_TX_TYPES: string[] = ['bonus'];
 
 function toTransactionType(tx: ApiTransaction): Pick<WalletTransaction, 'type' | 'rawType'> {
   const rawType = tx.type ?? '';
   const ref     = tx.reference_type ?? '';
+  const ledger  = tx.ledger_type ?? '';
 
+  // `ledger_type` is where the backend puts bonuses, so it wins over `type`.
+  if (ledger === 'bonus')          return { type: 'bonus', rawType: ledger };
+  if (ledger === 'bonus_reversal') return { type: 'bonus_reversal', rawType: ledger };
   if (BONUS_TX_TYPES.includes(rawType)) return { type: 'bonus', rawType };
+  if (rawType === 'bonus_reversal')     return { type: 'bonus_reversal', rawType };
   if (rawType === 'credit' && ref && BONUS_TX_TYPES.includes(ref)) return { type: 'bonus', rawType: ref };
 
   if (rawType === 'debit') {

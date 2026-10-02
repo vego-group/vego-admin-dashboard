@@ -32,6 +32,7 @@ const PAGE_SIZE = 8;
 const TYPE_CLASS: Record<TransactionType, string> = {
   top_up:       'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400',
   bonus:        'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400',
+  bonus_reversal: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400',
   fast_charge:  'bg-blue-100   text-blue-700   dark:bg-blue-500/15   dark:text-blue-400',
   battery_swap: 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400',
   refund:       'bg-amber-100  text-amber-700  dark:bg-amber-500/15  dark:text-amber-400',
@@ -41,6 +42,7 @@ const TYPE_CLASS: Record<TransactionType, string> = {
 const TYPE_I18N: Record<TransactionType, string> = {
   top_up:       'wallet.typeTopUp',
   bonus:        'wallet.typeBonus',
+  bonus_reversal: 'wallet.typeBonusReversal',
   fast_charge:  'wallet.typeFastCharge',
   battery_swap: 'wallet.typeBatterySwap',
   refund:       'wallet.typeRefund',
@@ -55,12 +57,14 @@ function typeLabel(tx: WalletTransaction, t: (key: string, params?: Record<strin
 }
 
 /**
- * The Note cell. A `bonus` or `other` row with no note of its own shows the
- * backend's raw type, so it never reads as an unexplained blank.
+ * The Note cell. A `bonus`, `bonus_reversal` or `other` row with no note of its
+ * own shows the backend's raw type, so it never reads as an unexplained blank.
  */
 function noteText(tx: WalletTransaction): string | undefined {
   if (tx.note?.trim()) return tx.note;
-  return tx.type === 'bonus' || tx.type === 'other' ? tx.rawType || undefined : undefined;
+  return tx.type === 'bonus' || tx.type === 'bonus_reversal' || tx.type === 'other'
+    ? tx.rawType || undefined
+    : undefined;
 }
 
 /** The CSV's Type column: our kind, or the backend's own value when we have none. */
