@@ -673,7 +673,7 @@ function toTransactionStatus(raw: string | undefined): Pick<WalletTransaction, '
  * - The rest are the sub-kind names of the endpoint's own `type` filter
  *   (pending-confirmations §4).
  *
- * `debit` is not here: what it paid for comes from {@link DEBIT_REFERENCE_KINDS}.
+ * `debit` is not here: what it paid for comes from {@link debitKind}.
  * Anything not listed is `other` — guessing "Top-Up" is how a bonus credit would
  * have been shown, and exported, as fleet-funded money.
  */
@@ -690,20 +690,26 @@ const DOCUMENTED_TX_KINDS: ReadonlyMap<string, TransactionType> = new Map([
 ]);
 
 /**
- * What a debit paid for, by its `reference_type`.
+ * What a debit paid for, by its `reference_type`, or undefined when it can't be
+ * told.
  *
- * No document names a `reference_type` value literally. These are the names the
- * endpoint's `type` filter documents for "debits referencing a swap / charging
- * session" (pending-confirmations §4) — the vocabulary this mapper has always
- * read. Any other value is `other`, not "Battery Swap" by default.
+ * No document names the value for a swap or charging debit. The type filter's
+ * vocabulary is `swap` / `fast_charging`, but the backend's status report shows
+ * `reference_type` holding model class names (`TopupBonusGrant`), so a swap
+ * debit may just as well be `SwapSession` or `App\Models\SwapSession`. Matching
+ * the normalised name — namespace dropped, lower-cased, `_` and `-` removed —
+ * on "swap" or "charg" covers every one of those spellings. Anything else is
+ * `other`, not "Battery Swap" by default.
  */
-const DEBIT_REFERENCE_KINDS: ReadonlyMap<string, TransactionType> = new Map([
-  ['swap',          'battery_swap'],
-  ['battery_swap',  'battery_swap'],
-  ['charging',      'fast_charge'],
-  ['fast_charge',   'fast_charge'],
-  ['fast_charging', 'fast_charge'],
-]);
+function debitKind(referenceType: string): TransactionType | undefined {
+  const name = referenceType
+    .slice(referenceType.lastIndexOf('\\') + 1)
+    .toLowerCase()
+    .replace(/[_-]/g, '');
+  if (name.includes('swap'))  return 'battery_swap';
+  if (name.includes('charg')) return 'fast_charge';
+  return undefined;
+}
 
 /**
  * Backend values that mark a bonus credit. **Empty until the backend names it** —
@@ -726,7 +732,7 @@ function toTransactionType(tx: ApiTransaction): Pick<WalletTransaction, 'type' |
   if (rawType === 'debit') {
     // Spending — reference_type says on what. An unknown one stays a debit (the
     // direction is unaffected) but is labelled with the value we were given.
-    const kind = DEBIT_REFERENCE_KINDS.get(ref);
+    const kind = debitKind(ref);
     return kind ? { type: kind } : { type: 'other', rawType: ref || rawType };
   }
 
