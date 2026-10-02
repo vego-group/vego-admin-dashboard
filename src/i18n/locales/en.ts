@@ -117,6 +117,7 @@ const en = {
     started: 'Started',
     ended: 'Ended',
     amount: 'Amount',
+    couponApplied: 'Coupon applied',
     statusCompleted: 'Completed',
     statusInProgress: 'In Progress',
     statusCancelled: 'Cancelled',

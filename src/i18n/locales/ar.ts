@@ -135,6 +135,7 @@ const ar: Translations = {
     started: 'البداية',
     ended: 'النهاية',
     amount: 'المبلغ',
+    couponApplied: 'تم تطبيق كوبون',
     statusCompleted: 'مكتملة',
     statusInProgress: 'جارية',
     statusCancelled: 'ملغاة',

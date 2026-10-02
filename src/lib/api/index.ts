@@ -2861,6 +2861,17 @@ function netSessionAmount(pricing: unknown): string | undefined {
   return /^[+-]?\d+(?:\.\d+)?$/.test(text) ? text : undefined;
 }
 
+/** True when `pricing.discount_amount` is a positive amount — a coupon was applied. */
+function hasCouponDiscount(pricing: unknown): boolean {
+  if (!pricing || typeof pricing !== 'object') return false;
+  const value: unknown = (pricing as RawSession).discount_amount;
+  if (value == null || value === '') return false;
+  if (typeof value === 'object') return readMoney(value as ApiMoneyFields).minorUnits > 0;
+  if (typeof value !== 'string' && typeof value !== 'number') return false;
+  // Only the sign matters here, so the value's own precision is enough.
+  return parseAmount(value, fractionDigitsOf(value)) > 0;
+}
+
 function mapSession(kind: SessionKind, s: RawSession): DriverSession {
   // Real API: driver is `user`; station is `station` (swaps) or `pile` (charging).
   const driver = s.user ?? s.driver ?? {};
@@ -2880,6 +2891,7 @@ function mapSession(kind: SessionKind, s: RawSession): DriverSession {
     // (charging).
     amount:      netSessionAmount(s.pricing)
       ?? num(s.swap_fee ?? s.final_amount ?? s.amount ?? s.cost ?? s.total ?? s.price),
+    couponApplied: hasCouponDiscount(s.pricing),
   };
 }
 

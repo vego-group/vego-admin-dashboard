@@ -465,6 +465,11 @@ export interface DriverSession {
    * parsed with the fleet's decimals; from the legacy fields, a number.
    */
   amount?: string | number;
+  /**
+   * A coupon discounted this session (`pricing.discount_amount > 0`). `amount`
+   * is already net of it; there is no discount column (FD-2).
+   */
+  couponApplied?: boolean;
 }
 
 // ----- Wallet ----------------------------------------------------------------
