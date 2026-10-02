@@ -459,8 +459,12 @@ export interface DriverSession {
   status: SessionStatus;
   startedAt?: string;
   endedAt?: string;
-  /** Cost of the session, when applicable. */
-  amount?: number;
+  /**
+   * Cost of the session, when applicable — the net amount actually charged.
+   * From `pricing.final_price` it is the backend's exact decimal string, to be
+   * parsed with the fleet's decimals; from the legacy fields, a number.
+   */
+  amount?: string | number;
 }
 
 // ----- Wallet ----------------------------------------------------------------

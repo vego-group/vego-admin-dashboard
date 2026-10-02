@@ -2837,6 +2837,30 @@ function toSessionStatus(s?: string): SessionStatus {
   return 'in_progress';
 }
 
+/**
+ * `pricing.final_price` — what the session actually charged, net of any coupon —
+ * as the backend's exact decimal string, or undefined when it isn't there.
+ *
+ * Deliberately not parsed here: the page formats it through `formatMoney`, which
+ * parses digit-wise with the fleet's own decimals, so a JOD "1.250" never passes
+ * through `parseFloat`. A money object is read through `readMoney` for the same
+ * reason.
+ */
+function netSessionAmount(pricing: unknown): string | undefined {
+  if (!pricing || typeof pricing !== 'object') return undefined;
+  const value: unknown = (pricing as RawSession).final_price;
+  if (value == null || value === '') return undefined;
+
+  if (typeof value === 'object') {
+    const money = value as ApiMoneyFields;
+    return money.amount != null || money.minor_units != null ? readMoney(money).amount : undefined;
+  }
+  // Anything that isn't a plain decimal falls back to the legacy fields rather
+  // than rendering as 0.
+  const text = String(value).trim();
+  return /^[+-]?\d+(?:\.\d+)?$/.test(text) ? text : undefined;
+}
+
 function mapSession(kind: SessionKind, s: RawSession): DriverSession {
   // Real API: driver is `user`; station is `station` (swaps) or `pile` (charging).
   const driver = s.user ?? s.driver ?? {};
@@ -2851,8 +2875,11 @@ function mapSession(kind: SessionKind, s: RawSession): DriverSession {
     startedAt:   s.started_at ?? s.created_at ?? s.start_time ?? undefined,
     // Real API: `completed_at`.
     endedAt:     s.completed_at ?? s.ended_at ?? s.end_time ?? undefined,
-    // Real API: swaps use `swap_fee`, charging uses `final_amount`.
-    amount:      num(s.swap_fee ?? s.final_amount ?? s.amount ?? s.cost ?? s.total ?? s.price),
+    // Net first: managers see what was actually charged (FD-2). Without
+    // `pricing`, the real API puts it in `swap_fee` (swaps) / `final_amount`
+    // (charging).
+    amount:      netSessionAmount(s.pricing)
+      ?? num(s.swap_fee ?? s.final_amount ?? s.amount ?? s.cost ?? s.total ?? s.price),
   };
 }
 
