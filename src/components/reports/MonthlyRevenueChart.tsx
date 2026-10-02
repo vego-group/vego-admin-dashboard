@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import {
   Area,
   AreaChart,
@@ -13,6 +14,7 @@ import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { TrendingUp } from 'lucide-react';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useFleetContext } from '@/hooks/useFleetContext';
 import type { RevenuePoint } from '@/types';
 
 interface Props {
@@ -21,7 +23,16 @@ interface Props {
 }
 
 export function MonthlyRevenueChart({ data, loading }: Props) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const { formatMoney } = useFleetContext();
+
+  // Ticks carry the currency at the fleet's full precision ("JOD 1,500.000"),
+  // which recharts' default 60px axis clips. Size it from the widest label this
+  // data produces — an estimate at the 11px tick font.
+  const axisWidth = useMemo(() => {
+    const max = data.reduce((m, p) => Math.max(m, p.revenue), 0);
+    return Math.min(140, Math.max(60, formatMoney(max, locale).length * 7 + 8));
+  }, [data, formatMoney, locale]);
 
   return (
     <Card className="p-5">
@@ -60,6 +71,8 @@ export function MonthlyRevenueChart({ data, loading }: Props) {
                 tickLine={false}
                 axisLine={false}
                 tick={{ fontSize: 11, fill: '#94a3b8' }}
+                width={axisWidth}
+                tickFormatter={(v: number) => formatMoney(v, locale)}
               />
               <Tooltip
                 contentStyle={{
@@ -67,6 +80,7 @@ export function MonthlyRevenueChart({ data, loading }: Props) {
                   border: '1px solid #e2e8f0',
                   fontSize: 12,
                 }}
+                formatter={(value) => [formatMoney(Number(value), locale), t('reports.revenue')]}
               />
               <Area
                 type="monotone"
