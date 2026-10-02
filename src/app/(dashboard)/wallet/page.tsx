@@ -54,6 +54,15 @@ function typeLabel(tx: WalletTransaction, t: (key: string, params?: Record<strin
   return t('wallet.typeOther', { value: bidiIsolate(tx.rawType || '—') });
 }
 
+/**
+ * The Note cell. A `bonus` or `other` row with no note of its own shows the
+ * backend's raw type, so it never reads as an unexplained blank.
+ */
+function noteText(tx: WalletTransaction): string | undefined {
+  if (tx.note?.trim()) return tx.note;
+  return tx.type === 'bonus' || tx.type === 'other' ? tx.rawType || undefined : undefined;
+}
+
 /** The CSV's Type column: our kind, or the backend's own value when we have none. */
 function csvType(tx: WalletTransaction): string {
   return tx.type === 'other' ? (tx.rawType ?? '') : tx.type;
@@ -585,7 +594,7 @@ export default function WalletPage() {
                         {tx.paymentMethod ?? <span className="text-slate-300 dark:text-slate-600">—</span>}
                       </td>
                       <td className="px-5 py-4 italic text-slate-500 dark:text-slate-400">
-                        {tx.note ?? <span className="not-italic text-slate-300 dark:text-slate-600">—</span>}
+                        {noteText(tx) ?? <span className="not-italic text-slate-300 dark:text-slate-600">—</span>}
                       </td>
                       <td className="px-5 py-4">
                         <div className={cn('inline-flex items-center gap-1.5 text-sm font-medium', STATUS_CLASS[tx.status] ?? STATUS_CLASS.unknown)}>
