@@ -116,7 +116,14 @@ function isoDate(d: Date): string {
   return d.toISOString().split('T')[0];
 }
 
-function formatDT(iso: string): string {
+/**
+ * An unparseable `created_at` made Intl throw mid-render and took the whole
+ * table down with it. It renders as `fallback` instead — "—" on screen, the raw
+ * value in the CSV.
+ */
+function formatDT(iso: string, fallback = '—'): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return fallback;
   return new Intl.DateTimeFormat('en-GB', {
     day:    '2-digit',
     month:  'short',
@@ -124,7 +131,7 @@ function formatDT(iso: string): string {
     hour:   '2-digit',
     minute: '2-digit',
     hour12: false,
-  }).format(new Date(iso));
+  }).format(date);
 }
 
 function defaultFrom(): string {
@@ -176,7 +183,7 @@ function exportCsv(
     'Type', 'Payment Method', 'Note', 'Status', 'Admin',
   ];
   const lines = rows.map((r) => [
-    formatDT(r.createdAt),
+    formatDT(r.createdAt, r.createdAt),
     r.driverName,
     csvAmount(r, decimals),
     r.money?.currency ?? currency ?? '',
