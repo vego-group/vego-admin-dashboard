@@ -38,6 +38,7 @@ const en = {
     locationUnknown: 'Location unknown',
     locationUnknownHint: 'No position reported — not shown on the map',
     error: 'Something went wrong',
+    pageError: 'Something went wrong on this page',
     retry: 'Retry',
     today: 'Today',
     yesterday: 'Yesterday',

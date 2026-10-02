@@ -56,6 +56,7 @@ const ar: Translations = {
     locationUnknown: 'الموقع غير معروف',
     locationUnknownHint: 'لم يُبلَّغ عن أي موقع — لا يظهر على الخريطة',
     error: 'حدث خطأ ما',
+    pageError: 'حدث خطأ في هذه الصفحة',
     retry: 'إعادة المحاولة',
     today: 'اليوم',
     yesterday: 'الأمس',
