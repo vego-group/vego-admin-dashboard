@@ -466,7 +466,12 @@ export interface DriverSession {
 // ----- Wallet ----------------------------------------------------------------
 
 export type TransactionType   = 'top_up' | 'fast_charge' | 'battery_swap' | 'refund';
-export type TransactionStatus = 'completed' | 'pending' | 'failed' | 'cancelled';
+/**
+ * The four statuses the backend stores, plus `'unknown'` — ours, not the
+ * backend's — for anything else it sends. The value it actually sent is kept in
+ * {@link WalletTransaction.rawStatus}.
+ */
+export type TransactionStatus = 'completed' | 'pending' | 'failed' | 'cancelled' | 'unknown';
 
 /**
  * Which way the money moved: `'in'` = credit / refund, `'out'` = debit.
@@ -507,6 +512,8 @@ export interface WalletTransaction {
   paymentMethod?: string;
   note?: string;
   status: TransactionStatus;
+  /** The backend's status verbatim, when it is not one we know (`status: 'unknown'`). */
+  rawStatus?: string;
   adminName?: string;
 }
 

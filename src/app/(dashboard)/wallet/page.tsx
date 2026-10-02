@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   TrendingUp, ShoppingCart, Users2,
-  Download, CheckCircle2, Clock, XCircle,
+  Download, CheckCircle2, Clock, XCircle, HelpCircle,
   ArrowUp, AlertTriangle, Calendar,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
@@ -15,6 +15,7 @@ import { Pagination } from '@/components/ui/Pagination';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import { useFleetContext } from '@/hooks/useFleetContext';
+import { bidiIsolate } from '@/lib/format';
 import { apiTransactionType, driversApi, walletApi, walletFilterErrorFrom } from '@/lib/api';
 import { fractionDigitsOf, fromMinorUnits, toMinorUnits } from '@/lib/money';
 import type {
@@ -40,11 +41,14 @@ const TYPE_I18N: Record<TransactionType, string> = {
   refund:       'wallet.typeRefund',
 };
 
+// `unknown` is a status the backend sent that we don't know. It renders neutral,
+// with the raw value in its label — see `statusLabel`.
 const STATUS_ICON: Record<TransactionStatus, React.ElementType> = {
   completed: CheckCircle2,
   pending:   Clock,
   failed:    XCircle,
   cancelled: XCircle,
+  unknown:   HelpCircle,
 };
 
 const STATUS_CLASS: Record<TransactionStatus, string> = {
@@ -52,6 +56,7 @@ const STATUS_CLASS: Record<TransactionStatus, string> = {
   pending:   'text-amber-600   dark:text-amber-400',
   failed:    'text-rose-600    dark:text-rose-400',
   cancelled: 'text-slate-500   dark:text-slate-400',
+  unknown:   'text-slate-500   dark:text-slate-400',
 };
 
 const STATUS_I18N: Record<TransactionStatus, string> = {
@@ -59,7 +64,24 @@ const STATUS_I18N: Record<TransactionStatus, string> = {
   pending:   'wallet.statusPending',
   failed:    'wallet.statusFailed',
   cancelled: 'wallet.statusCancelled',
+  unknown:   'wallet.statusOther',
 };
+
+/** The backend's own status for an unknown one — the CSV and the label both show it. */
+function rawStatusOf(tx: WalletTransaction): string {
+  return tx.status === 'unknown' ? (tx.rawStatus ?? '') : tx.status;
+}
+
+/**
+ * "Completed", or "Other (reversed)" for a status we don't know. The maps above
+ * are typed complete, but a row can still carry a value they lack at runtime, so
+ * a miss falls through to the neutral label rather than an undefined key.
+ */
+function statusLabel(tx: WalletTransaction, t: (key: string, params?: Record<string, string>) => string): string {
+  const key = STATUS_I18N[tx.status];
+  if (key && tx.status !== 'unknown') return t(key);
+  return t('wallet.statusOther', { value: bidiIsolate(rawStatusOf(tx) || '—') });
+}
 
 // ── Date helpers ──────────────────────────────────────────────────────────
 
@@ -134,7 +156,7 @@ function exportCsv(
     r.type,
     r.paymentMethod ?? '',
     r.note ?? '',
-    r.status,
+    rawStatusOf(r),
     r.adminName ?? '',
   ].map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','));
   const csv  = [headers.join(','), ...lines].join('\n');
@@ -509,7 +531,7 @@ export default function WalletPage() {
                 </tr>
               ) : (
                 rows.map((tx) => {
-                  const StatusIcon = STATUS_ICON[tx.status];
+                  const StatusIcon = STATUS_ICON[tx.status] ?? HelpCircle;
                   // Direction, never the sign. A debit is a positive amount with
                   // type "debit" — reading `amount >= 0` painted every debit
                   // green as if it were a credit.
@@ -548,9 +570,9 @@ export default function WalletPage() {
                         {tx.note ?? <span className="not-italic text-slate-300 dark:text-slate-600">—</span>}
                       </td>
                       <td className="px-5 py-4">
-                        <div className={cn('inline-flex items-center gap-1.5 text-sm font-medium', STATUS_CLASS[tx.status])}>
+                        <div className={cn('inline-flex items-center gap-1.5 text-sm font-medium', STATUS_CLASS[tx.status] ?? STATUS_CLASS.unknown)}>
                           <StatusIcon className="h-4 w-4" />
-                          {t(STATUS_I18N[tx.status])}
+                          {statusLabel(tx, t)}
                         </div>
                       </td>
                       <td className="px-5 py-4 text-slate-600 dark:text-slate-300">

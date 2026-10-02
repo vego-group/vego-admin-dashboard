@@ -785,6 +785,7 @@ const ar: Translations = {
     statusPending: 'قيد الانتظار',
     statusFailed: 'فشل',
     statusCancelled: 'ملغي',
+    statusOther: 'أخرى ({{value}})',
     helpTitle: 'هل تحتاج مساعدة في المعاملات؟',
     helpDescription: 'فريق العمليات المالية متاح 24/7 لحل مشكلات الشحن أو تعديل أرصدة المحفظة للسائقين.',
     contactFinanceTeam: 'تواصل مع فريق المالية',

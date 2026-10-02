@@ -132,6 +132,16 @@ export function formatCurrency(
   }).format(value);
 }
 
+/**
+ * Wrap a value of unknown direction — a raw backend key, a name — in Unicode
+ * first-strong isolates, so it cannot reorder the translated text around it.
+ * Without this an Arabic label such as "أخرى ({{value}})" can lose its closing
+ * parenthesis to the wrong side when the value ends in punctuation.
+ */
+export function bidiIsolate(value: string): string {
+  return `⁨${value}⁩`;
+}
+
 export function formatPercent(value: number, locale: Locale = 'en'): string {
   return new Intl.NumberFormat(localeMap[locale], {
     style: 'percent',

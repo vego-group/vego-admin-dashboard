@@ -643,6 +643,27 @@ function toDirection(tx: ApiTransaction): TransactionDirection {
   return DEBIT_TYPES.has(tx.type ?? '') ? 'out' : 'in';
 }
 
+/**
+ * Every status the backend stores (fleet-admin-pending-confirmations-answers §4).
+ * The column is free text as far as this client can tell, so the cast it used to
+ * get was a promise nobody made.
+ */
+const KNOWN_TX_STATUSES: ReadonlySet<string> = new Set(['pending', 'completed', 'failed', 'cancelled']);
+
+/**
+ * A status we know, or `'unknown'` plus the value as sent.
+ *
+ * An unvalidated status reached the page's lookup tables as `undefined`, and the
+ * label lookup threw — one new backend status white-screened the whole Wallet
+ * page. Absent stays `'completed'`, as it always has.
+ */
+function toTransactionStatus(raw: string | undefined): Pick<WalletTransaction, 'status' | 'rawStatus'> {
+  if (raw == null) return { status: 'completed' };
+  return KNOWN_TX_STATUSES.has(raw)
+    ? { status: raw as WalletTransaction['status'] }
+    : { status: 'unknown', rawStatus: raw };
+}
+
 function mapTransaction(tx: ApiTransaction): WalletTransaction {
   const rawType = tx.type ?? '';
   let type: WalletTransaction['type'] = 'top_up';
@@ -689,7 +710,7 @@ function mapTransaction(tx: ApiTransaction): WalletTransaction {
     type,
     paymentMethod: tx.payment_method,
     note:          tx.note ?? tx.description,
-    status:        (tx.status as WalletTransaction['status']) ?? 'completed',
+    ...toTransactionStatus(tx.status),
     adminName:     tx.admin?.name,
   };
 }

@@ -778,6 +778,7 @@ const en = {
     statusPending: 'Pending',
     statusFailed: 'Failed',
     statusCancelled: 'Cancelled',
+    statusOther: 'Other ({{value}})',
     helpTitle: 'Need Help with Transactions?',
     helpDescription: 'Our financial operations team is available 24/7 to resolve top-up issues or adjust wallet balances for your drivers.',
     contactFinanceTeam: 'Contact Finance Team',

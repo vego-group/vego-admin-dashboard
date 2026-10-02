@@ -16,7 +16,10 @@ interface I18nContextValue {
   locale: Locale;
   dir: Direction;
   setLocale: (locale: Locale) => void;
-  /** Lookup with dot-path key, e.g. t("dashboard.title"). Falls back to the key if missing. */
+  /**
+   * Lookup with dot-path key, e.g. t("dashboard.title"). Falls back to the key if
+   * missing, and to an empty string if the key itself is not a string.
+   */
   t: (key: string, params?: Record<string, string | number>) => string;
 }
 
@@ -67,6 +70,10 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 
   const t = useCallback<I18nContextValue['t']>(
     (key, params) => {
+      // A key looked up from data (`MAP[row.status]`) is `undefined` at runtime
+      // whatever its type says, and `resolvePath` would throw on it. A missing
+      // label must never take a page down.
+      if (typeof key !== 'string') return '';
       const value = resolvePath(dictionaries[locale], key);
       if (typeof value === 'string') return interpolate(value, params);
       // Fall back to English if key missing in current locale
