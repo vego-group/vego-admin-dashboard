@@ -197,7 +197,9 @@ function exportCsv(
     rawStatusOf(r),
     r.adminName ?? '',
   ].map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','));
-  const csv  = [headers.join(','), ...lines].join('\n');
+  // The BOM is what tells Excel the file is UTF-8. Without it Excel on Windows
+  // reads the bytes in the system code page and garbles every Arabic name.
+  const csv  = '﻿' + [headers.join(','), ...lines].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
