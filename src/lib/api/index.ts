@@ -284,6 +284,11 @@ interface ApiTransaction {
   note?: string;
   payment_method?: string;
   reference_type?: string | null;
+  /**
+   * The ledger's own classification — `bonus` / `bonus_reversal` — when the row
+   * is one. Seen on the mobile transactions endpoint; expected to match here.
+   */
+  ledger_type?: string | null;
   /** Driver may be directly on the transaction or nested inside wallet */
   user?: { id: number | string; name: string };
   driver?: { id: number | string; name: string };
@@ -624,7 +629,7 @@ function mapPile(p: ApiPile): FastChargingCabinet {
 
 /** Transaction `type` values that move money **out** of the wallet. */
 const DEBIT_TYPES = new Set([
-  'debit', 'fast_charging', 'fast_charge', 'charging', 'swap', 'battery_swap',
+  'debit', 'fast_charging', 'fast_charge', 'charging', 'swap', 'battery_swap', 'bonus_reversal',
 ]);
 
 /**
@@ -640,25 +645,112 @@ const DEBIT_TYPES = new Set([
 function toDirection(tx: ApiTransaction): TransactionDirection {
   const raw = (tx.direction ?? '').toLowerCase();
   if (raw === 'in' || raw === 'out') return raw;
-  return DEBIT_TYPES.has(tx.type ?? '') ? 'out' : 'in';
+  return DEBIT_TYPES.has(tx.type ?? '') || tx.ledger_type === 'bonus_reversal' ? 'out' : 'in';
+}
+
+/**
+ * Every status the backend stores (fleet-admin-pending-confirmations-answers §4).
+ * The column is free text as far as this client can tell, so the cast it used to
+ * get was a promise nobody made.
+ */
+const KNOWN_TX_STATUSES: ReadonlySet<string> = new Set(['pending', 'completed', 'failed', 'cancelled']);
+
+/**
+ * A status we know, or `'unknown'` plus the value as sent.
+ *
+ * An unvalidated status reached the page's lookup tables as `undefined`, and the
+ * label lookup threw — one new backend status white-screened the whole Wallet
+ * page. Absent stays `'completed'`, as it always has.
+ */
+function toTransactionStatus(raw: string | undefined): Pick<WalletTransaction, 'status' | 'rawStatus'> {
+  if (raw == null) return { status: 'completed' };
+  return KNOWN_TX_STATUSES.has(raw)
+    ? { status: raw as WalletTransaction['status'] }
+    : { status: 'unknown', rawStatus: raw };
+}
+
+/**
+ * Every transaction `type` a backend document names, and what it means here.
+ *
+ * - `credit` / `debit` are the stored values (fleet-admin-pending-confirmations-
+ *   answers §4; dashboard-country-currency-answers-updated §8).
+ * - `top_up`, `charging`, `swap` are legacy row values (API_CONTRACT §11).
+ * - The rest are the sub-kind names of the endpoint's own `type` filter
+ *   (pending-confirmations §4).
+ *
+ * `debit` is not here: what it paid for comes from {@link debitKind}.
+ * Anything not listed is `other` — guessing "Top-Up" is how a bonus credit would
+ * have been shown, and exported, as fleet-funded money.
+ */
+const DOCUMENTED_TX_KINDS: ReadonlyMap<string, TransactionType> = new Map([
+  ['credit',        'top_up'],
+  ['top_up',        'top_up'],
+  ['topup',         'top_up'],
+  ['refund',        'refund'],
+  ['swap',          'battery_swap'],
+  ['battery_swap',  'battery_swap'],
+  ['charging',      'fast_charge'],
+  ['fast_charge',   'fast_charge'],
+  ['fast_charging', 'fast_charge'],
+]);
+
+/**
+ * What a debit paid for, by its `reference_type`, or undefined when it can't be
+ * told.
+ *
+ * No document names the value for a swap or charging debit. The type filter's
+ * vocabulary is `swap` / `fast_charging`, but the backend's status report shows
+ * `reference_type` holding model class names (`TopupBonusGrant`), so a swap
+ * debit may just as well be `SwapSession` or `App\Models\SwapSession`. Matching
+ * the normalised name — namespace dropped, lower-cased, `_` and `-` removed —
+ * on "swap" or "charg" covers every one of those spellings. Anything else is
+ * `other`, not "Battery Swap" by default.
+ */
+function debitKind(referenceType: string): TransactionType | undefined {
+  const name = referenceType
+    .slice(referenceType.lastIndexOf('\\') + 1)
+    .toLowerCase()
+    .replace(/[_-]/g, '');
+  if (name.includes('swap'))  return 'battery_swap';
+  if (name.includes('charg')) return 'fast_charge';
+  return undefined;
+}
+
+/**
+ * Backend `type` values that mark a bonus credit. The backend's status report
+ * names `bonus` (with `reference_type: TopupBonusGrant`); `ledger_type: "bonus"`
+ * marks one too, see {@link toTransactionType}.
+ *
+ * Also matched against `reference_type` on a `credit` row. There is deliberately
+ * no filter option for bonuses: the server-side filter value isn't confirmed,
+ * and the endpoint answers an unknown one with a 422.
+ */
+export const BONUS_TX_TYPES: string[] = ['bonus'];
+
+function toTransactionType(tx: ApiTransaction): Pick<WalletTransaction, 'type' | 'rawType'> {
+  const rawType = tx.type ?? '';
+  const ref     = tx.reference_type ?? '';
+  const ledger  = tx.ledger_type ?? '';
+
+  // `ledger_type` is where the backend puts bonuses, so it wins over `type`.
+  if (ledger === 'bonus')          return { type: 'bonus', rawType: ledger };
+  if (ledger === 'bonus_reversal') return { type: 'bonus_reversal', rawType: ledger };
+  if (BONUS_TX_TYPES.includes(rawType)) return { type: 'bonus', rawType };
+  if (rawType === 'bonus_reversal')     return { type: 'bonus_reversal', rawType };
+  if (rawType === 'credit' && ref && BONUS_TX_TYPES.includes(ref)) return { type: 'bonus', rawType: ref };
+
+  if (rawType === 'debit') {
+    // Spending — reference_type says on what. An unknown one stays a debit (the
+    // direction is unaffected) but is labelled with the value we were given.
+    const kind = debitKind(ref);
+    return kind ? { type: kind } : { type: 'other', rawType: ref || rawType };
+  }
+
+  const kind = DOCUMENTED_TX_KINDS.get(rawType);
+  return kind ? { type: kind } : { type: 'other', rawType };
 }
 
 function mapTransaction(tx: ApiTransaction): WalletTransaction {
-  const rawType = tx.type ?? '';
-  let type: WalletTransaction['type'] = 'top_up';
-  if (rawType === 'debit') {
-    // debit transactions are spending — use reference_type to distinguish
-    const ref = tx.reference_type ?? '';
-    type = (ref === 'fast_charge' || ref === 'fast_charging' || ref === 'charging') ? 'fast_charge' : 'battery_swap';
-  } else if (rawType === 'fast_charging' || rawType === 'fast_charge' || rawType === 'charging') {
-    type = 'fast_charge';
-  } else if (rawType === 'swap' || rawType === 'battery_swap') {
-    type = 'battery_swap';
-  } else if (rawType === 'refund') {
-    type = 'refund';
-  }
-  // "credit" or "top_up" stays as 'top_up'
-
   // Driver may be nested under wallet.user, or directly on tx.user / tx.driver
   const driver = tx.wallet?.user ?? tx.user ?? tx.driver;
 
@@ -686,10 +778,10 @@ function mapTransaction(tx: ApiTransaction): WalletTransaction {
     money,
     direction,
     signedAmount,
-    type,
+    ...toTransactionType(tx),
     paymentMethod: tx.payment_method,
     note:          tx.note ?? tx.description,
-    status:        (tx.status as WalletTransaction['status']) ?? 'completed',
+    ...toTransactionStatus(tx.status),
     adminName:     tx.admin?.name,
   };
 }
@@ -2160,12 +2252,44 @@ export function apiTransactionType(
   }
 }
 
+/**
+ * A stats amount in any shape the backend has used: a bare number, a decimal
+ * string ("120.500"), or the currency-aware block that "every money field ships
+ * as" (dashboard-country-currency-answers-updated §12). `null` is how a total
+ * that can't be summed comes back.
+ */
+type ApiStatsAmount = number | string | ApiMoneyFields | null;
+
+/**
+ * A stats amount as a number, or **null** when it is absent or in a shape we
+ * can't read.
+ *
+ * These used to go to the page untouched. A money object then reached
+ * `formatMoney` as "[object Object]" and rendered as 0 with no error, which
+ * reads as "this fleet spent nothing". An unreadable amount now renders "—".
+ */
+function statsAmount(value: ApiStatsAmount | undefined): number | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? moneyToNumber(readMoney({ amount: value })) : null;
+  }
+  if (typeof value === 'string') {
+    return /^[+-]?\d+(?:\.\d+)?$/.test(value.trim()) ? moneyToNumber(readMoney({ amount: value.trim() })) : null;
+  }
+  if (typeof value === 'object' && !Array.isArray(value)
+      && (value.amount != null || value.balance != null || value.minor_units != null)) {
+    return moneyToNumber(readMoney(value));
+  }
+  logger.warn('[Wallet] Unreadable stats amount — showing "—":', value);
+  return null;
+}
+
 interface ApiWalletStats {
-  current_month_top_ups?: number;
-  total_top_ups?: number;
-  current_month_spent?: number;
-  total_spent?: number;
-  avg_per_driver?: number;
+  current_month_top_ups?: ApiStatsAmount;
+  total_top_ups?: ApiStatsAmount;
+  current_month_spent?: ApiStatsAmount;
+  total_spent?: ApiStatsAmount;
+  avg_per_driver?: ApiStatsAmount;
   top_up_trend_pct?: number;
   top_up_trend?: number;
   budget_used_pct?: number;
@@ -2272,9 +2396,9 @@ export const walletApi = {
       ? raw.data
       : raw;
     return {
-      totalTopUps:        s.current_month_top_ups ?? s.total_top_ups ?? 0,
-      totalSpent:         s.current_month_spent   ?? s.total_spent   ?? 0,
-      avgPerDriver:       s.avg_per_driver ?? 0,
+      totalTopUps:        statsAmount(s.current_month_top_ups ?? s.total_top_ups),
+      totalSpent:         statsAmount(s.current_month_spent   ?? s.total_spent),
+      avgPerDriver:       statsAmount(s.avg_per_driver),
       topUpTrend:         s.top_up_trend_pct ?? s.top_up_trend ?? 0,
       budgetUsedPercent:  s.budget_used_pct ?? s.budget_used_percent ?? 0,
       activeDriversCount: s.active_drivers_count ?? 0,
@@ -2761,6 +2885,41 @@ function toSessionStatus(s?: string): SessionStatus {
   return 'in_progress';
 }
 
+/**
+ * `pricing.final_price` — what the session actually charged, net of any coupon —
+ * as the backend's exact decimal string, or undefined when it isn't there.
+ *
+ * Deliberately not parsed here: the page formats it through `formatMoney`, which
+ * parses digit-wise with the fleet's own decimals, so a JOD "1.250" never passes
+ * through `parseFloat`. A money object is read through `readMoney` for the same
+ * reason.
+ */
+function netSessionAmount(pricing: unknown): string | undefined {
+  if (!pricing || typeof pricing !== 'object') return undefined;
+  const value: unknown = (pricing as RawSession).final_price;
+  if (value == null || value === '') return undefined;
+
+  if (typeof value === 'object') {
+    const money = value as ApiMoneyFields;
+    return money.amount != null || money.minor_units != null ? readMoney(money).amount : undefined;
+  }
+  // Anything that isn't a plain decimal falls back to the legacy fields rather
+  // than rendering as 0.
+  const text = String(value).trim();
+  return /^[+-]?\d+(?:\.\d+)?$/.test(text) ? text : undefined;
+}
+
+/** True when `pricing.discount_amount` is a positive amount — a coupon was applied. */
+function hasCouponDiscount(pricing: unknown): boolean {
+  if (!pricing || typeof pricing !== 'object') return false;
+  const value: unknown = (pricing as RawSession).discount_amount;
+  if (value == null || value === '') return false;
+  if (typeof value === 'object') return readMoney(value as ApiMoneyFields).minorUnits > 0;
+  if (typeof value !== 'string' && typeof value !== 'number') return false;
+  // Only the sign matters here, so the value's own precision is enough.
+  return parseAmount(value, fractionDigitsOf(value)) > 0;
+}
+
 function mapSession(kind: SessionKind, s: RawSession): DriverSession {
   // Real API: driver is `user`; station is `station` (swaps) or `pile` (charging).
   const driver = s.user ?? s.driver ?? {};
@@ -2775,8 +2934,12 @@ function mapSession(kind: SessionKind, s: RawSession): DriverSession {
     startedAt:   s.started_at ?? s.created_at ?? s.start_time ?? undefined,
     // Real API: `completed_at`.
     endedAt:     s.completed_at ?? s.ended_at ?? s.end_time ?? undefined,
-    // Real API: swaps use `swap_fee`, charging uses `final_amount`.
-    amount:      num(s.swap_fee ?? s.final_amount ?? s.amount ?? s.cost ?? s.total ?? s.price),
+    // Net first: managers see what was actually charged (FD-2). Without
+    // `pricing`, the real API puts it in `swap_fee` (swaps) / `final_amount`
+    // (charging).
+    amount:      netSessionAmount(s.pricing)
+      ?? num(s.swap_fee ?? s.final_amount ?? s.amount ?? s.cost ?? s.total ?? s.price),
+    couponApplied: hasCouponDiscount(s.pricing),
   };
 }
 

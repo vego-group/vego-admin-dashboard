@@ -459,14 +459,36 @@ export interface DriverSession {
   status: SessionStatus;
   startedAt?: string;
   endedAt?: string;
-  /** Cost of the session, when applicable. */
-  amount?: number;
+  /**
+   * Cost of the session, when applicable — the net amount actually charged.
+   * From `pricing.final_price` it is the backend's exact decimal string, to be
+   * parsed with the fleet's decimals; from the legacy fields, a number.
+   */
+  amount?: string | number;
+  /**
+   * A coupon discounted this session (`pricing.discount_amount > 0`). `amount`
+   * is already net of it; there is no discount column (FD-2).
+   */
+  couponApplied?: boolean;
 }
 
 // ----- Wallet ----------------------------------------------------------------
 
-export type TransactionType   = 'top_up' | 'fast_charge' | 'battery_swap' | 'refund';
-export type TransactionStatus = 'completed' | 'pending' | 'failed' | 'cancelled';
+/**
+ * - `bonus` — a credit the backend marks as a bonus (`ledger_type` or `type`).
+ * - `bonus_reversal` — a bonus taken back; a debit.
+ * - `other` — a backend `type`, or a debit's `reference_type`, that no backend
+ *   document names. Never relabelled as a kind it might not be; the value as
+ *   sent is kept in {@link WalletTransaction.rawType}.
+ */
+export type TransactionType   =
+  'top_up' | 'fast_charge' | 'battery_swap' | 'refund' | 'bonus' | 'bonus_reversal' | 'other';
+/**
+ * The four statuses the backend stores, plus `'unknown'` — ours, not the
+ * backend's — for anything else it sends. The value it actually sent is kept in
+ * {@link WalletTransaction.rawStatus}.
+ */
+export type TransactionStatus = 'completed' | 'pending' | 'failed' | 'cancelled' | 'unknown';
 
 /**
  * Which way the money moved: `'in'` = credit / refund, `'out'` = debit.
@@ -504,16 +526,25 @@ export interface WalletTransaction {
    */
   signedAmount: string;
   type: TransactionType;
+  /**
+   * The backend value behind a `bonus`, `bonus_reversal` or `other` row,
+   * verbatim — its `ledger_type`, `type`, or the `reference_type` that decided
+   * it. Unset for the documented kinds.
+   */
+  rawType?: string;
   paymentMethod?: string;
   note?: string;
   status: TransactionStatus;
+  /** The backend's status verbatim, when it is not one we know (`status: 'unknown'`). */
+  rawStatus?: string;
   adminName?: string;
 }
 
 export interface WalletStats {
-  totalTopUps: number;
-  totalSpent: number;
-  avgPerDriver: number;
+  /** Money totals: **null** when the backend sent none or a shape we can't read — render "—", never 0. */
+  totalTopUps: number | null;
+  totalSpent: number | null;
+  avgPerDriver: number | null;
   topUpTrend: number;   // %
   budgetUsedPercent: number;
   activeDriversCount: number;

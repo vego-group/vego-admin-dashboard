@@ -150,6 +150,11 @@ export default function SessionsPage() {
                         </td>
                         <td className="px-5 py-4 font-semibold tabular-nums text-slate-900 dark:text-slate-100">
                           {s.amount != null ? formatMoney(s.amount, locale) : '—'}
+                          {s.couponApplied && (
+                            <span className="mt-0.5 block text-[11px] font-normal text-slate-400 dark:text-slate-500">
+                              {t('sessions.couponApplied')}
+                            </span>
+                          )}
                         </td>
                       </tr>
                     );

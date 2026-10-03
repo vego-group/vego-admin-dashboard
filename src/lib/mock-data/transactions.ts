@@ -12,7 +12,7 @@ type Fixture = Omit<WalletTransaction, 'direction' | 'signedAmount'> &
 
 /** Fills in `direction` from the type, and `signedAmount` from the direction. */
 function tx(f: Fixture): WalletTransaction {
-  const direction = f.direction ?? (f.type === 'top_up' || f.type === 'refund' ? 'in' : 'out');
+  const direction = f.direction ?? (f.type === 'top_up' || f.type === 'refund' || f.type === 'bonus' ? 'in' : 'out');
   return {
     ...f,
     direction,

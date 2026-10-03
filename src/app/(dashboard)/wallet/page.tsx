@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   TrendingUp, ShoppingCart, Users2,
-  Download, CheckCircle2, Clock, XCircle,
-  ArrowUp, AlertTriangle, Calendar,
+  Download, CheckCircle2, Clock, XCircle, HelpCircle,
+  ArrowUp, AlertTriangle, Calendar, Info,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { Card } from '@/components/ui/Card';
@@ -15,6 +15,7 @@ import { Pagination } from '@/components/ui/Pagination';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import { useFleetContext } from '@/hooks/useFleetContext';
+import { bidiIsolate } from '@/lib/format';
 import { apiTransactionType, driversApi, walletApi, walletFilterErrorFrom } from '@/lib/api';
 import { fractionDigitsOf, fromMinorUnits, toMinorUnits } from '@/lib/money';
 import type {
@@ -26,25 +27,59 @@ const PAGE_SIZE = 8;
 
 // ── Config maps ───────────────────────────────────────────────────────────
 
+// `other` is neutral and keeps the backend's own casing — the raw value is the
+// point of the badge, so it isn't uppercased like the known kinds.
 const TYPE_CLASS: Record<TransactionType, string> = {
   top_up:       'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400',
+  bonus:        'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400',
+  bonus_reversal: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400',
   fast_charge:  'bg-blue-100   text-blue-700   dark:bg-blue-500/15   dark:text-blue-400',
   battery_swap: 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400',
   refund:       'bg-amber-100  text-amber-700  dark:bg-amber-500/15  dark:text-amber-400',
+  other:        'bg-slate-100  text-slate-700  dark:bg-slate-500/15  dark:text-slate-300 normal-case tracking-normal',
 };
 
 const TYPE_I18N: Record<TransactionType, string> = {
   top_up:       'wallet.typeTopUp',
+  bonus:        'wallet.typeBonus',
+  bonus_reversal: 'wallet.typeBonusReversal',
   fast_charge:  'wallet.typeFastCharge',
   battery_swap: 'wallet.typeBatterySwap',
   refund:       'wallet.typeRefund',
+  other:        'wallet.typeOther',
 };
 
+/** "Top-Up", or "Other (mystery)" for a type no backend document names. */
+function typeLabel(tx: WalletTransaction, t: (key: string, params?: Record<string, string>) => string): string {
+  const key = TYPE_I18N[tx.type];
+  if (key && tx.type !== 'other') return t(key);
+  return t('wallet.typeOther', { value: bidiIsolate(tx.rawType || '—') });
+}
+
+/**
+ * The Note cell. A `bonus`, `bonus_reversal` or `other` row with no note of its
+ * own shows the backend's raw type, so it never reads as an unexplained blank.
+ */
+function noteText(tx: WalletTransaction): string | undefined {
+  if (tx.note?.trim()) return tx.note;
+  return tx.type === 'bonus' || tx.type === 'bonus_reversal' || tx.type === 'other'
+    ? tx.rawType || undefined
+    : undefined;
+}
+
+/** The CSV's Type column: our kind, or the backend's own value when we have none. */
+function csvType(tx: WalletTransaction): string {
+  return tx.type === 'other' ? (tx.rawType ?? '') : tx.type;
+}
+
+// `unknown` is a status the backend sent that we don't know. It renders neutral,
+// with the raw value in its label — see `statusLabel`.
 const STATUS_ICON: Record<TransactionStatus, React.ElementType> = {
   completed: CheckCircle2,
   pending:   Clock,
   failed:    XCircle,
   cancelled: XCircle,
+  unknown:   HelpCircle,
 };
 
 const STATUS_CLASS: Record<TransactionStatus, string> = {
@@ -52,6 +87,7 @@ const STATUS_CLASS: Record<TransactionStatus, string> = {
   pending:   'text-amber-600   dark:text-amber-400',
   failed:    'text-rose-600    dark:text-rose-400',
   cancelled: 'text-slate-500   dark:text-slate-400',
+  unknown:   'text-slate-500   dark:text-slate-400',
 };
 
 const STATUS_I18N: Record<TransactionStatus, string> = {
@@ -59,7 +95,24 @@ const STATUS_I18N: Record<TransactionStatus, string> = {
   pending:   'wallet.statusPending',
   failed:    'wallet.statusFailed',
   cancelled: 'wallet.statusCancelled',
+  unknown:   'wallet.statusOther',
 };
+
+/** The backend's own status for an unknown one — the CSV and the label both show it. */
+function rawStatusOf(tx: WalletTransaction): string {
+  return tx.status === 'unknown' ? (tx.rawStatus ?? '') : tx.status;
+}
+
+/**
+ * "Completed", or "Other (reversed)" for a status we don't know. The maps above
+ * are typed complete, but a row can still carry a value they lack at runtime, so
+ * a miss falls through to the neutral label rather than an undefined key.
+ */
+function statusLabel(tx: WalletTransaction, t: (key: string, params?: Record<string, string>) => string): string {
+  const key = STATUS_I18N[tx.status];
+  if (key && tx.status !== 'unknown') return t(key);
+  return t('wallet.statusOther', { value: bidiIsolate(rawStatusOf(tx) || '—') });
+}
 
 // ── Date helpers ──────────────────────────────────────────────────────────
 
@@ -67,7 +120,14 @@ function isoDate(d: Date): string {
   return d.toISOString().split('T')[0];
 }
 
-function formatDT(iso: string): string {
+/**
+ * An unparseable `created_at` made Intl throw mid-render and took the whole
+ * table down with it. It renders as `fallback` instead — "—" on screen, the raw
+ * value in the CSV.
+ */
+function formatDT(iso: string, fallback = '—'): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return fallback;
   return new Intl.DateTimeFormat('en-GB', {
     day:    '2-digit',
     month:  'short',
@@ -75,7 +135,7 @@ function formatDT(iso: string): string {
     hour:   '2-digit',
     minute: '2-digit',
     hour12: false,
-  }).format(new Date(iso));
+  }).format(date);
 }
 
 function defaultFrom(): string {
@@ -127,17 +187,19 @@ function exportCsv(
     'Type', 'Payment Method', 'Note', 'Status', 'Admin',
   ];
   const lines = rows.map((r) => [
-    formatDT(r.createdAt),
+    formatDT(r.createdAt, r.createdAt),
     r.driverName,
     csvAmount(r, decimals),
     r.money?.currency ?? currency ?? '',
-    r.type,
+    csvType(r),
     r.paymentMethod ?? '',
     r.note ?? '',
-    r.status,
+    rawStatusOf(r),
     r.adminName ?? '',
   ].map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','));
-  const csv  = [headers.join(','), ...lines].join('\n');
+  // The BOM is what tells Excel the file is UTF-8. Without it Excel on Windows
+  // reads the bytes in the system code page and garbles every Arabic name.
+  const csv  = '﻿' + [headers.join(','), ...lines].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
@@ -330,7 +392,7 @@ export default function WalletPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard
           label={t('wallet.totalTopUps')}
-          value={stats ? formatMoney(stats.totalTopUps, locale) : '—'}
+          value={stats?.totalTopUps != null ? formatMoney(stats.totalTopUps, locale) : '—'}
           iconBg="bg-gradient-to-br from-emerald-400 to-emerald-600"
           Icon={TrendingUp}
           trend={stats?.topUpTrend}
@@ -338,7 +400,7 @@ export default function WalletPage() {
         />
         <StatCard
           label={t('wallet.totalSpent')}
-          value={stats ? formatMoney(stats.totalSpent, locale) : '—'}
+          value={stats?.totalSpent != null ? formatMoney(stats.totalSpent, locale) : '—'}
           iconBg="bg-gradient-to-br from-rose-400 to-rose-600"
           Icon={ShoppingCart}
           subtitle={stats ? t('wallet.ofBudget', { percent: stats.budgetUsedPercent }) : undefined}
@@ -346,7 +408,7 @@ export default function WalletPage() {
         />
         <StatCard
           label={t('wallet.avgPerDriver')}
-          value={stats ? formatMoney(stats.avgPerDriver, locale) : '—'}
+          value={stats?.avgPerDriver != null ? formatMoney(stats.avgPerDriver, locale) : '—'}
           iconBg="bg-gradient-to-br from-indigo-500 to-violet-600"
           Icon={Users2}
           subtitle={stats ? t('wallet.acrossDrivers', { count: stats.activeDriversCount }) : undefined}
@@ -447,6 +509,13 @@ export default function WalletPage() {
           </div>
         </div>
 
+        {/* Fleet drivers can top up their own wallets, so bonus rows can appear
+            here, and the type filter has no option of its own for them yet. */}
+        <p className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-400 dark:text-slate-500">
+          <Info className="h-3 w-3 shrink-0" />
+          {t('wallet.bonusesUnderTopUp')}
+        </p>
+
         {/* A filter the endpoint refused, in its own words. Without this the
             operator reads "no transactions" as an answer about their fleet. */}
         {filterError && (
@@ -509,7 +578,7 @@ export default function WalletPage() {
                 </tr>
               ) : (
                 rows.map((tx) => {
-                  const StatusIcon = STATUS_ICON[tx.status];
+                  const StatusIcon = STATUS_ICON[tx.status] ?? HelpCircle;
                   // Direction, never the sign. A debit is a positive amount with
                   // type "debit" — reading `amount >= 0` painted every debit
                   // green as if it were a credit.
@@ -521,7 +590,9 @@ export default function WalletPage() {
                       style={{ borderColor: 'rgb(var(--border))' }}
                     >
                       <td className="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">
-                        {formatDT(tx.createdAt)}
+                        {/* An English date inside an RTL row reorders ("Oct 2026, 15:00 02")
+                            unless it is isolated as LTR. */}
+                        <span dir="ltr">{formatDT(tx.createdAt)}</span>
                       </td>
                       <td className="px-5 py-4 font-medium text-slate-900 dark:text-slate-100">
                         {tx.driverName}
@@ -536,21 +607,21 @@ export default function WalletPage() {
                       <td className="px-5 py-4">
                         <span className={cn(
                           'inline-flex items-center rounded-md px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide',
-                          TYPE_CLASS[tx.type],
+                          TYPE_CLASS[tx.type] ?? TYPE_CLASS.other,
                         )}>
-                          {t(TYPE_I18N[tx.type])}
+                          {typeLabel(tx, t)}
                         </span>
                       </td>
                       <td className="px-5 py-4 text-slate-600 dark:text-slate-300">
                         {tx.paymentMethod ?? <span className="text-slate-300 dark:text-slate-600">—</span>}
                       </td>
                       <td className="px-5 py-4 italic text-slate-500 dark:text-slate-400">
-                        {tx.note ?? <span className="not-italic text-slate-300 dark:text-slate-600">—</span>}
+                        {noteText(tx) ?? <span className="not-italic text-slate-300 dark:text-slate-600">—</span>}
                       </td>
                       <td className="px-5 py-4">
-                        <div className={cn('inline-flex items-center gap-1.5 text-sm font-medium', STATUS_CLASS[tx.status])}>
+                        <div className={cn('inline-flex items-center gap-1.5 text-sm font-medium', STATUS_CLASS[tx.status] ?? STATUS_CLASS.unknown)}>
                           <StatusIcon className="h-4 w-4" />
-                          {t(STATUS_I18N[tx.status])}
+                          {statusLabel(tx, t)}
                         </div>
                       </td>
                       <td className="px-5 py-4 text-slate-600 dark:text-slate-300">
