@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   TrendingUp, ShoppingCart, Users2,
   Download, CheckCircle2, Clock, XCircle, HelpCircle,
-  ArrowUp, AlertTriangle, Calendar,
+  ArrowUp, AlertTriangle, Calendar, Info,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { Card } from '@/components/ui/Card';
@@ -506,6 +506,13 @@ export default function WalletPage() {
             </Button>
           </div>
         </div>
+
+        {/* Fleet drivers can top up their own wallets, so bonus rows can appear
+            here, and the type filter has no option of its own for them yet. */}
+        <p className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-400 dark:text-slate-500">
+          <Info className="h-3 w-3 shrink-0" />
+          {t('wallet.bonusesUnderTopUp')}
+        </p>
 
         {/* A filter the endpoint refused, in its own words. Without this the
             operator reads "no transactions" as an answer about their fleet. */}
