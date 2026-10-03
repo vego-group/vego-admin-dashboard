@@ -590,7 +590,9 @@ export default function WalletPage() {
                       style={{ borderColor: 'rgb(var(--border))' }}
                     >
                       <td className="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">
-                        {formatDT(tx.createdAt)}
+                        {/* An English date inside an RTL row reorders ("Oct 2026, 15:00 02")
+                            unless it is isolated as LTR. */}
+                        <span dir="ltr">{formatDT(tx.createdAt)}</span>
                       </td>
                       <td className="px-5 py-4 font-medium text-slate-900 dark:text-slate-100">
                         {tx.driverName}
