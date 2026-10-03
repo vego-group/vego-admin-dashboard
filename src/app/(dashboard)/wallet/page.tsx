@@ -392,7 +392,7 @@ export default function WalletPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard
           label={t('wallet.totalTopUps')}
-          value={stats ? formatMoney(stats.totalTopUps, locale) : '—'}
+          value={stats?.totalTopUps != null ? formatMoney(stats.totalTopUps, locale) : '—'}
           iconBg="bg-gradient-to-br from-emerald-400 to-emerald-600"
           Icon={TrendingUp}
           trend={stats?.topUpTrend}
@@ -400,7 +400,7 @@ export default function WalletPage() {
         />
         <StatCard
           label={t('wallet.totalSpent')}
-          value={stats ? formatMoney(stats.totalSpent, locale) : '—'}
+          value={stats?.totalSpent != null ? formatMoney(stats.totalSpent, locale) : '—'}
           iconBg="bg-gradient-to-br from-rose-400 to-rose-600"
           Icon={ShoppingCart}
           subtitle={stats ? t('wallet.ofBudget', { percent: stats.budgetUsedPercent }) : undefined}
@@ -408,7 +408,7 @@ export default function WalletPage() {
         />
         <StatCard
           label={t('wallet.avgPerDriver')}
-          value={stats ? formatMoney(stats.avgPerDriver, locale) : '—'}
+          value={stats?.avgPerDriver != null ? formatMoney(stats.avgPerDriver, locale) : '—'}
           iconBg="bg-gradient-to-br from-indigo-500 to-violet-600"
           Icon={Users2}
           subtitle={stats ? t('wallet.acrossDrivers', { count: stats.activeDriversCount }) : undefined}

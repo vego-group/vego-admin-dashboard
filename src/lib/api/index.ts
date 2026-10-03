@@ -2252,12 +2252,44 @@ export function apiTransactionType(
   }
 }
 
+/**
+ * A stats amount in any shape the backend has used: a bare number, a decimal
+ * string ("120.500"), or the currency-aware block that "every money field ships
+ * as" (dashboard-country-currency-answers-updated §12). `null` is how a total
+ * that can't be summed comes back.
+ */
+type ApiStatsAmount = number | string | ApiMoneyFields | null;
+
+/**
+ * A stats amount as a number, or **null** when it is absent or in a shape we
+ * can't read.
+ *
+ * These used to go to the page untouched. A money object then reached
+ * `formatMoney` as "[object Object]" and rendered as 0 with no error, which
+ * reads as "this fleet spent nothing". An unreadable amount now renders "—".
+ */
+function statsAmount(value: ApiStatsAmount | undefined): number | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? moneyToNumber(readMoney({ amount: value })) : null;
+  }
+  if (typeof value === 'string') {
+    return /^[+-]?\d+(?:\.\d+)?$/.test(value.trim()) ? moneyToNumber(readMoney({ amount: value.trim() })) : null;
+  }
+  if (typeof value === 'object' && !Array.isArray(value)
+      && (value.amount != null || value.balance != null || value.minor_units != null)) {
+    return moneyToNumber(readMoney(value));
+  }
+  logger.warn('[Wallet] Unreadable stats amount — showing "—":', value);
+  return null;
+}
+
 interface ApiWalletStats {
-  current_month_top_ups?: number;
-  total_top_ups?: number;
-  current_month_spent?: number;
-  total_spent?: number;
-  avg_per_driver?: number;
+  current_month_top_ups?: ApiStatsAmount;
+  total_top_ups?: ApiStatsAmount;
+  current_month_spent?: ApiStatsAmount;
+  total_spent?: ApiStatsAmount;
+  avg_per_driver?: ApiStatsAmount;
   top_up_trend_pct?: number;
   top_up_trend?: number;
   budget_used_pct?: number;
@@ -2364,9 +2396,9 @@ export const walletApi = {
       ? raw.data
       : raw;
     return {
-      totalTopUps:        s.current_month_top_ups ?? s.total_top_ups ?? 0,
-      totalSpent:         s.current_month_spent   ?? s.total_spent   ?? 0,
-      avgPerDriver:       s.avg_per_driver ?? 0,
+      totalTopUps:        statsAmount(s.current_month_top_ups ?? s.total_top_ups),
+      totalSpent:         statsAmount(s.current_month_spent   ?? s.total_spent),
+      avgPerDriver:       statsAmount(s.avg_per_driver),
       topUpTrend:         s.top_up_trend_pct ?? s.top_up_trend ?? 0,
       budgetUsedPercent:  s.budget_used_pct ?? s.budget_used_percent ?? 0,
       activeDriversCount: s.active_drivers_count ?? 0,

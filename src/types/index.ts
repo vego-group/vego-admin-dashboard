@@ -541,9 +541,10 @@ export interface WalletTransaction {
 }
 
 export interface WalletStats {
-  totalTopUps: number;
-  totalSpent: number;
-  avgPerDriver: number;
+  /** Money totals: **null** when the backend sent none or a shape we can't read — render "—", never 0. */
+  totalTopUps: number | null;
+  totalSpent: number | null;
+  avgPerDriver: number | null;
   topUpTrend: number;   // %
   budgetUsedPercent: number;
   activeDriversCount: number;
