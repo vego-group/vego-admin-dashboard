@@ -562,6 +562,57 @@ export interface SavedCard {
   name?: string;       // name on card, if captured
   expMonth?: number;   // 1-12
   expYear?: number;    // 4-digit year
+  /**
+   * The gateway holding the token. Moyasar cards arrive without one; HyperPay
+   * (Jordan) cards say `'hyperpay'`. A HyperPay card is never charged
+   * server-side: the admin pays with it inside the widget and enters the CVV.
+   */
+  gateway?: string;
+}
+
+/** The payment gateway `initiate` routed a top-up to. */
+export type TopUpGateway = 'moyasar' | 'hyperpay';
+
+/**
+ * A HyperPay COPYandPAY checkout from `POST /fleet-admin/wallet/top-up/initiate`
+ * (Jordanian drivers).
+ *
+ * Everything the payment page needs, and nothing secret: the widget script URL
+ * (test or live host, chosen by the backend), the SRI hash it must load with,
+ * and the URL HyperPay sends the admin back to.
+ */
+export interface HyperPayCheckout {
+  gateway: 'hyperpay';
+  checkoutId: string;
+  integrity: string;
+  widgetScriptUrl: string;
+  /** Card brands for the widget's `data-brands`, e.g. ['VISA', 'MASTER']. */
+  brands: string[];
+  /** `'test'` on HyperPay's test server, which only takes whole amounts. */
+  mode: string | null;
+  /** Whether the backend can store cards right now (`save_card` is honoured). */
+  tokenizationEnabled: boolean;
+  shopperResultUrl: string;
+  /** Fixed-precision amount string, as the backend sent it ("20.000"). */
+  amount: string;
+  currency: CurrencyCode;
+  decimals: number;
+  /** ISO timestamp after which the checkout is dead, when the backend sends one. */
+  expiresAt: string | null;
+  transactionId: string | null;
+  walletTransactionUuid: string | null;
+}
+
+/** The fleet's billing address — one per fleet, required for HyperPay card payments. */
+export interface BillingAddress {
+  street: string;
+  city: string;
+  /** Governorate. */
+  state: string;
+  /** Five digits. */
+  postcode: string;
+  /** Set by the server (JO); read-only here. */
+  country?: string;
 }
 
 /**

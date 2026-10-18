@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Pagination } from '@/components/ui/Pagination';
+import { PaymentSettings } from '@/components/wallet/PaymentSettings';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import { useFleetContext } from '@/hooks/useFleetContext';
@@ -649,6 +650,9 @@ export default function WalletPage() {
           </div>
         )}
       </Card>
+
+      {/* ── Payment settings: billing address (Jordan) + saved cards ── */}
+      <PaymentSettings />
 
     </DashboardShell>
   );
