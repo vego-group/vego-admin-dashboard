@@ -1,17 +1,29 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Wallet, CreditCard, Shield, ChevronLeft, Plus, Trash2, Check, Loader2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Wallet, CreditCard, Shield, ChevronLeft, Plus, Loader2, MapPin } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
+import { BillingAddressForm } from '@/components/wallet/BillingAddressForm';
+import { SavedCardsList, brandLabel } from '@/components/wallet/SavedCardsList';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import { formatCurrency } from '@/lib/format';
+import {
+  hyperPayAmountIssue,
+  readHyperPayHints,
+  rememberHyperPayHints,
+  storeHyperPayCheckout,
+  type HyperPayHints,
+} from '@/lib/hyperpay';
 import { logger } from '@/lib/logger';
 import { amountStep, fractionDigitsOf, toMinorUnits } from '@/lib/money';
 import { useFleetContext } from '@/hooks/useFleetContext';
-import { topUpBelowMinimumFrom, walletApi } from '@/lib/api';
-import type { Driver, MinTopUpReason, Money, SavedCard, ServicePrice, TopUpOptions } from '@/types';
+import { hyperPayRefusalFrom, topUpBelowMinimumFrom, walletApi, type MoyasarPaymentData } from '@/lib/api';
+import type {
+  Driver, HyperPayCheckout, MinTopUpReason, Money, SavedCard, ServicePrice, TopUpOptions,
+} from '@/types';
 
 interface TopUpModalProps {
   open: boolean;
@@ -20,7 +32,7 @@ interface TopUpModalProps {
   onSuccess?: (updatedDriver: Driver) => void;
 }
 
-type Step = 'amount' | 'card';
+type Step = 'amount' | 'card' | 'billing';
 type CardMode = 'list' | 'new';
 
 function balanceColor(bal: number): string {
@@ -29,16 +41,7 @@ function balanceColor(bal: number): string {
   return 'text-rose-600 dark:text-rose-400';
 }
 
-function brandLabel(brand: string): string {
-  const b = brand.toLowerCase();
-  if (b.includes('visa')) return 'VISA';
-  if (b.includes('master')) return 'Mastercard';
-  if (b.includes('mada')) return 'mada';
-  if (b.includes('amex') || b.includes('american')) return 'Amex';
-  return brand.charAt(0).toUpperCase() + brand.slice(1);
-}
-
-type PaymentData = Awaited<ReturnType<typeof walletApi.initiateTopUp>>['paymentData'];
+type PaymentData = MoyasarPaymentData;
 
 /**
  * The payment gateway to name in the security footnote, or **null** to name none.
@@ -59,7 +62,8 @@ function gatewayNameFor(isoCountryCode: string | null): string | null {
 
 export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const { t, locale } = useI18n();
-  const { formatMoney, currency, currencyDecimals, currencyStatus, isoCountryCode } = useFleetContext();
+  const { fleet, formatMoney, currency, currencyDecimals, currencyStatus, isoCountryCode } = useFleetContext();
+  const router = useRouter();
 
   const [step, setStep]               = useState<Step>('amount');
 
@@ -68,6 +72,16 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const [amountError, setAmountError] = useState('');
   const [initiating, setInitiating]   = useState(false);
   const [apiError, setApiError]       = useState('');
+
+  // HyperPay (Jordan). `initiate` is the authority on the gateway; the fleet's
+  // country only shapes this form before it answers — the saved-cards list is
+  // hidden, the amount is held to HyperPay's two decimals, and the "Save this
+  // card" choice is offered once a previous checkout said tokenization is on.
+  const [hints, setHints]             = useState<HyperPayHints | null>(null);
+  const [saveCard, setSaveCard]       = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
+  const expectHyperPay = isoCountryCode === 'JO';
+  const fleetId = fleet?.id ?? null;
 
   // Card step — data returned by initiateTopUp (only for the "new card" form)
   const [paymentData, setPaymentData] = useState<PaymentData | null>(null);
@@ -143,6 +157,8 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     setCardMode('new');
     setSelectedCardId(null);
     setCharging(false);
+    setSaveCard(false);
+    setRedirecting(false);
 
     void loadWallet(driver.id, driver.walletBalance ?? 0);
 
@@ -156,6 +172,12 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
       .catch(() => setSavedCards([]))
       .finally(() => setCardsLoading(false));
   }, [open, driver, loadWallet]);
+
+  // Kept apart from the reset above: the fleet profile can resolve while the
+  // modal is open, and that must not wipe what the admin has typed.
+  useEffect(() => {
+    if (open) setHints(readHyperPayHints(fleetId));
+  }, [open, fleetId]);
 
   // Initialize Moyasar form once we're on the "new card" view and paymentData is ready
   useEffect(() => {
@@ -262,6 +284,14 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     return service.label ?? service.key;
   };
 
+  // Jordan pays through HyperPay, so its saved cards are never charged from this
+  // form (the widget offers them, and the admin enters the CVV). Only cards that
+  // `charge-saved` can take are listed — on a Saudi fleet, all of them.
+  const chargeableCards = expectHyperPay ? [] : savedCards.filter((c) => c.gateway !== 'hyperpay');
+
+  const hyperPayAmountMessage = (code: 'amount_precision' | 'amount_whole_only_in_test'): string =>
+    code === 'amount_precision' ? t('wallet.hyperpayAmountPrecision') : t('wallet.hyperpayWholeOnlyInTest');
+
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   const validateAmount = (): boolean => {
@@ -270,6 +300,11 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     if (!trimmed || !wellFormed)  { setAmountError(t('drivers.topUpAmountRequired')); return false; }
     if (amountMinorUnits <= 0)    { setAmountError(t('drivers.topUpAmountInvalid'));  return false; }
     if (belowMinimum && minTopUp) { setAmountError(minimumMessage(minTopUp, minReason)); return false; }
+    if (expectHyperPay) {
+      // The whole-amounts rule is only known once a checkout has said `mode: "test"`.
+      const issue = hyperPayAmountIssue(trimmed, hints?.mode);
+      if (issue) { setAmountError(hyperPayAmountMessage(issue)); return false; }
+    }
     return true;
   };
 
@@ -299,18 +334,81 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     return true;
   };
 
-  /** Provision a pending transaction + Moyasar config for entering a brand-new card. */
+  /**
+   * HyperPay's refusals: no billing address yet (collect it, then retry), or an
+   * amount HyperPay cannot take (back on the field, in the backend's own words
+   * when it sent some). Returns false for anything else.
+   */
+  const handledAsHyperPayRefusal = (err: unknown): boolean => {
+    const refusal = hyperPayRefusalFrom(err);
+    if (!refusal) return false;
+
+    if (refusal.code === 'billing_address_required') {
+      setApiError('');
+      setPaymentData(null);
+      setStep('billing');
+      return true;
+    }
+    if (refusal.code === 'amount_precision' || refusal.code === 'amount_whole_only_in_test') {
+      setAmountError(refusal.message ?? hyperPayAmountMessage(refusal.code));
+      setApiError('');
+      setPaymentData(null);
+      setStep('amount');
+      return true;
+    }
+    return false;
+  };
+
+  /**
+   * Hand a HyperPay checkout to its own page. COPYandPAY redirects the whole
+   * page for 3-D Secure and is not built for React re-mounts, so it is never
+   * mounted inside this modal.
+   */
+  const openHyperPayCheckout = (checkout: HyperPayCheckout) => {
+    rememberHyperPayHints(fleetId, checkout);
+    storeHyperPayCheckout({
+      ...checkout,
+      driverName: driver.name || null,
+      returnTo:   window.location.pathname,
+    });
+    setRedirecting(true);
+    router.push(`/wallet/top-up/pay?checkout=${encodeURIComponent(checkout.checkoutId)}`);
+  };
+
+  /**
+   * Provision a pending transaction and the gateway's form for a brand-new card:
+   * the Moyasar config (Saudi Arabia), or a HyperPay checkout (Jordan).
+   */
   const enterNewCard = async () => {
     setApiError('');
-    setCardMode('new');
-    setStep('card');
+    // A Jordanian top-up never shows the card step: the amount step's button
+    // spins until the HyperPay page takes over.
+    if (!expectHyperPay) {
+      setCardMode('new');
+      setStep('card');
+    }
     if (paymentData) return;
     setInitiating(true);
     try {
-      const result = await walletApi.initiateTopUp({ driverId: driver.id, amount: numAmount, saveCard: true });
+      const result = await walletApi.initiateTopUp({
+        driverId: driver.id,
+        amount:   numAmount,
+        // Moyasar asks "save this card?" inside its own form, so the Saudi
+        // request always allows it. The HyperPay widget asks nothing — the
+        // admin's checkbox on this form is the consent.
+        saveCard: expectHyperPay ? saveCard : true,
+      });
+      if (result.gateway === 'hyperpay') {
+        openHyperPayCheckout(result);
+        return;
+      }
+      if (expectHyperPay) {
+        setCardMode('new');
+        setStep('card');
+      }
       setPaymentData(result.paymentData);
     } catch (err) {
-      if (!handledAsBelowMinimum(err)) {
+      if (!handledAsBelowMinimum(err) && !handledAsHyperPayRefusal(err)) {
         setApiError(err instanceof Error ? err.message : 'Failed to initialize payment. Please try again.');
       }
     } finally {
@@ -321,7 +419,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const handleProceedToCard = async () => {
     if (!validateAmount()) return;
     setApiError('');
-    if (savedCards.length > 0) {
+    if (chargeableCards.length > 0) {
       setCardMode('list');
       setStep('card');
     } else {
@@ -357,6 +455,12 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
       }
       setApiError(t('drivers.chargeFailed'));
     } catch (err) {
+      // A Jordanian fleet: its saved cards are used inside the HyperPay widget,
+      // never charged server-side. Go to the widget instead.
+      if (hyperPayRefusalFrom(err)?.code === 'use_widget_for_saved_cards') {
+        await enterNewCard();
+        return;
+      }
       if (!handledAsBelowMinimum(err)) {
         setApiError(err instanceof Error ? err.message : t('drivers.chargeFailed'));
       }
@@ -380,7 +484,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   };
 
   const headerBack = () => {
-    if (cardMode === 'new' && savedCards.length > 0) { setApiError(''); setCardMode('list'); }
+    if (cardMode === 'new' && chargeableCards.length > 0) { setApiError(''); setCardMode('list'); }
     else setStep('amount');
   };
 
@@ -456,7 +560,11 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                   value={amount}
                   onChange={(e) => { setAmount(e.target.value); if (amountError) setAmountError(''); if (apiError) setApiError(''); }}
                   min="0"
-                  step={knownDecimals != null ? amountStep(knownDecimals) : 'any'}
+                  step={
+                    // HyperPay takes two decimals, and whole amounts on its test server.
+                    expectHyperPay ? (hints?.mode === 'test' ? 1 : 0.01)
+                      : knownDecimals != null ? amountStep(knownDecimals) : 'any'
+                  }
                   className={cn(
                     'h-11 w-full appearance-none rounded-xl border bg-white pe-3.5 text-sm text-slate-700 transition-colors',
                     'focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20',
@@ -533,12 +641,32 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
             ) : null}
 
             {/* Saved-cards hint */}
-            {savedCards.length > 0 && (
+            {chargeableCards.length > 0 && (
               <p className="text-[11px] text-slate-400">
-                {savedCards.length === 1
-                  ? brandLabel(savedCards[0].brand) + ' •••• ' + savedCards[0].last4
-                  : `${savedCards.length} ${t('drivers.savedCards')}`}
+                {chargeableCards.length === 1
+                  ? brandLabel(chargeableCards[0].brand) + ' •••• ' + chargeableCards[0].last4
+                  : `${chargeableCards.length} ${t('drivers.savedCards')}`}
               </p>
+            )}
+
+            {/* "Save this card" — HyperPay only, and only once a checkout has
+                said the backend can store cards. The card itself is entered,
+                and later reused with its CVV, inside the HyperPay widget. */}
+            {expectHyperPay && hints?.tokenizationEnabled && (
+              <label className="flex cursor-pointer items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  checked={saveCard}
+                  onChange={(e) => setSaveCard(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 accent-brand-600 dark:border-slate-600"
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-slate-700 dark:text-slate-200">
+                    {t('wallet.saveCardForLater')}
+                  </span>
+                  <span className="block text-[11px] text-slate-400">{t('wallet.saveCardForLaterHint')}</span>
+                </span>
+              </label>
             )}
 
             {/* API error */}
@@ -595,11 +723,11 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
               <Button
                 type="button"
                 variant="primary"
-                isLoading={initiating}
+                isLoading={initiating || redirecting}
                 disabled={belowMinimum}
                 onClick={handleProceedToCard}
                 className="min-w-[160px]"
-                leftIcon={!initiating ? <CreditCard className="h-4 w-4" /> : undefined}
+                leftIcon={!(initiating || redirecting) ? <CreditCard className="h-4 w-4" /> : undefined}
               >
                 {numAmount > 0 && currencyStatus !== 'pending'
                   ? t('drivers.payAmount', { amount: formatMoney(numAmount, locale) })
@@ -648,57 +776,12 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                 </div>
               ) : (
                 <div className="space-y-2.5">
-                  {savedCards.map((card) => {
-                    const selected = selectedCardId === card.id;
-                    return (
-                      <div
-                        key={card.id}
-                        className={cn(
-                          'group flex items-center gap-3 rounded-xl border p-3 transition-colors cursor-pointer',
-                          selected
-                            ? 'border-indigo-500 bg-indigo-50/60 dark:bg-indigo-500/10'
-                            : 'hover:bg-slate-50 dark:hover:bg-slate-800/40',
-                        )}
-                        style={!selected ? { borderColor: 'rgb(var(--border))' } : undefined}
-                        onClick={() => setSelectedCardId(card.id)}
-                      >
-                        <div className="flex h-9 w-12 shrink-0 items-center justify-center rounded-md bg-slate-100 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                          {brandLabel(card.brand)}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-                            •••• {card.last4}
-                          </p>
-                          {(card.expMonth && card.expYear) ? (
-                            <p className="text-[11px] text-slate-400">
-                              {t('drivers.expiresShort', {
-                                month: String(card.expMonth).padStart(2, '0'),
-                                year:  String(card.expYear).slice(-2),
-                              })}
-                            </p>
-                          ) : card.name ? (
-                            <p className="truncate text-[11px] text-slate-400">{card.name}</p>
-                          ) : null}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); handleRemoveCard(card.id); }}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 opacity-0 transition-opacity hover:bg-rose-50 hover:text-rose-500 group-hover:opacity-100 dark:hover:bg-rose-500/10"
-                          aria-label={t('drivers.removeCard')}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                        <span
-                          className={cn(
-                            'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors',
-                            selected ? 'border-indigo-500 bg-indigo-500 text-white' : 'border-slate-300 dark:border-slate-600',
-                          )}
-                        >
-                          {selected && <Check className="h-3 w-3" />}
-                        </span>
-                      </div>
-                    );
-                  })}
+                  <SavedCardsList
+                    cards={chargeableCards}
+                    selectedId={selectedCardId}
+                    onSelect={setSelectedCardId}
+                    onRemove={handleRemoveCard}
+                  />
 
                   {/* Add new card */}
                   <button
@@ -762,6 +845,49 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
               </div>
             </div>
           )}
+        </>
+      )}
+
+      {/* ── Billing address (HyperPay: `422 billing_address_required`) ──────── */}
+      {step === 'billing' && (
+        <>
+          <div
+            className="flex items-center gap-3 border-b px-6 pb-4 pt-5"
+            style={{ borderColor: 'rgb(var(--border))' }}
+          >
+            <button
+              type="button"
+              onClick={() => setStep('amount')}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 transition-colors dark:hover:bg-slate-800"
+              aria-label={t('common.back')}
+            >
+              <ChevronLeft className="h-5 w-5 rtl:rotate-180" />
+            </button>
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-sm">
+              <MapPin className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-50">
+                {t('wallet.billingRequiredTitle')}
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {t('wallet.billingRequiredBody')}
+              </p>
+            </div>
+          </div>
+
+          <div className="px-6 py-5">
+            <BillingAddressForm
+              submitLabel={t('wallet.billingSaveAndContinue')}
+              onCancel={() => setStep('amount')}
+              cancelLabel={t('common.back')}
+              onSaved={() => {
+                // Saved — retry the same top-up straight away.
+                setStep('amount');
+                void enterNewCard();
+              }}
+            />
+          </div>
         </>
       )}
     </Modal>

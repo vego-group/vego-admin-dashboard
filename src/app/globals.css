@@ -172,3 +172,26 @@
     border-top-color: rgb(var(--card));
   }
 }
+
+/* ── HyperPay COPYandPAY widget (/wallet/top-up/pay) ──────────────────────
+   The widget brings its own stylesheet ("card" style), so these only fit it
+   to the page: full width, the app's primary button colour, and right-aligned
+   labels in Arabic (the widget has no RTL layout of its own). The card number
+   and CVV live in HyperPay's iframes and keep their own styling. */
+.hyperpay-widget .wpwl-form {
+  max-width: 100%;
+  margin: 0;
+}
+.hyperpay-widget .wpwl-button-pay {
+  border-radius: 0.75rem;
+  border-color: #1e1b4b;          /* brand-950, as Button "primary" */
+  background-color: #1e1b4b;
+}
+.dark .hyperpay-widget .wpwl-button-pay {
+  border-color: #4f46e5;          /* brand-600 */
+  background-color: #4f46e5;
+}
+html[dir='rtl'] .hyperpay-widget .wpwl-label,
+html[dir='rtl'] .hyperpay-widget .wpwl-group {
+  text-align: right;
+}

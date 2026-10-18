@@ -1,3 +1,12 @@
+/**
+ * HyperPay COPYandPAY (Jordan card top-ups). The widget script URL itself
+ * always comes from the backend (`widget_script_url`); these are only the hosts
+ * the browser may load the widget, its frames and its styles from, and post its
+ * card form to. eu-test is HyperPay's test server; eu-prod is the production
+ * host their docs give — confirm it against the host HyperPay issues at go-live.
+ */
+const HYPERPAY_HOSTS = ['https://eu-test.oppwa.com', 'https://eu-prod.oppwa.com'].join(' ');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -20,15 +29,16 @@ const nextConfig = {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.moyasar.com",
-              "style-src 'self' 'unsafe-inline' https://cdn.moyasar.com https://basemaps.cartocdn.com",
-              "img-src 'self' data: blob: https://mobility-live.com https://*.basemaps.cartocdn.com https://cdn.moyasar.com",
-              "font-src 'self' data: https://cdn.moyasar.com",
-              "connect-src 'self' https://mobility-live.com https://api.moyasar.com https://*.basemaps.cartocdn.com",
-              "frame-src 'self' https://cdn.moyasar.com",
+              `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.moyasar.com ${HYPERPAY_HOSTS}`,
+              `style-src 'self' 'unsafe-inline' https://cdn.moyasar.com https://basemaps.cartocdn.com ${HYPERPAY_HOSTS}`,
+              `img-src 'self' data: blob: https://mobility-live.com https://*.basemaps.cartocdn.com https://cdn.moyasar.com ${HYPERPAY_HOSTS}`,
+              `font-src 'self' data: https://cdn.moyasar.com ${HYPERPAY_HOSTS}`,
+              `connect-src 'self' https://mobility-live.com https://api.moyasar.com https://*.basemaps.cartocdn.com ${HYPERPAY_HOSTS}`,
+              `frame-src 'self' https://cdn.moyasar.com ${HYPERPAY_HOSTS}`,
               "object-src 'none'",
               "base-uri 'self'",
-              "form-action 'self'",
+              // The COPYandPAY card form posts to HyperPay's host.
+              `form-action 'self' ${HYPERPAY_HOSTS}`,
             ].join('; '),
           },
         ],

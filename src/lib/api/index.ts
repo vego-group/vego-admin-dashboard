@@ -43,6 +43,8 @@ import type {
   AlarmSeverity,
   AlarmStatus,
   BatteryStation,
+  BillingAddress,
+  HyperPayCheckout,
   CancelledSessions,
   CostBreakdown,
   Country,
@@ -2388,6 +2390,232 @@ export function topUpBelowMinimumFrom(
   };
 }
 
+// ── HyperPay (Jordan) ────────────────────────────────────────────────────────
+
+/** What `initiateTopUp` hands the Moyasar form (Saudi Arabia). */
+export interface MoyasarPaymentData {
+  amount:         number;              // already in halalas
+  currency:       string;
+  description:    string;
+  publishableKey: string;
+  callbackUrl:    string;
+  metadata:       Record<string, string>;
+}
+
+/**
+ * The two answers `initiate` can give. The backend picks the gateway from the
+ * driver's wallet country; the client never chooses it.
+ */
+export type InitiatedTopUp =
+  | { gateway: 'moyasar'; walletTransactionUuid: string; paymentData: MoyasarPaymentData }
+  | HyperPayCheckout;
+
+/** `initiate` for a Jordanian driver, as the backend serialises it. */
+interface ApiHyperPayCheckout {
+  gateway?:                 string | null;
+  transaction_id?:          number | string | null;
+  wallet_transaction_uuid?: string | null;
+  checkout_id?:             string | number | null;
+  integrity?:               string | null;
+  widget_script_url?:       string | null;
+  brands?:                  unknown;
+  mode?:                    string | null;
+  tokenization_enabled?:    boolean | null;
+  shopper_result_url?:      string | null;
+  amount?:                  ApiMoneyFields | string | number | null;
+  currency?:                string | null;
+  decimals?:                number | null;
+  expires_at?:              string | null;
+}
+
+/**
+ * The URL if it is an absolute https URL, else ''. `allowLocalHttp` also lets
+ * `http://localhost` through — for the return URL of a local backend, never for
+ * the widget script.
+ */
+function httpsUrl(raw: unknown, allowLocalHttp = false): string {
+  if (typeof raw !== 'string' || !raw.trim()) return '';
+  try {
+    const url = new URL(raw.trim());
+    if (url.protocol === 'https:') return url.toString();
+    const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+    return allowLocalHttp && local && url.protocol === 'http:' ? url.toString() : '';
+  } catch {
+    return '';
+  }
+}
+
+/** Brand codes for `data-brands`. Anything that isn't a bare code is dropped. */
+function readBrands(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw : typeof raw === 'string' ? raw.split(/[\s,]+/) : [];
+  const brands = list
+    .filter((b): b is string => typeof b === 'string')
+    .map((b) => b.trim().toUpperCase())
+    .filter((b) => /^[A-Z0-9_]+$/.test(b));
+  // The two brands HyperPay enabled on our entity.
+  return brands.length > 0 ? brands : ['VISA', 'MASTER'];
+}
+
+function mapHyperPayCheckout(raw: ApiHyperPayCheckout): HyperPayCheckout {
+  const checkoutId      = raw.checkout_id != null ? String(raw.checkout_id).trim() : '';
+  const integrity       = typeof raw.integrity === 'string' ? raw.integrity.trim() : '';
+  const widgetScriptUrl = httpsUrl(raw.widget_script_url);
+
+  const amountObject = raw.amount !== null && typeof raw.amount === 'object' ? raw.amount : null;
+  const currency     = raw.currency ?? amountObject?.currency ?? null;
+  const decimals     = typeof raw.decimals === 'number' ? raw.decimals : amountObject?.decimals ?? null;
+  const money        = raw.amount != null ? readEnvelopeMoney(raw.amount, currency, decimals) : null;
+
+  // Without any one of these the widget either cannot load or would charge an
+  // amount we cannot state, so no payment starts.
+  const missing = [
+    !checkoutId      && 'checkout_id',
+    !integrity       && 'integrity',
+    !widgetScriptUrl && 'widget_script_url (https)',
+    !money           && 'amount',
+    !currency        && 'currency',
+  ].filter(Boolean);
+  if (missing.length > 0 || !money || !currency) {
+    throw new Error(
+      `The HyperPay checkout is missing ${missing.join(', ')}. Refusing to start a payment without it.`,
+    );
+  }
+
+  let shopperResultUrl = httpsUrl(raw.shopper_result_url, true);
+  if (!shopperResultUrl && typeof window !== 'undefined') {
+    // The same fallback the Moyasar form uses for an empty `callback_url`.
+    shopperResultUrl = `${window.location.origin}/payment-callback?gateway=hyperpay`;
+    logger.warn('[walletApi] initiate sent no usable shopper_result_url; returning to this origin instead.');
+  }
+
+  return {
+    gateway: 'hyperpay',
+    checkoutId,
+    integrity,
+    widgetScriptUrl,
+    brands:              readBrands(raw.brands),
+    mode:                typeof raw.mode === 'string' ? raw.mode.toLowerCase() : null,
+    tokenizationEnabled: raw.tokenization_enabled === true,
+    shopperResultUrl,
+    amount:              money.amount,
+    currency,
+    decimals:            decimals ?? money.decimals,
+    expiresAt:           typeof raw.expires_at === 'string' && raw.expires_at ? raw.expires_at : null,
+    transactionId:       raw.transaction_id != null ? String(raw.transaction_id) : null,
+    walletTransactionUuid: raw.wallet_transaction_uuid ?? null,
+  };
+}
+
+/** The refusals HyperPay top-ups can come back with, beyond the minimum. */
+export type HyperPayRefusalCode =
+  | 'billing_address_required'
+  | 'amount_precision'
+  | 'amount_whole_only_in_test'
+  | 'use_widget_for_saved_cards';
+
+const HYPERPAY_REFUSAL_CODES: ReadonlySet<string> = new Set<HyperPayRefusalCode>([
+  'billing_address_required',
+  'amount_precision',
+  'amount_whole_only_in_test',
+  'use_widget_for_saved_cards',
+]);
+
+/**
+ * A HyperPay refusal (`422`/`409` with `error_code`), or **null** for anything
+ * else — including every Saudi error, which keeps the old
+ * `400 { success: false, message }` shape and is handled as before.
+ *
+ * `message` is the backend's own sentence, or null when it sent none (the
+ * client's placeholder "HTTP 422" is not worth showing).
+ */
+export function hyperPayRefusalFrom(
+  err: unknown,
+): { code: HyperPayRefusalCode; message: string | null } | null {
+  if (!(err instanceof ApiError) || !err.code || !HYPERPAY_REFUSAL_CODES.has(err.code)) return null;
+  const message = err.message && !/^HTTP \d{3}$/.test(err.message) ? err.message : null;
+  return { code: err.code as HyperPayRefusalCode, message };
+}
+
+/** `verify` for a HyperPay checkout. Every field past `status` is optional. */
+export interface HyperPayVerifyResult {
+  /** Lower-cased: 'completed' | 'pending' | 'failed', or whatever else the backend sends. */
+  status:            string;
+  /** Fixed-precision strings, as sent. */
+  amount:            string | null;
+  balance:           string | null;
+  currency:          string | null;
+  decimals:          number | null;
+  gatewayStatus:     string | null;
+  resultCode:        string | null;
+  resultDescription: string | null;
+  cardBrand:         string | null;
+  cardLast4:         string | null;
+}
+
+function optionalString(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+/** An amount that may be a bare string/number or a money object, as a fixed-precision string. */
+function amountString(
+  value: ApiMoneyFields | string | number | null | undefined,
+  currency: string | null,
+  decimals: number | null,
+): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'object') return readEnvelopeMoney(value, currency, decimals).amount;
+  return String(value).trim() || null;
+}
+
+// ── Billing address (one per fleet, HyperPay only) ───────────────────────────
+
+/** The request fields the billing form has, as the backend may name them in `errors`. */
+export type BillingAddressField = 'street' | 'city' | 'state' | 'postcode';
+
+const BILLING_FIELD_BY_KEY: Record<string, BillingAddressField> = {
+  street: 'street', street1: 'street', 'billing.street1': 'street',
+  city: 'city', 'billing.city': 'city',
+  state: 'state', governorate: 'state', 'billing.state': 'state',
+  postcode: 'postcode', 'billing.postcode': 'postcode',
+};
+
+/** Laravel's per-field messages for a rejected billing address, or null. */
+export function billingAddressErrorsFrom(err: unknown): Partial<Record<BillingAddressField, string>> | null {
+  if (!(err instanceof ApiError) || err.status !== 422 || !err.errors) return null;
+  const out: Partial<Record<BillingAddressField, string>> = {};
+  for (const [key, messages] of Object.entries(err.errors)) {
+    const field = BILLING_FIELD_BY_KEY[key];
+    if (field && messages?.length) out[field] = messages[0];
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+function mapBillingAddress(raw: unknown): BillingAddress | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const text = (v: unknown) => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '');
+  const address: BillingAddress = {
+    street:   text(r.street ?? r.street1),
+    city:     text(r.city),
+    state:    text(r.state ?? r.governorate),
+    postcode: text(r.postcode),
+    country:  text(r.country) || undefined,
+  };
+  // An all-empty record is "no address yet", not an address.
+  return address.street || address.city || address.state || address.postcode ? address : null;
+}
+
+/** The address out of `{ data: {...} }`, `{ data: { billing_address } }`, `{ data: null }` or a bare object. */
+function unwrapBillingAddress(raw: unknown): BillingAddress | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const body  = raw as Record<string, unknown>;
+  const inner = 'data' in body ? body.data : body;
+  if (!inner || typeof inner !== 'object') return null;
+  const nested = (inner as Record<string, unknown>).billing_address;
+  return mapBillingAddress(nested !== undefined ? nested : inner);
+}
+
 export const walletApi = {
   async getStats(): Promise<WalletStats> {
     const raw = await apiClient.get<{ data?: ApiWalletStats } & ApiWalletStats>('/fleet-admin/wallet/stats');
@@ -2504,26 +2732,22 @@ export const walletApi = {
   },
 
   /**
-   * Step 1 — Call BEFORE showing the Moyasar form.
-   * Backend provisions the pending wallet transaction and returns everything
-   * Moyasar.init() needs, including the metadata object that links the payment
-   * back to the wallet transaction.  Do NOT build your own metadata.
+   * Step 1 — Call BEFORE showing any payment form.
+   *
+   * Saudi drivers (Moyasar): the backend provisions the pending wallet
+   * transaction and returns everything Moyasar.init() needs, including the
+   * metadata object that links the payment back to the wallet transaction.
+   * Do NOT build your own metadata.
+   *
+   * Jordanian drivers (HyperPay): the backend answers with a COPYandPAY
+   * checkout instead — see {@link HyperPayCheckout}. Refusals come back as
+   * `422`/`409` with an `error_code`; read them with {@link hyperPayRefusalFrom}.
    */
   async initiateTopUp(params: {
     driverId:  string;
     amount:    number;
-    saveCard?: boolean;   // ask backend/Moyasar to tokenize this card for reuse
-  }): Promise<{
-    walletTransactionUuid: string;
-    paymentData: {
-      amount:         number;              // already in halalas
-      currency:       string;
-      description:    string;
-      publishableKey: string;
-      callbackUrl:    string;
-      metadata:       Record<string, string>;
-    };
-  }> {
+    saveCard?: boolean;   // ask the backend/gateway to tokenize this card for reuse
+  }): Promise<InitiatedTopUp> {
     const res = await apiClient.post<{
       success?: boolean;
       message?: string;
@@ -2537,14 +2761,28 @@ export const walletApi = {
           callback_url?:    string | null;
           metadata?:        Record<string, string>;
         };
-      };
-    }>('/fleet-admin/wallet/top-up/initiate', {
+      } & ApiHyperPayCheckout;
+    } & ApiHyperPayCheckout>('/fleet-admin/wallet/top-up/initiate', {
       driver_id: Number(params.driverId),
       amount:    params.amount,
       save_card: params.saveCard ?? false,
     });
 
     if (res.success === false) throw new Error(res.message ?? 'Top-up initiation failed');
+
+    // The gateway may sit inside `data` or beside it. A response without one is
+    // the Saudi response as it always was.
+    const rawGateway = res.data?.gateway ?? res.gateway;
+    const gateway    = typeof rawGateway === 'string' ? rawGateway.trim().toLowerCase() : '';
+    if (gateway === 'hyperpay') {
+      return mapHyperPayCheckout(res.data?.checkout_id != null ? res.data : res);
+    }
+    if (gateway && gateway !== 'moyasar') {
+      throw new Error(
+        `Top-up initiation returned a gateway this dashboard cannot pay with ("${gateway}"). ` +
+        'Refusing to start a payment.',
+      );
+    }
 
     const d  = res.data ?? {};
     const pd = d.payment_data ?? {};
@@ -2560,6 +2798,7 @@ export const walletApi = {
     }
 
     return {
+      gateway: 'moyasar',
       walletTransactionUuid: d.wallet_transaction_uuid ?? '',
       paymentData: {
         amount:         pd.amount         ?? 0,
@@ -2590,45 +2829,135 @@ export const walletApi = {
     };
   },
 
-  // ── Saved cards (Moyasar tokens) ───────────────────────────────────────────
-  //
-  // Cards are tokenized by Moyasar and stored against the fleet account, so they
-  // can be reused to top up any driver. The raw card number never reaches us.
-  //
-  // ⚠️ Backend not yet implemented — these call the agreed contracts below.
-  // Until the routes exist, `getSavedCards` resolves to [] (so the UI degrades
-  // to "add new card") and `chargeSavedCard` surfaces the backend error.
+  /**
+   * Step 2 for HyperPay — on the callback page, once per checkout.
+   *
+   * Sends only the checkout id; the backend builds HyperPay's status URL itself
+   * and calls it at most once, so a repeat call returns the stored result.
+   */
+  async verifyHyperPayTopUp(checkoutId: string): Promise<HyperPayVerifyResult> {
+    const res = await apiClient.post<{
+      success?: boolean;
+      message?: string;
+      data?: Record<string, unknown>;
+    } & Record<string, unknown>>('/fleet-admin/wallet/top-up/verify', {
+      gateway:     'hyperpay',
+      checkout_id: checkoutId,
+    });
 
-  /** List cards the fleet account has saved. Endpoint: GET /fleet-admin/wallet/saved-cards */
-  async getSavedCards(): Promise<SavedCard[]> {
-    try {
-      const raw = await apiClient.get<unknown>('/fleet-admin/wallet/saved-cards');
-      return extractList<{
-        id?:         number | string;
-        brand?:      string;
-        company?:    string;
-        last_four?:  string;
-        last4?:      string;
-        name?:       string;
-        exp_month?:  number | string;
-        exp_year?:   number | string;
-      }>(raw).map((c) => ({
+    if (res.success === false) throw new Error(res.message ?? 'Payment verification failed');
+
+    const d = (res.data && typeof res.data === 'object' && !Array.isArray(res.data))
+      ? res.data
+      : res as Record<string, unknown>;
+    const currency = optionalString(d.currency);
+    const decimals = typeof d.decimals === 'number' ? d.decimals : null;
+
+    return {
+      status:            (optionalString(d.status) ?? 'pending').toLowerCase(),
+      amount:            amountString(d.amount as ApiMoneyFields | string | number | null, currency, decimals),
+      balance:           amountString(d.balance as ApiMoneyFields | string | number | null, currency, decimals),
+      currency,
+      decimals,
+      gatewayStatus:     optionalString(d.gateway_status),
+      resultCode:        optionalString(d.result_code),
+      resultDescription: optionalString(d.result_description),
+      cardBrand:         optionalString(d.card_brand),
+      cardLast4:         optionalString(d.card_last4),
+    };
+  },
+
+  // ── Saved cards ────────────────────────────────────────────────────────────
+  //
+  // Saudi cards are Moyasar tokens, charged server-side through `charge-saved`.
+  // Jordanian cards are HyperPay registrations, owned by the admin who saved
+  // them; they are only ever used inside the HyperPay widget (CVV re-entered),
+  // never through `charge-saved`. The raw card number never reaches us.
+
+  /**
+   * Cards this admin can see, both gateways. Throws on failure — the payment
+   * settings list needs to tell "no cards" from "could not load".
+   * Endpoint: GET /fleet-admin/wallet/saved-cards
+   */
+  async listSavedCards(): Promise<SavedCard[]> {
+    const raw = await apiClient.get<unknown>('/fleet-admin/wallet/saved-cards');
+    return extractList<{
+      id?:           number | string;
+      brand?:        string;
+      company?:      string;
+      last_four?:    string;
+      last4?:        string;
+      name?:         string;
+      exp_month?:    number | string;
+      exp_year?:     number | string;
+      expiry_month?: number | string;
+      expiry_year?:  number | string;
+      gateway?:      string;
+    }>(raw).map((c) => {
+      // Moyasar sends `last_four`/`exp_*`, HyperPay `last4`/`expiry_*`.
+      const month = c.exp_month ?? c.expiry_month;
+      const year  = c.exp_year  ?? c.expiry_year;
+      return {
         id:       String(c.id ?? ''),
         brand:    (c.brand ?? c.company ?? 'card').toLowerCase(),
         last4:    String(c.last_four ?? c.last4 ?? '••••'),
         name:     c.name,
-        expMonth: c.exp_month != null ? Number(c.exp_month) : undefined,
-        expYear:  c.exp_year  != null ? Number(c.exp_year)  : undefined,
-      })).filter((c) => c.id);
+        expMonth: month != null && month !== '' ? Number(month) : undefined,
+        expYear:  year  != null && year  !== '' ? Number(year)  : undefined,
+        gateway:  typeof c.gateway === 'string' ? c.gateway.toLowerCase() : undefined,
+      };
+    }).filter((c) => c.id);
+  },
+
+  /** {@link listSavedCards}, degrading to "no saved cards" on any failure (the top-up form). */
+  async getSavedCards(): Promise<SavedCard[]> {
+    try {
+      return await walletApi.listSavedCards();
     } catch {
-      // Backend route may not exist yet — degrade gracefully to "no saved cards".
       return [];
     }
   },
 
-  /** Forget a saved card. Endpoint: DELETE /fleet-admin/wallet/saved-cards/{id} */
+  /**
+   * Forget a saved card. For a HyperPay card the backend also revokes the
+   * registration at HyperPay. Endpoint: DELETE /fleet-admin/wallet/saved-cards/{id}
+   */
   async deleteSavedCard(cardId: string): Promise<void> {
     await apiClient.delete(`/fleet-admin/wallet/saved-cards/${cardId}`);
+  },
+
+  /**
+   * The fleet's billing address, or **null** when none is saved yet.
+   * Jordanian fleets only. Endpoint: GET /fleet-admin/billing-address
+   */
+  async getBillingAddress(): Promise<BillingAddress | null> {
+    try {
+      return unwrapBillingAddress(await apiClient.get<unknown>('/fleet-admin/billing-address'));
+    } catch (err) {
+      // "Nothing saved yet" may be answered as a 404 rather than an empty body.
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  },
+
+  /**
+   * Save the fleet's billing address. The country is set by the server.
+   * Endpoint: PUT /fleet-admin/billing-address
+   */
+  async saveBillingAddress(address: Omit<BillingAddress, 'country'>): Promise<BillingAddress> {
+    const body = {
+      street:   address.street,
+      city:     address.city,
+      state:    address.state,
+      postcode: address.postcode,
+    };
+    const res = await apiClient.put<unknown>('/fleet-admin/billing-address', body);
+    if (res && typeof res === 'object' && (res as { success?: unknown }).success === false) {
+      throw new Error((res as { message?: string }).message ?? 'Could not save the billing address.');
+    }
+    // Some endpoints answer a write with `{ success: true }` only — the address
+    // we sent is then the address on file.
+    return unwrapBillingAddress(res) ?? body;
   },
 
   /**
