@@ -574,6 +574,16 @@ export interface SavedCard {
 export type TopUpGateway = 'moyasar' | 'hyperpay';
 
 /**
+ * How a Jordanian (HyperPay) top-up pays — `card_choice` on `initiate`.
+ *
+ * - `new`   — the admin types a card; sent to HyperPay as INITIAL, and stored
+ *             after a successful payment when `save_card` is true.
+ * - `saved` — one of this admin's stored cards; sent as REPEATED. The widget
+ *             lists the stored cards and the admin enters the CVV.
+ */
+export type CardChoice = 'new' | 'saved';
+
+/**
  * A HyperPay COPYandPAY checkout from `POST /fleet-admin/wallet/top-up/initiate`
  * (Jordanian drivers).
  *
@@ -592,6 +602,8 @@ export interface HyperPayCheckout {
   mode: string | null;
   /** Whether the backend can store cards right now (`save_card` is honoured). */
   tokenizationEnabled: boolean;
+  /** What this checkout pays with, as `initiate` answered. A `saved` checkout lists the stored cards. */
+  cardChoice: CardChoice;
   shopperResultUrl: string;
   /** Fixed-precision amount string, as the backend sent it ("20.000"). */
   amount: string;

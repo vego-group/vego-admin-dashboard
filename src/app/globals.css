@@ -219,3 +219,12 @@ html[dir='rtl'] .hyperpay-widget .wpwl-label,
 html[dir='rtl'] .hyperpay-widget .wpwl-group {
   text-align: right;
 }
+/* A stored card (a "saved" checkout) is rendered in our DOM, not in an iframe.
+   Its masked number and expiry are left-to-right tokens like every other card
+   in the app: in Arabic "**0010" otherwise reads "0010**". */
+html[dir='rtl'] .hyperpay-widget .wpwl-wrapper-registration-number,
+html[dir='rtl'] .hyperpay-widget .wpwl-wrapper-registration-expiry {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: right;
+}

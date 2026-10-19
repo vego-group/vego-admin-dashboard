@@ -50,6 +50,8 @@ export function readHyperPayCheckout(checkoutId: string): StoredHyperPayCheckout
     return {
       ...parsed,
       brands:   Array.isArray(parsed.brands) ? parsed.brands : ['VISA', 'MASTER'],
+      // Only an explicit "saved" lists the stored cards; anything else is a new card.
+      cardChoice: parsed.cardChoice === 'saved' ? 'saved' : 'new',
       returnTo: typeof parsed.returnTo === 'string' && parsed.returnTo.startsWith('/') ? parsed.returnTo : '/drivers',
     } as StoredHyperPayCheckout;
   } catch {
@@ -74,18 +76,21 @@ export function isCheckoutExpired(expiresAt: string | null, now = Date.now()): b
 
 // ── What the last checkout told us about this fleet ─────────────────────────
 //
-// `tokenization_enabled` and `mode` only arrive with an `initiate` response,
-// which is too late for the amount step of that same top-up. So the last
-// answer is remembered per fleet and used from the next top-up on: the "Save
-// this card" checkbox appears from the second top-up after tokenization is
-// switched on, and the test server's whole-amounts rule is enforced on the
-// field once we have seen `mode: "test"`. The backend still decides; a stale
-// hint only costs one 422.
+// `mode` only arrives with an `initiate` response, which is too late for the
+// amount step of that same top-up. So the last answer is remembered per fleet
+// and used from the next top-up on: the test server's whole-amounts rule is
+// enforced on the field once we have seen `mode: "test"`. The backend still
+// decides; a stale hint only costs one 422.
+//
+// `tokenization_enabled` used to be remembered here too, and it decided
+// whether the "Save this card" checkbox showed. That made the checkbox depend
+// on what the *previous* checkout in this browser had said: hidden on the first
+// top-up after tokenization was switched on, shown from the second. The
+// checkbox no longer reads it (see TopUpModal); an old stored value is ignored.
 
 const HINTS_KEY = 'myvego.hyperpay.hints';
 
 export interface HyperPayHints {
-  tokenizationEnabled: boolean;
   mode: string | null;
 }
 
@@ -107,7 +112,7 @@ export function readHyperPayHints(fleetId: string | null | undefined): HyperPayH
 export function rememberHyperPayHints(fleetId: string | null | undefined, checkout: HyperPayCheckout): void {
   try {
     const all = readAllHints();
-    all[fleetId || '_'] = { tokenizationEnabled: checkout.tokenizationEnabled, mode: checkout.mode };
+    all[fleetId || '_'] = { mode: checkout.mode };
     localStorage.setItem(HINTS_KEY, JSON.stringify(all));
   } catch {
     // A hint, nothing more.
@@ -151,6 +156,10 @@ export interface WpwlOptions {
   style?: string;
   numberFormatting?: boolean;
   iframeStyles?: Record<string, Record<string, string>>;
+  /** Stored cards. Merged into the widget's defaults, so only what is set here changes. */
+  registrations?: { requireCvv?: boolean };
+  /** Removes "Show other payment methods" under the stored cards. Top-level, not under `registrations`. */
+  hideOtherPaymentButton?: boolean;
   onReady?: () => void;
   onError?: (error: WpwlError) => void;
 }

@@ -5,7 +5,7 @@ import { Bike, Clock, UserX, Ban, Search, Plus } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { DriversTable } from '@/components/drivers/DriversTable';
-import { DriverFormModal, type DriverFormValues } from '@/components/drivers/DriverFormModal';
+import { DocumentUploadError, DriverFormModal, type DriverFormValues } from '@/components/drivers/DriverFormModal';
 import { TopUpModal } from '@/components/drivers/TopUpModal';
 import { AssignMotorcycleModal } from '@/components/drivers/AssignMotorcycleModal';
 import { Card } from '@/components/ui/Card';
@@ -132,17 +132,28 @@ export default function DriversPage() {
 
   // ----- Handlers -----------------------------------------------------------
 
-  /** Upload licence/plate images if the form selected any; returns updated docs. */
+  /**
+   * Upload licence/plate images if the form selected any; returns updated docs.
+   *
+   * Runs after the driver itself is saved. A refused upload throws
+   * {@link DocumentUploadError} carrying that driver's id: the form stays open
+   * with the API's reason, and saving again retries against the same driver.
+   */
   const uploadDocsIfAny = async (driverId: string, values: DriverFormValues) => {
     if (!values.licenseFrontFile && !values.licenseBackFile && !values.plateImageFile) return null;
-    return driversApi.uploadDocuments(driverId, {
-      licenseFront:  values.licenseFrontFile,
-      licenseBack:   values.licenseBackFile,
-      licenseNumber: values.licenseNumber || undefined,
-      licenseExpiry: values.licenseExpiry || undefined,
-      plateImage:    values.plateImageFile,
-      plateNumber:   values.plateNumber || undefined,
-    });
+    try {
+      return await driversApi.uploadDocuments(driverId, {
+        licenseFront:  values.licenseFrontFile,
+        licenseBack:   values.licenseBackFile,
+        licenseNumber: values.licenseNumber || undefined,
+        licenseExpiry: values.licenseExpiry || undefined,
+        plateImage:    values.plateImageFile,
+        plateNumber:   values.plateNumber || undefined,
+      });
+    } catch (err) {
+      logger.warn('[Drivers] Document upload failed:', err);
+      throw new DocumentUploadError(driverId, err);
+    }
   };
 
   const handleAddSubmit = async (values: DriverFormValues) => {
@@ -168,11 +179,14 @@ export default function DriversPage() {
         },
       },
     });
+    // The driver exists from here on, whatever the upload does.
+    setDrivers((prev) => [created, ...prev]);
     const docs = await uploadDocsIfAny(created.id, values);
-    const withDocs = docs
-      ? { ...created, documents: { ...created.documents, license: docs.license, plate: docs.plate } }
-      : created;
-    setDrivers((prev) => [withDocs, ...prev]);
+    if (docs) {
+      setDrivers((prev) => prev.map((d) => (
+        d.id === created.id ? { ...d, documents: { ...d.documents, license: docs.license, plate: docs.plate } } : d
+      )));
+    }
     setSuccessDialog({ kind: 'added' });
   };
 
@@ -206,20 +220,27 @@ export default function DriversPage() {
     });
 
     if (updated) {
-      const docs = await uploadDocsIfAny(driverId, values);
-      setDrivers((prev) => prev.map((d) => {
-        if (d.id !== updated.id) return d;
-        return {
-          ...updated,
-          status:        d.status,
-          walletBalance: d.walletBalance,
-          trips:         d.trips,
-          totalCost:     d.totalCost,
-          charges:       d.charges,
-          swaps:         d.swaps,
-          documents:     docs ? { ...updated.documents, license: docs.license, plate: docs.plate } : updated.documents,
-        };
-      }));
+      const applyUpdate = (docs: Awaited<ReturnType<typeof uploadDocsIfAny>>) =>
+        setDrivers((prev) => prev.map((d) => {
+          if (d.id !== updated.id) return d;
+          return {
+            ...updated,
+            status:        d.status,
+            walletBalance: d.walletBalance,
+            trips:         d.trips,
+            totalCost:     d.totalCost,
+            charges:       d.charges,
+            swaps:         d.swaps,
+            documents:     docs ? { ...updated.documents, license: docs.license, plate: docs.plate } : updated.documents,
+          };
+        }));
+      try {
+        applyUpdate(await uploadDocsIfAny(driverId, values));
+      } catch (err) {
+        // The details were saved even though the documents were not.
+        applyUpdate(null);
+        throw err;
+      }
       setSuccessDialog({ kind: 'updated' });
     }
   };
@@ -454,8 +475,10 @@ export default function DriversPage() {
         open={formMode.kind !== 'closed'}
         onClose={() => setFormMode({ kind: 'closed' })}
         driver={formMode.kind === 'edit' ? formMode.driver : null}
+        // An id means the driver exists: editing, or retrying the upload for a
+        // driver this form has just created.
         onSubmit={(values, id) =>
-          formMode.kind === 'edit'
+          id
             ? handleEditSubmit(values, id)
             : handleAddSubmit(values)
         }

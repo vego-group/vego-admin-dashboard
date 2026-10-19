@@ -44,6 +44,7 @@ import type {
   AlarmStatus,
   BatteryStation,
   BillingAddress,
+  CardChoice,
   HyperPayCheckout,
   CancelledSessions,
   CostBreakdown,
@@ -1448,7 +1449,10 @@ export const driversApi = {
   /**
    * Upload a driver's licence / plate documents (multipart).
    * Endpoint: POST /fleet-admin/drivers/{id}/documents
-   * Returns the updated license + plate document state, or null on error / nothing to send.
+   * Returns the updated license + plate document state, or null when there is
+   * nothing to send. A failed upload **throws** the {@link ApiError}: the
+   * operator has to see why the files were refused (too large, wrong type),
+   * rather than a "driver saved" dialog over documents that never arrived.
    */
   async uploadDocuments(
     id: string,
@@ -1466,37 +1470,33 @@ export const driversApi = {
     fd.forEach(() => { hasAny = true; });
     if (!hasAny) return null;
 
-    try {
-      const res = await apiClient.postForm<{
-        data?: {
-          driving_license?: { status?: string; number?: string; expiry_date?: string; file_url?: string; back_file_url?: string; rejection_reason?: string | null };
-          plate?: { status?: string; number?: string; file_url?: string; rejection_reason?: string | null };
-        };
-      }>(`/fleet-admin/drivers/${id}/documents`, fd);
-
-      const lic = res.data?.driving_license;
-      const pl  = res.data?.plate;
-      const licStatus = toDocStatus(lic?.status);
-      return {
-        license: {
-          status:          licStatus,
-          hasLicense:      licStatus !== 'not_uploaded',
-          number:          lic?.number,
-          expiryDate:      lic?.expiry_date,
-          fileUrl:         lic?.file_url,
-          backFileUrl:     lic?.back_file_url,
-          rejectionReason: lic?.rejection_reason ?? undefined,
-        },
-        plate: {
-          status:          toDocStatus(pl?.status),
-          number:          pl?.number,
-          fileUrl:         pl?.file_url,
-          rejectionReason: pl?.rejection_reason ?? undefined,
-        },
+    const res = await apiClient.postForm<{
+      data?: {
+        driving_license?: { status?: string; number?: string; expiry_date?: string; file_url?: string; back_file_url?: string; rejection_reason?: string | null };
+        plate?: { status?: string; number?: string; file_url?: string; rejection_reason?: string | null };
       };
-    } catch {
-      return null;
-    }
+    }>(`/fleet-admin/drivers/${id}/documents`, fd);
+
+    const lic = res.data?.driving_license;
+    const pl  = res.data?.plate;
+    const licStatus = toDocStatus(lic?.status);
+    return {
+      license: {
+        status:          licStatus,
+        hasLicense:      licStatus !== 'not_uploaded',
+        number:          lic?.number,
+        expiryDate:      lic?.expiry_date,
+        fileUrl:         lic?.file_url,
+        backFileUrl:     lic?.back_file_url,
+        rejectionReason: lic?.rejection_reason ?? undefined,
+      },
+      plate: {
+        status:          toDocStatus(pl?.status),
+        number:          pl?.number,
+        fileUrl:         pl?.file_url,
+        rejectionReason: pl?.rejection_reason ?? undefined,
+      },
+    };
   },
 
   /**
@@ -2421,6 +2421,7 @@ interface ApiHyperPayCheckout {
   brands?:                  unknown;
   mode?:                    string | null;
   tokenization_enabled?:    boolean | null;
+  card_choice?:             string | null;
   shopper_result_url?:      string | null;
   amount?:                  ApiMoneyFields | string | number | null;
   currency?:                string | null;
@@ -2456,7 +2457,17 @@ function readBrands(raw: unknown): string[] {
   return brands.length > 0 ? brands : ['VISA', 'MASTER'];
 }
 
-function mapHyperPayCheckout(raw: ApiHyperPayCheckout): HyperPayCheckout {
+/** `card_choice` as sent, or null for anything that is not one of the two values. */
+function readCardChoice(raw: unknown): CardChoice | null {
+  const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  return value === 'new' || value === 'saved' ? value : null;
+}
+
+/**
+ * `requestedChoice` is what the modal asked for. The response's own
+ * `card_choice` is the authority; the request only stands in if it is absent.
+ */
+function mapHyperPayCheckout(raw: ApiHyperPayCheckout, requestedChoice: CardChoice = 'new'): HyperPayCheckout {
   const checkoutId      = raw.checkout_id != null ? String(raw.checkout_id).trim() : '';
   const integrity       = typeof raw.integrity === 'string' ? raw.integrity.trim() : '';
   const widgetScriptUrl = httpsUrl(raw.widget_script_url);
@@ -2496,6 +2507,7 @@ function mapHyperPayCheckout(raw: ApiHyperPayCheckout): HyperPayCheckout {
     brands:              readBrands(raw.brands),
     mode:                typeof raw.mode === 'string' ? raw.mode.toLowerCase() : null,
     tokenizationEnabled: raw.tokenization_enabled === true,
+    cardChoice:          readCardChoice(raw.card_choice) ?? requestedChoice,
     shopperResultUrl,
     amount:              money.amount,
     currency,
@@ -2506,18 +2518,25 @@ function mapHyperPayCheckout(raw: ApiHyperPayCheckout): HyperPayCheckout {
   };
 }
 
-/** The refusals HyperPay top-ups can come back with, beyond the minimum. */
+/**
+ * The refusals HyperPay top-ups can come back with, beyond the minimum.
+ *
+ * `no_saved_cards` (422): `card_choice: "saved"` with no stored card for this
+ * admin — or with tokenization switched off on the backend.
+ */
 export type HyperPayRefusalCode =
   | 'billing_address_required'
   | 'amount_precision'
   | 'amount_whole_only_in_test'
-  | 'use_widget_for_saved_cards';
+  | 'use_widget_for_saved_cards'
+  | 'no_saved_cards';
 
 const HYPERPAY_REFUSAL_CODES: ReadonlySet<string> = new Set<HyperPayRefusalCode>([
   'billing_address_required',
   'amount_precision',
   'amount_whole_only_in_test',
   'use_widget_for_saved_cards',
+  'no_saved_cards',
 ]);
 
 /**
@@ -2742,12 +2761,24 @@ export const walletApi = {
    * Jordanian drivers (HyperPay): the backend answers with a COPYandPAY
    * checkout instead — see {@link HyperPayCheckout}. Refusals come back as
    * `422`/`409` with an `error_code`; read them with {@link hyperPayRefusalFrom}.
+   *
+   * `cardChoice` is sent for Jordanian top-ups only; without it the request is
+   * the Saudi one, unchanged. `save_card` goes with every request except a
+   * `"saved"` one, where the backend ignores it.
    */
   async initiateTopUp(params: {
     driverId:  string;
     amount:    number;
     saveCard?: boolean;   // ask the backend/gateway to tokenize this card for reuse
+    cardChoice?: CardChoice;
   }): Promise<InitiatedTopUp> {
+    const body: Record<string, unknown> = {
+      driver_id: Number(params.driverId),
+      amount:    params.amount,
+    };
+    if (params.cardChoice) body.card_choice = params.cardChoice;
+    if (params.cardChoice !== 'saved') body.save_card = params.saveCard ?? false;
+
     const res = await apiClient.post<{
       success?: boolean;
       message?: string;
@@ -2762,11 +2793,7 @@ export const walletApi = {
           metadata?:        Record<string, string>;
         };
       } & ApiHyperPayCheckout;
-    } & ApiHyperPayCheckout>('/fleet-admin/wallet/top-up/initiate', {
-      driver_id: Number(params.driverId),
-      amount:    params.amount,
-      save_card: params.saveCard ?? false,
-    });
+    } & ApiHyperPayCheckout>('/fleet-admin/wallet/top-up/initiate', body);
 
     if (res.success === false) throw new Error(res.message ?? 'Top-up initiation failed');
 
@@ -2775,7 +2802,7 @@ export const walletApi = {
     const rawGateway = res.data?.gateway ?? res.gateway;
     const gateway    = typeof rawGateway === 'string' ? rawGateway.trim().toLowerCase() : '';
     if (gateway === 'hyperpay') {
-      return mapHyperPayCheckout(res.data?.checkout_id != null ? res.data : res);
+      return mapHyperPayCheckout(res.data?.checkout_id != null ? res.data : res, params.cardChoice);
     }
     if (gateway && gateway !== 'moyasar') {
       throw new Error(

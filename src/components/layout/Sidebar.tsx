@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -13,6 +13,7 @@ import {
   Map,
   Bell,
   LogOut,
+  Loader2,
   Wallet,
   Zap,
   Cpu,
@@ -54,7 +55,8 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const { t } = useI18n();
   const { tv } = useVehicleTerm();
   const router = useRouter();
-  const signOut = useAuthStore((s) => s.signOut);
+  const logout = useAuthStore((s) => s.logout);
+  const [signingOut, setSigningOut] = useState(false);
   const unreadCount        = useNotificationStore((s) => s.unreadCount);
   const fetchUnreadCount   = useNotificationStore((s) => s.fetchUnreadCount);
 
@@ -62,8 +64,11 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   // even before the user visits the Notifications page.
   useEffect(() => { void fetchUnreadCount(); }, [fetchUnreadCount]);
 
-  const handleSignOut = () => {
-    signOut();
+  // Revokes the token on the server first; signs out here whatever it answers.
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    await logout();
     router.push('/login');
   };
 
@@ -131,10 +136,14 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         <button
           type="button"
           onClick={handleSignOut}
-          className="group inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-rose-500 to-red-500 text-sm font-semibold text-white shadow-sm transition-all hover:from-rose-600 hover:to-red-600 hover:shadow-md active:scale-[0.99]"
+          disabled={signingOut}
+          aria-busy={signingOut}
+          className="group inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-rose-500 to-red-500 text-sm font-semibold text-white shadow-sm transition-all hover:from-rose-600 hover:to-red-600 hover:shadow-md active:scale-[0.99] disabled:cursor-wait disabled:opacity-70"
         >
           {t('common.signOut')}
-          <LogOut className="h-4 w-4 transition-transform group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5" />
+          {signingOut
+            ? <Loader2 className="h-4 w-4 animate-spin" />
+            : <LogOut className="h-4 w-4 transition-transform group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5" />}
         </button>
       </div>
     </aside>

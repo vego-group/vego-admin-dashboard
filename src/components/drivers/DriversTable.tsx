@@ -8,6 +8,7 @@ import { StatusPill } from '@/components/ui/StatusPill';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { cn } from '@/lib/cn';
+import { ltrIsolate } from '@/lib/format';
 import type { Driver, DocumentStatus } from '@/types';
 import { useFleetContext } from '@/hooks/useFleetContext';
 
@@ -35,11 +36,11 @@ const DOC_DOT: Record<DocumentStatus, string> = {
   rejected:     'bg-rose-500',
 };
 
-const DOC_LABEL: Record<DocumentStatus, string> = {
-  not_uploaded: 'Not Uploaded',
-  pending:      'Pending Review',
-  verified:     'Verified',
-  rejected:     'Rejected',
+const DOC_LABEL_KEY: Record<DocumentStatus, string> = {
+  not_uploaded: 'drivers.docNotUploaded',
+  pending:      'drivers.docPending',
+  verified:     'drivers.docVerified',
+  rejected:     'drivers.docRejected',
 };
 
 function DocDot({
@@ -49,9 +50,10 @@ function DocDot({
   Icon: React.ElementType;
   label: string;
 }) {
+  const { t } = useI18n();
   return (
     <span
-      title={`${label}: ${DOC_LABEL[status]}`}
+      title={`${label}: ${t(DOC_LABEL_KEY[status])}`}
       className={cn(
         'inline-flex h-6 w-6 items-center justify-center rounded-full text-white transition-transform hover:scale-110',
         DOC_DOT[status]
@@ -206,7 +208,7 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
                         <DocDot status={d.documents.plate.status}       Icon={Hash}     label={tv('drivers.licensePlate')} />
                       </div>
                       <span className="text-[10px] tabular-nums text-slate-400">
-                        {verified}/{total} verified
+                        {t('drivers.docsVerifiedCount', { count: ltrIsolate(`${verified}/${total}`) })}
                       </span>
                     </div>
                   </td>
