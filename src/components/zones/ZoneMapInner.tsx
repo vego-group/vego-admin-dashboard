@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Sparkles } from 'lucide-react';
 import { ZONE_TYPES, ZONE_TYPE_LIST } from '@/lib/zone-types';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useBasemap } from '@/hooks/useBasemap';
 import { cn } from '@/lib/cn';
 import { fitToPoints, type LatLngTuple } from '@/lib/map-fit';
 import { html, trustedHtml, type TrustedHtml } from '@/lib/html';
@@ -93,6 +94,7 @@ export default function ZoneMapInner({
   onDrawingPointAdd,
 }: ZoneMapProps) {
   const { t } = useI18n();
+  const addBasemap   = useBasemap();
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapRef        = useRef<any>(null);
@@ -139,15 +141,7 @@ export default function ZoneMapInner({
         zoomControl: true,
       });
 
-      L.tileLayer(
-        'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-        {
-          attribution:
-            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-          subdomains: 'abcd',
-          maxZoom: 20,
-        }
-      ).addTo(map);
+      addBasemap(L, map);
 
       mapRef.current = map;
       if (!cancelled) setMapReady(true);
@@ -160,7 +154,7 @@ export default function ZoneMapInner({
       hasFittedRef.current = false;
       setMapReady(false);
     };
-  }, []);
+  }, [addBasemap]);
 
   /* 2 ── Draw zone polygons + labels */
   useEffect(() => {
