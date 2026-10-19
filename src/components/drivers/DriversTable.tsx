@@ -167,18 +167,22 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
                   className="border-b transition-colors hover:bg-slate-50/60 dark:hover:bg-slate-800/40"
                   style={{ borderColor: 'rgb(var(--border))' }}
                 >
+                  {/* Ids, phones and plates are left-to-right tokens: in Arabic
+                      "+962…" would otherwise render as "…962+". */}
                   <td className="px-5 py-4 font-medium text-slate-700 dark:text-slate-200">
-                    #{d.id}
+                    <span dir="ltr">#{d.id}</span>
                   </td>
                   <td className="px-5 py-4 text-slate-900 dark:text-slate-100">{d.name}</td>
-                  <td className="px-5 py-4 text-slate-600 dark:text-slate-300">{d.phone}</td>
+                  <td className="px-5 py-4 text-slate-600 dark:text-slate-300"><span dir="ltr">{d.phone}</span></td>
                   <td className="px-5 py-4 text-slate-600 dark:text-slate-300">
                     {d.assignedMotorcyclePlate || d.assignedMotorcycleId || d.vehicleModel ? (
                       <div className="flex items-center gap-1.5">
                         <Bike className="h-3.5 w-3.5 text-slate-400" />
                         <div className="min-w-0 leading-tight">
                           <p className="truncate font-medium text-slate-700 dark:text-slate-200">
-                            {d.assignedMotorcyclePlate ?? (d.assignedMotorcycleId ? `#${d.assignedMotorcycleId}` : d.vehicleModel)}
+                            {d.assignedMotorcyclePlate != null || d.assignedMotorcycleId
+                              ? <span dir="ltr">{d.assignedMotorcyclePlate ?? `#${d.assignedMotorcycleId}`}</span>
+                              : d.vehicleModel}
                           </p>
                           {d.vehicleModel && (d.assignedMotorcyclePlate || d.assignedMotorcycleId) && (
                             <p className="truncate text-[10px] text-slate-400">{d.vehicleModel}</p>

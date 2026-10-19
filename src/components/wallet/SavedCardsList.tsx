@@ -59,7 +59,7 @@ export function SavedCardsList({ cards, onRemove, selectedId, onSelect, removing
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-                •••• {card.last4}
+                <span dir="ltr">•••• {card.last4}</span>
               </p>
               {(card.expMonth && card.expYear) ? (
                 <p className="text-[11px] text-slate-400">

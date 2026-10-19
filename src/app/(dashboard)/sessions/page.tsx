@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { BatteryCharging, Zap, Search, User, MapPin } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { Card } from '@/components/ui/Card';
+import { NoAccessState } from '@/components/ui/NoAccessState';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -12,6 +13,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Pagination } from '@/components/ui/Pagination';
 import { useI18n } from '@/i18n/I18nProvider';
 import { sessionsApi } from '@/lib/api';
+import { isForbiddenError } from '@/lib/api-errors';
 import { formatRelativeTime } from '@/lib/format';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import type { DriverSession, SessionKind, SessionStatus } from '@/types';
@@ -33,6 +35,7 @@ export default function SessionsPage() {
   const [sessions, setSessions] = useState<DriverSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
 
@@ -46,7 +49,9 @@ export default function SessionsPage() {
         if (!cancelled) { setSessions(data); setPage(1); }
       } catch (err) {
         logger.error('[Sessions] Failed to load sessions:', err);
-        if (!cancelled) setApiError(err instanceof Error ? err.message : 'Failed to load sessions');
+        if (cancelled) return;
+        if (isForbiddenError(err)) setForbidden(true);
+        else setApiError(err instanceof Error ? err.message : 'Failed to load sessions');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -64,6 +69,14 @@ export default function SessionsPage() {
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  if (forbidden) {
+    return (
+      <DashboardShell title={t('sessions.title')} subtitle={t('sessions.subtitle')}>
+        <NoAccessState />
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell title={t('sessions.title')} subtitle={t('sessions.subtitle')}>

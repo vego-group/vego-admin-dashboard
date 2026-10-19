@@ -8,6 +8,7 @@ import { VehicleCard } from '@/components/fleet/VehicleCard';
 import { FleetTable } from '@/components/fleet/FleetTable';
 import { AssignDriverModal } from '@/components/fleet/AssignDriverModal';
 import { Card } from '@/components/ui/Card';
+import { NoAccessState } from '@/components/ui/NoAccessState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -18,7 +19,9 @@ import { SuccessDialog } from '@/components/ui/SuccessDialog';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { fleetApi, driversApi } from '@/lib/api';
+import { isForbiddenError } from '@/lib/api-errors';
 import type { Driver, Vehicle, VehicleStatus } from '@/types';
+import { ltrIsolate } from '@/lib/format';
 import { logger } from '@/lib/logger';
 
 type TabValue = 'all' | VehicleStatus;
@@ -37,6 +40,7 @@ export default function FleetPage() {
   const [sort, setSort] = useState('newest');
   const [page, setPage] = useState(1);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
 
   // Driver-assignment modal + success feedback
   const [assignVehicle, setAssignVehicle] = useState<Vehicle | null>(null);
@@ -60,7 +64,8 @@ export default function FleetPage() {
         }
       } catch (err) {
         logger.error('[Fleet] Failed to load vehicles:', err);
-        setApiError(err instanceof Error ? err.message : 'Failed to load vehicles');
+        if (isForbiddenError(err)) setForbidden(true);
+        else setApiError(err instanceof Error ? err.message : 'Failed to load vehicles');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -88,7 +93,7 @@ export default function FleetPage() {
       title: t('fleet.assignSuccessTitle'),
       // `plate`, not `vehicle`: `{{vehicle}}` is the country's noun for the
       // type, bound by tv(). This names one specific machine.
-      description: tv('fleet.assignSuccessDescription', { driver: driverName, plate: motorcycleId }),
+      description: tv('fleet.assignSuccessDescription', { driver: driverName, plate: ltrIsolate(motorcycleId) }),
     });
     return true;
   };
@@ -105,7 +110,7 @@ export default function FleetPage() {
     );
     setSuccessDialog({
       title: t('fleet.unassignSuccessTitle'),
-      description: tv('fleet.unassignSuccessDescription', { plate: motorcycleId }),
+      description: tv('fleet.unassignSuccessDescription', { plate: ltrIsolate(motorcycleId) }),
     });
     return true;
   };
@@ -142,6 +147,14 @@ export default function FleetPage() {
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  if (forbidden) {
+    return (
+      <DashboardShell title={t('fleet.title')} subtitle={tv('fleet.subtitle')}>
+        <NoAccessState />
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell title={t('fleet.title')} subtitle={tv('fleet.subtitle')}>

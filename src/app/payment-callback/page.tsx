@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { brandLabel } from '@/components/wallet/SavedCardsList';
 import { walletApi, type HyperPayVerifyResult } from '@/lib/api';
 import { ApiError } from '@/lib/api/client';
+import { ltrIsolate } from '@/lib/format';
 import { clearHyperPayCheckout } from '@/lib/hyperpay';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { useI18n } from '@/i18n/I18nProvider';
@@ -210,7 +211,8 @@ export default function PaymentCallbackPage() {
             )}
             {card && (
               <p className="mt-1 text-xs text-slate-400">
-                {t('paymentCallback.paidWithCard', { brand: card.brand, last4: card.last4 })}
+                {/* One left-to-right token, so Arabic keeps "Visa •••• 0010" in card order. */}
+                {t('paymentCallback.paidWithCard', { card: ltrIsolate(`${card.brand} •••• ${card.last4}`) })}
               </p>
             )}
             {balance != null && (

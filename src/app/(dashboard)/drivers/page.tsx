@@ -16,12 +16,15 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Pagination } from '@/components/ui/Pagination';
 import { SuccessDialog } from '@/components/ui/SuccessDialog';
+import { NoAccessState } from '@/components/ui/NoAccessState';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { useCountries } from '@/hooks/useCountries';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { driversApi, fleetApi } from '@/lib/api';
+import { isForbiddenError } from '@/lib/api-errors';
 import { toE164 } from '@/lib/country';
+import { ltrIsolate } from '@/lib/format';
 import type { CancelledSessions, DialCode, Driver, DriverStatus, Vehicle } from '@/types';
 import { logger } from '@/lib/logger';
 
@@ -61,6 +64,7 @@ export default function DriversPage() {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [motorcycles, setMotorcycles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
+  const [forbidden, setForbidden] = useState(false);
 
   // Filters
   const [tab, setTab] = useState<TabValue>('all');
@@ -98,6 +102,7 @@ export default function DriversPage() {
         }
       } catch (err) {
         logger.error('[Drivers] Failed to load data:', err);
+        if (!cancelled && isForbiddenError(err)) setForbidden(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -307,7 +312,7 @@ export default function DriversPage() {
     setSuccessDialog({
       kind: 'statusChanged',
       title: tv('drivers.motorcycleAssignedTitle'),
-      description: t('drivers.motorcycleAssignedDescription', { motorcycle: plate, driver: driver?.name ?? driverId }),
+      description: t('drivers.motorcycleAssignedDescription', { motorcycle: ltrIsolate(plate), driver: driver?.name ?? driverId }),
     });
     return true;
   };
@@ -343,6 +348,14 @@ export default function DriversPage() {
     { value: 'blocked' as TabValue,  label: t('status.blocked') },
     { value: 'inactive' as TabValue, label: t('status.inactive') },
   ];
+
+  if (forbidden) {
+    return (
+      <DashboardShell title={t('drivers.title')} subtitle={t('drivers.subtitle')}>
+        <NoAccessState />
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell title={t('drivers.title')} subtitle={t('drivers.subtitle')}>

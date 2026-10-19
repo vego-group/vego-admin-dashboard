@@ -66,7 +66,7 @@ export function VehicleListPanel({ vehicles, selectedId, onSelect }: VehicleList
                     <VehicleIconTile status={v.status} size="sm" />
                     <div className="min-w-0">
                       <p className="truncate text-xs font-bold text-slate-900 dark:text-slate-50">
-                        {displayId}
+                        <span dir="ltr">{displayId}</span>
                       </p>
                       <p className="text-[10px] text-slate-500">Vego 2030</p>
                     </div>

@@ -57,6 +57,8 @@ const ar: Translations = {
     locationUnknownHint: 'لم يُبلَّغ عن أي موقع — لا يظهر على الخريطة',
     error: 'حدث خطأ ما',
     pageError: 'حدث خطأ في هذه الصفحة',
+    noAccessTitle: 'ليس لديك صلاحية لعرض هذه البيانات',
+    noAccessDescription: 'رفض الخادم هذا الطلب لحسابك. تواصل مع مسؤول ماي فيجو إذا كنت بحاجة إلى الصلاحية.',
     retry: 'إعادة المحاولة',
     today: 'اليوم',
     yesterday: 'الأمس',
@@ -671,6 +673,7 @@ const ar: Translations = {
     invalidOtp: 'رمز التحقق غير صحيح. حاول مجدداً.',
     invalidPhone: 'يرجى إدخال رقم هاتف صحيح',
     smartMobility: 'نظام إدارة التنقل الذكي',
+    noFleetAdminAccess: 'هذا الحساب ليس لديه صلاحية الدخول إلى لوحة إدارة الأسطول.',
   },
   batterySwapping: {
     title: 'تبديل البطاريات',
@@ -852,7 +855,7 @@ const ar: Translations = {
     processingTitle: 'جارٍ معالجة الدفع',
     processingBody: 'جارٍ معالجة دفعتك. سيتم تحديث رصيد المحفظة قريبًا.',
     confirmingBody: 'جارٍ تأكيد دفعتك. سيتم تحديث رصيد المحفظة قريبًا.',
-    paidWithCard: 'تم الدفع ببطاقة {{brand}} •••• {{last4}}',
+    paidWithCard: 'تم الدفع ببطاقة {{card}}',
   },
 };
 

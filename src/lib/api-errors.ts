@@ -103,3 +103,14 @@ export function fieldErrorFrom(err: unknown): FieldError | null {
 export function isFieldLevelError(err: unknown): boolean {
   return fieldErrorFrom(err) !== null;
 }
+
+/**
+ * True when the backend refused the request for this account (HTTP 403).
+ *
+ * Not an empty result and not a transient failure: the page must say the
+ * account may not see this data, rather than render an empty table that reads
+ * as "there is none".
+ */
+export function isForbiddenError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 403;
+}

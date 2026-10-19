@@ -5,6 +5,7 @@ import { Cpu, Wifi, WifiOff, SatelliteDish, Search, MapPin, Bike, Battery } from
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { Card } from '@/components/ui/Card';
+import { NoAccessState } from '@/components/ui/NoAccessState';
 import { Input } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
@@ -14,6 +15,7 @@ import { Pagination } from '@/components/ui/Pagination';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { iotDevicesApi } from '@/lib/api';
+import { isForbiddenError } from '@/lib/api-errors';
 import { formatRelativeTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import type { IoTDevice, DeviceStatus } from '@/types';
@@ -34,6 +36,7 @@ export default function IoTDevicesPage() {
   const [devices, setDevices] = useState<IoTDevice[]>([]);
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
   const [tab, setTab] = useState<TabValue>('all');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
@@ -47,7 +50,9 @@ export default function IoTDevicesPage() {
         if (!cancelled) setDevices(data);
       } catch (err) {
         logger.error('[IoTDevices] Failed to load devices:', err);
-        if (!cancelled) setApiError(err instanceof Error ? err.message : 'Failed to load devices');
+        if (cancelled) return;
+        if (isForbiddenError(err)) setForbidden(true);
+        else setApiError(err instanceof Error ? err.message : 'Failed to load devices');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -82,6 +87,14 @@ export default function IoTDevicesPage() {
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  if (forbidden) {
+    return (
+      <DashboardShell title={t('iotDevices.title')} subtitle={t('iotDevices.subtitle')}>
+        <NoAccessState />
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell title={t('iotDevices.title')} subtitle={t('iotDevices.subtitle')}>
@@ -154,14 +167,14 @@ export default function IoTDevicesPage() {
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-2 font-medium text-slate-700 dark:text-slate-200">
                             <Cpu className="h-4 w-4 text-slate-400" />
-                            {d.deviceId || '—'}
+                            <span dir="ltr">{d.deviceId || '—'}</span>
                           </div>
                         </td>
                         <td className="px-5 py-4 text-slate-600 dark:text-slate-300">
                           {d.motorcyclePlate || d.motorcycleId ? (
                             <span className="inline-flex items-center gap-1.5">
                               <Bike className="h-3.5 w-3.5 text-slate-400" />
-                              {d.motorcyclePlate ?? `#${d.motorcycleId}`}
+                              <span dir="ltr">{d.motorcyclePlate ?? `#${d.motorcycleId}`}</span>
                             </span>
                           ) : '—'}
                         </td>

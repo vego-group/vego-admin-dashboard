@@ -71,7 +71,7 @@ function vehiclePopup(v: Vehicle): string {
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px">
     <div style="display:flex;align-items:center;gap:8px">
       <div style="width:32px;height:32px;background:#eef2ff;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${bikeIconIndigo}</div>
-      <div><div style="font-size:13px;font-weight:600;color:#0f172a">${v.plateNumber}</div><div style="font-size:11px;color:#64748b">${v.model}</div></div>
+      <div><div style="font-size:13px;font-weight:600;color:#0f172a"><span dir="ltr">${v.plateNumber}</span></div><div style="font-size:11px;color:#64748b">${v.model}</div></div>
     </div>
     <span style="font-size:10px;padding:2px 8px;border-radius:999px;font-weight:600;background:${sc.bg};color:${sc.color};flex-shrink:0;white-space:nowrap">${sc.label}</span>
   </div>

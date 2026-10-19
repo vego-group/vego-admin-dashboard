@@ -231,10 +231,12 @@ function HyperPayWidget({ checkout, locale, onExpired }: HyperPayWidgetProps) {
           // HyperPay: its number formatter does not support right-to-left
           // languages, and should be off when the locale is "ar".
           ...(locale === 'ar' ? { numberFormatting: false } : {}),
-          // Only the placeholders inside the card-number and CVV iframes can be styled.
+          // Only the placeholders inside the card-number and CVV iframes can be
+          // styled. Slate-500, like the card-holder placeholder in globals.css:
+          // readable on the widget's white fields in both themes.
           iframeStyles: {
-            'card-number-placeholder': { color: '#94a3b8', 'font-size': '14px' },
-            'cvv-placeholder':         { color: '#94a3b8', 'font-size': '14px' },
+            'card-number-placeholder': { color: '#64748b', 'font-size': '14px' },
+            'cvv-placeholder':         { color: '#64748b', 'font-size': '14px' },
           },
           onReady: () => {
             ready = true;

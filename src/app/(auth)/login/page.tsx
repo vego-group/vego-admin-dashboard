@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronDown, Phone, ShieldCheck } from 'lucide-react';
+import { ChevronDown, Phone, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
+import { useI18n } from '@/i18n/I18nProvider';
 import { useCountries } from '@/hooks/useCountries';
 import { BrandPanel } from '@/components/auth/BrandPanel';
 import { flagEmoji, matchesPhoneRegex, toNationalNumber } from '@/lib/country';
@@ -25,8 +26,9 @@ function invalidPhoneMessage(country: Country | undefined): string {
 
 export default function LoginPage() {
   const router = useRouter();
-  const { sendOtp, isLoading, isAuthenticated, error, clearError, loginCountry } = useAuthStore();
+  const { sendOtp, isLoading, isAuthenticated, error, clearError, loginCountry, signOutReason } = useAuthStore();
   const { countries, isLoading: countriesLoading } = useCountries();
+  const { t } = useI18n();
 
   const [iso, setIso] = useState<string>('');
   const [phone, setPhone] = useState('');
@@ -108,6 +110,17 @@ export default function LoginPage() {
             <p className="mt-2 text-base text-slate-500">
               Enter your phone number to sign in to your account
             </p>
+
+            {/* The app signed a non-fleet-admin account out (403 on /fleet-admin/me). */}
+            {signOutReason === 'not_fleet_admin' && (
+              <div
+                role="alert"
+                className="mt-6 flex items-start gap-2 rounded-lg bg-rose-50 px-3 py-2.5 text-sm font-medium text-rose-600"
+              >
+                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{t('auth.noFleetAdminAccess')}</span>
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="mt-8">
               {/* Country */}

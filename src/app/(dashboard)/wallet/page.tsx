@@ -12,12 +12,14 @@ import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Pagination } from '@/components/ui/Pagination';
+import { NoAccessState } from '@/components/ui/NoAccessState';
 import { PaymentSettings } from '@/components/wallet/PaymentSettings';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { bidiIsolate } from '@/lib/format';
 import { apiTransactionType, driversApi, walletApi, walletFilterErrorFrom } from '@/lib/api';
+import { isForbiddenError } from '@/lib/api-errors';
 import { fractionDigitsOf, fromMinorUnits, toMinorUnits } from '@/lib/money';
 import type {
   CurrencyCode, Driver, TransactionType, TransactionStatus, WalletTransaction, WalletStats,
@@ -283,6 +285,8 @@ export default function WalletPage() {
   // A filter the endpoint refused, in its own words. An empty table for this
   // reason must not read as "this fleet has no such activity".
   const [filterError, setFilterError] = useState<string | null>(null);
+  // The ledger refused with a 403: this account may not see it at all.
+  const [forbidden, setForbidden] = useState(false);
 
   // Filters
   const [fromDate, setFromDate] = useState(defaultFrom);
@@ -347,6 +351,7 @@ export default function WalletPage() {
       } catch (err) {
         if (cancelled) return;
         logger.error('[Wallet] Failed to load transactions:', err);
+        if (isForbiddenError(err)) setForbidden(true);
         // A refused filter says which parameter it refused — show that, not an
         // empty table that looks like an answer.
         setFilterError(walletFilterErrorFrom(err)?.message ?? null);
@@ -385,6 +390,14 @@ export default function WalletPage() {
   };
 
   const setFilter = <T,>(setter: (v: T) => void) => (v: T) => { setter(v); setPage(1); };
+
+  if (forbidden) {
+    return (
+      <DashboardShell title={t('wallet.title')} subtitle={t('wallet.subtitle')}>
+        <NoAccessState />
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell title={t('wallet.title')} subtitle={t('wallet.subtitle')}>

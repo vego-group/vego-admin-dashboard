@@ -1,11 +1,14 @@
 import { create } from 'zustand';
 import { notificationsApi } from '@/lib/api';
+import { isForbiddenError } from '@/lib/api-errors';
 import type { Notification } from '@/types';
 
 interface NotificationStore {
   notifications: Notification[];
   unreadCount: number;
   loading: boolean;
+  /** The last list fetch was refused with a 403 — "no access", not "no notifications". */
+  forbidden: boolean;
   /** Fetch (or re-fetch) all notifications from the backend. */
   fetchNotifications: () => Promise<void>;
   /** Lightweight poll — only fetches the unread count (for sidebar badge). */
@@ -20,18 +23,20 @@ export const useNotificationStore = create<NotificationStore>((set, get) => ({
   notifications: [],
   unreadCount: 0,
   loading: false,
+  forbidden: false,
 
   fetchNotifications: async () => {
-    set({ loading: true });
+    set({ loading: true, forbidden: false });
     try {
       const notifications = await notificationsApi.list();
       set({
         notifications,
         unreadCount: notifications.filter((n) => !n.read).length,
         loading: false,
+        forbidden: false,
       });
-    } catch {
-      set({ loading: false });
+    } catch (err) {
+      set({ loading: false, forbidden: isForbiddenError(err) });
     }
   },
 

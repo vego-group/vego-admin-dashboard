@@ -175,7 +175,7 @@ export function AssignMotorcycleModal({
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
-                        {m.plateNumber || m.id}
+                        <span dir="ltr">{m.plateNumber || m.id}</span>
                       </p>
                       <p className="truncate text-xs text-slate-400">{m.model}</p>
                     </div>

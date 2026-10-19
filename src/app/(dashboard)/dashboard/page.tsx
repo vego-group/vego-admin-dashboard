@@ -10,9 +10,11 @@ import { TodaysUsageChart } from '@/components/dashboard/TodaysUsageChart';
 import { BatteryHealthChart } from '@/components/dashboard/BatteryHealthChart';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { NoAccessState } from '@/components/ui/NoAccessState';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { dashboardApi, fleetApi, stationsApi } from '@/lib/api';
+import { isForbiddenError } from '@/lib/api-errors';
 import type {
   DashboardMetrics,
   UsagePoint,
@@ -64,6 +66,8 @@ export default function DashboardPage() {
   // KPI + Fleet Status — starts with zeros, replaced by real API data
   const [metrics, setMetrics] = useState<DashboardMetrics>(EMPTY_METRICS);
   const [metricsLoading, setMetricsLoading] = useState(true);
+  // The KPIs are this page's data — a 403 on them means the account may not see it.
+  const [forbidden, setForbidden] = useState(false);
 
   // Today's Usage chart
   const [usage, setUsage] = useState<UsagePoint[]>(FALLBACK_USAGE);
@@ -83,7 +87,10 @@ export default function DashboardPage() {
     // ── KPI + Fleet Status → GET /fleet-admin/dashboard ────────────────────
     dashboardApi.getMetrics()
       .then((data) => { if (!cancelled) setMetrics(data); })
-      .catch((err) => logger.error('[Dashboard] metrics failed:', err))
+      .catch((err) => {
+        logger.error('[Dashboard] metrics failed:', err);
+        if (!cancelled && isForbiddenError(err)) setForbidden(true);
+      })
       .finally(() => { if (!cancelled) setMetricsLoading(false); });
 
     // ── Today's Usage → GET /fleet-admin/dashboard/usage ───────────────────
@@ -110,6 +117,14 @@ export default function DashboardPage() {
 
     return () => { cancelled = true; };
   }, []);
+
+  if (forbidden) {
+    return (
+      <DashboardShell title={t('dashboard.title')} subtitle={t('dashboard.subtitle')}>
+        <NoAccessState />
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell title={t('dashboard.title')} subtitle={t('dashboard.subtitle')}>

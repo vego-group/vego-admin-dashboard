@@ -39,6 +39,8 @@ const en = {
     locationUnknownHint: 'No position reported — not shown on the map',
     error: 'Something went wrong',
     pageError: 'Something went wrong on this page',
+    noAccessTitle: "You don't have access to this data",
+    noAccessDescription: 'The server refused this request for your account. Contact your MyVego administrator if you need access.',
     retry: 'Retry',
     today: 'Today',
     yesterday: 'Yesterday',
@@ -664,6 +666,7 @@ const en = {
     invalidOtp: 'Invalid OTP code. Please try again.',
     invalidPhone: 'Please enter a valid phone number',
     smartMobility: 'Smart Mobility Management System',
+    noFleetAdminAccess: "This account doesn't have access to the Fleet Admin dashboard.",
   },
   batterySwapping: {
     title: 'Battery Swapping',
@@ -845,7 +848,7 @@ const en = {
     processingTitle: 'Payment Processing',
     processingBody: 'Your payment is being processed. The wallet balance will update shortly.',
     confirmingBody: 'Your payment is being confirmed. The wallet balance will update shortly.',
-    paidWithCard: 'Paid with {{brand}} •••• {{last4}}',
+    paidWithCard: 'Paid with {{card}}',
   },
 };
 

@@ -6,6 +6,7 @@ import { DashboardShell } from '@/components/layout/DashboardShell';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { NoAccessState } from '@/components/ui/NoAccessState';
 import { WeeklyTripsChart } from '@/components/reports/WeeklyTripsChart';
 import { BatteryDistributionChart } from '@/components/reports/BatteryDistributionChart';
 import { MonthlyRevenueChart } from '@/components/reports/MonthlyRevenueChart';
@@ -15,6 +16,7 @@ import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { reportsApi, dashboardApi } from '@/lib/api';
+import { isForbiddenError } from '@/lib/api-errors';
 import type {
   BatteryDistribution,
   CostBreakdown,
@@ -39,6 +41,7 @@ export default function ReportsPage() {
   const [costAnalysis, setCostAnalysis]     = useState<CostBreakdown[]>([]);
   const [topDrivers, setTopDrivers]         = useState<TopDriver[]>([]);
   const [failedSections, setFailedSections] = useState<string[]>([]);
+  const [forbidden, setForbidden]           = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,7 +76,11 @@ export default function ReportsPage() {
         [tdRes, t('reports.sectionTopDrivers')],
       ];
       const failed = sections.filter(([r]) => r.status === 'rejected').map(([, label]) => label);
-      if (failed.length > 0) {
+      // Every section refused with a 403 is "no access", not six empty charts. A
+      // single refused section is still just a failed section, listed below.
+      if (sections.every(([r]) => r.status === 'rejected' && isForbiddenError(r.reason))) {
+        setForbidden(true);
+      } else if (failed.length > 0) {
         logger.error('[Reports] Failed sections:', failed,
           sections.filter(([r]) => r.status === 'rejected').map(([r]) => (r as PromiseRejectedResult).reason));
         setFailedSections(failed);
@@ -82,6 +89,14 @@ export default function ReportsPage() {
     })();
     return () => { cancelled = true; };
   }, [t]);
+
+  if (forbidden) {
+    return (
+      <DashboardShell title={t('reports.title')} subtitle={tv('reports.subtitle')}>
+        <NoAccessState />
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell title={t('reports.title')} subtitle={tv('reports.subtitle')}>
