@@ -230,6 +230,15 @@ function HyperPayWidget({ checkout, locale, onExpired }: HyperPayWidgetProps) {
           paymentTarget: '_top',
           locale: locale === 'ar' ? 'ar' : 'en',
           style: 'card',
+          // A "saved" checkout is sent to HyperPay as REPEATED. The widget's
+          // defaults would list the stored card without a CVV field, and keep
+          // a "Show other payment methods" button that opens the new-card
+          // form — a new card must go out as INITIAL, through a "new"
+          // checkout. So: CVV required, and no way to the new-card form.
+          // A "new" checkout keeps the widget's defaults.
+          ...(checkout.cardChoice === 'saved'
+            ? { registrations: { requireCvv: true }, hideOtherPaymentButton: true }
+            : {}),
           // HyperPay: its number formatter does not support right-to-left
           // languages, and should be off when the locale is "ar".
           ...(locale === 'ar' ? { numberFormatting: false } : {}),

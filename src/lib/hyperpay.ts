@@ -156,6 +156,10 @@ export interface WpwlOptions {
   style?: string;
   numberFormatting?: boolean;
   iframeStyles?: Record<string, Record<string, string>>;
+  /** Stored cards. Merged into the widget's defaults, so only what is set here changes. */
+  registrations?: { requireCvv?: boolean };
+  /** Removes "Show other payment methods" under the stored cards. Top-level, not under `registrations`. */
+  hideOtherPaymentButton?: boolean;
   onReady?: () => void;
   onError?: (error: WpwlError) => void;
 }
