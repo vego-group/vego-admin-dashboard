@@ -14,8 +14,10 @@ import { Input } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Pagination } from '@/components/ui/Pagination';
+import { NoAccessState } from '@/components/ui/NoAccessState';
 import { useI18n } from '@/i18n/I18nProvider';
 import { swappingApi, type SwapActivity } from '@/lib/api';
+import { isForbiddenError } from '@/lib/api-errors';
 import { formatRelativeTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import type { SwappingStation } from '@/types';
@@ -37,6 +39,7 @@ export default function BatterySwappingPage() {
   const [page, setPage] = useState(1);
   const [recentActivity, setRecentActivity] = useState<SwapActivity[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [forbidden, setForbidden] = useState(false);
 
   const loadData = useCallback(async () => {
     setIsSyncing(true);
@@ -47,6 +50,8 @@ export default function BatterySwappingPage() {
       ]);
       if (stationsData.status === 'fulfilled') setStations(stationsData.value);
       if (activityData.status === 'fulfilled') setRecentActivity(activityData.value);
+      // The cabinets are this page's data; a 403 on them is "no access", not "no stations".
+      setForbidden(stationsData.status === 'rejected' && isForbiddenError(stationsData.reason));
     } catch (err) {
       logger.error('[BatterySwapping] Failed to load data:', err);
     } finally {
@@ -94,6 +99,14 @@ export default function BatterySwappingPage() {
     { value: 'charging',  label: `${t('batterySwapping.charging')} (${tabCounts.charging})` },
     { value: 'empty',     label: `${t('batterySwapping.empty')} (${tabCounts.empty})` },
   ];
+
+  if (forbidden) {
+    return (
+      <DashboardShell title={t('batterySwapping.title')} subtitle={t('batterySwapping.subtitle')}>
+        <NoAccessState />
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell title={t('batterySwapping.title')} subtitle={t('batterySwapping.subtitle')}>

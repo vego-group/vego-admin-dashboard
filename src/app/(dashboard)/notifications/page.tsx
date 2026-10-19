@@ -17,6 +17,7 @@ import {
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { NoAccessState } from '@/components/ui/NoAccessState';
 import { useNotificationStore } from '@/store/notifications';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
@@ -91,7 +92,7 @@ type FilterTab = 'all' | 'unread' | 'alert' | 'warning' | 'success';
 
 export default function NotificationsPage() {
   const { t } = useI18n();
-  const { notifications, unreadCount, loading, fetchNotifications, markAsRead, markAllAsRead, remove, clearAll } =
+  const { notifications, unreadCount, loading, forbidden, fetchNotifications, markAsRead, markAllAsRead, remove, clearAll } =
     useNotificationStore();
   const [filter, setFilter] = useState<FilterTab>('all');
 
@@ -125,6 +126,14 @@ export default function NotificationsPage() {
     { key: 'warning', label: t('notifications.warnings') },
     { key: 'success', label: t('notifications.success') },
   ];
+
+  if (forbidden) {
+    return (
+      <DashboardShell title={t('notifications.title')} subtitle={t('notifications.subtitle')}>
+        <NoAccessState />
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell

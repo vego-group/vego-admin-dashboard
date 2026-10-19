@@ -21,6 +21,7 @@
 import { useCallback, useEffect } from 'react';
 import { create } from 'zustand';
 import { fleetAdminApi } from '@/lib/api';
+import { isForbiddenError } from '@/lib/api-errors';
 import { formatCurrency, PENDING_AMOUNT } from '@/lib/format';
 import { logger } from '@/lib/logger';
 import { useAuthStore } from '@/store/auth';
@@ -61,6 +62,16 @@ const useFleetStore = create<FleetStore>((set, get) => ({
       set({ fleet, isLoading: false, loaded: true, error: null });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not load the fleet profile';
+      if (isForbiddenError(err)) {
+        // Signed in, but not as a fleet admin: the staff OTP login is shared, so
+        // a superadmin gets this far, and every /fleet-admin/* call then answers
+        // 403. Nothing here can work for that account — sign it out and let the
+        // login page say why, rather than leave empty pages and dashes.
+        logger.warn('[useFleetContext] GET /fleet-admin/me answered 403 — not a fleet admin account; signing out.');
+        set({ fleet: null, isLoading: false, loaded: true, error: message });
+        useAuthStore.getState().signOut('not_fleet_admin');
+        return;
+      }
       logger.warn(
         `[useFleetContext] GET /fleet-admin/me failed (${message}) — money will render ` +
         'without a currency unit until it succeeds.',

@@ -292,6 +292,15 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const hyperPayAmountMessage = (code: 'amount_precision' | 'amount_whole_only_in_test'): string =>
     code === 'amount_precision' ? t('wallet.hyperpayAmountPrecision') : t('wallet.hyperpayWholeOnlyInTest');
 
+  // HyperPay's amount rules, checked as the admin types — like the minimum, they
+  // keep Pay disabled and put the reason under the field, rather than letting
+  // an enabled-looking button answer with an error. The whole-amounts rule
+  // applies only once a checkout has said `mode: "test"`.
+  const hyperPayIssue = expectHyperPay && amountMinorUnits > 0
+    ? hyperPayAmountIssue(amount.trim(), hints?.mode)
+    : null;
+  const amountInvalid = belowMinimum || hyperPayIssue !== null;
+
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   const validateAmount = (): boolean => {
@@ -524,7 +533,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{driver.name}</p>
-                <p className="text-xs text-slate-400">#{driver.id}</p>
+                <p className="text-xs text-slate-400"><span dir="ltr">#{driver.id}</span></p>
               </div>
               <div className="text-end">
                 <p className="mb-0.5 text-[10px] text-slate-400">{t('drivers.currentBalance')}</p>
@@ -570,18 +579,20 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                     'focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20',
                     'dark:bg-slate-900/40 dark:text-slate-200',
                     currencyLabel ? 'ps-14' : 'ps-3.5',
-                    amountError || belowMinimum ? 'border-rose-400' : '',
+                    amountError || amountInvalid ? 'border-rose-400' : '',
                   )}
-                  style={!(amountError || belowMinimum) ? { borderColor: 'rgb(var(--border))' } : undefined}
+                  style={!(amountError || amountInvalid) ? { borderColor: 'rgb(var(--border))' } : undefined}
                 />
               </div>
 
               {/* The minimum is stated up front, and becomes the error the moment
-                  the entered amount falls under it. */}
+                  the entered amount falls under it. HyperPay's rules likewise. */}
               {amountError ? (
                 <p className="mt-1 text-xs text-rose-600">{amountError}</p>
               ) : belowMinimum && minTopUp ? (
                 <p className="mt-1 text-xs text-rose-600">{minimumMessage(minTopUp, minReason)}</p>
+              ) : hyperPayIssue ? (
+                <p className="mt-1 text-xs text-rose-600">{hyperPayAmountMessage(hyperPayIssue)}</p>
               ) : minTopUp ? (
                 <p className="mt-1 text-xs text-slate-400">
                   {t('drivers.minTopUpHint', { amount: formatAmount(minTopUp) })}
@@ -644,7 +655,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
             {chargeableCards.length > 0 && (
               <p className="text-[11px] text-slate-400">
                 {chargeableCards.length === 1
-                  ? brandLabel(chargeableCards[0].brand) + ' •••• ' + chargeableCards[0].last4
+                  ? <span dir="ltr">{brandLabel(chargeableCards[0].brand) + ' •••• ' + chargeableCards[0].last4}</span>
                   : `${chargeableCards.length} ${t('drivers.savedCards')}`}
               </p>
             )}
@@ -724,7 +735,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                 type="button"
                 variant="primary"
                 isLoading={initiating || redirecting}
-                disabled={belowMinimum}
+                disabled={amountInvalid}
                 onClick={handleProceedToCard}
                 className="min-w-[160px]"
                 leftIcon={!(initiating || redirecting) ? <CreditCard className="h-4 w-4" /> : undefined}

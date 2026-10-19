@@ -7,11 +7,13 @@ import { VehicleListPanel } from '@/components/vehicle-control/VehicleListPanel'
 import { VehicleDetails } from '@/components/vehicle-control/VehicleDetails';
 import { ControlPanel } from '@/components/vehicle-control/ControlPanel';
 import { Card } from '@/components/ui/Card';
+import { NoAccessState } from '@/components/ui/NoAccessState';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { fleetApi, driversApi } from '@/lib/api';
+import { isForbiddenError } from '@/lib/api-errors';
 import type { Vehicle } from '@/types';
 import type { Driver } from '@/types';
 import type { MotorcycleBattery, MotorcycleStatistics, VehicleCommand, VehicleCommandOutcome } from '@/lib/api';
@@ -25,6 +27,7 @@ export default function VehicleControlPage() {
   const [vehicles, setVehicles]   = useState<Vehicle[]>([]);
   const [loading, setLoading]     = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
 
   // ── Per-vehicle extra data ────────────────────────────────────────────────
   const [battery, setBattery]         = useState<MotorcycleBattery | null>(null);
@@ -51,6 +54,7 @@ export default function VehicleControlPage() {
         }
       } catch (err) {
         logger.error('[VehicleControl] Failed to load initial data:', err);
+        if (!cancelled && isForbiddenError(err)) setForbidden(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -177,6 +181,14 @@ export default function VehicleControlPage() {
   const selected = vehicles.find((v) => v.id === selectedId) ?? null;
 
   // ── Render ────────────────────────────────────────────────────────────────
+  if (forbidden) {
+    return (
+      <DashboardShell title={tv('vehicleControl.title')} subtitle={t('vehicleControl.subtitle')}>
+        <NoAccessState />
+      </DashboardShell>
+    );
+  }
+
   return (
     <DashboardShell title={tv('vehicleControl.title')} subtitle={t('vehicleControl.subtitle')}>
       {loading ? (

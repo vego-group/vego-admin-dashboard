@@ -2,9 +2,16 @@ import { logger } from '@/lib/logger';
 import { fractionDigitsOf, parseAmount, toMinorUnits } from '@/lib/money';
 import type { CurrencyCode, Locale } from '@/types';
 
+/**
+ * Arabic keeps its own words, currency labels (`د.أ.`, `ر.س.`) and RTL layout,
+ * but Latin digits (`-u-nu-latn`). With Arabic-Indic digits and the Arabic
+ * decimal separator a JOD amount reads `٩٥٫٠٠٠ د.أ.` — easily taken for 95,000 —
+ * and a lone `٠` in a stat card looks like a dot. Latin digits also match what
+ * the amount field accepts.
+ */
 const localeMap: Record<Locale, string> = {
   en: 'en-US',
-  ar: 'ar-SA',
+  ar: 'ar-SA-u-nu-latn',
 };
 
 /**
@@ -140,6 +147,17 @@ export function formatCurrency(
  */
 export function bidiIsolate(value: string): string {
   return `⁨${value}⁩`;
+}
+
+/**
+ * Wrap a left-to-right token — a phone number, a plate, a masked card number —
+ * in a left-to-right isolate, for when it is interpolated into a translated
+ * sentence. In Arabic, "+962780009005" otherwise renders as "962780009005+",
+ * and "Visa •••• 0010" as "0010 •••• Visa". In JSX, wrap the token in
+ * `<span dir="ltr">` instead.
+ */
+export function ltrIsolate(value: string): string {
+  return `\u2066${value}\u2069`;
 }
 
 export function formatPercent(value: number, locale: Locale = 'en'): string {

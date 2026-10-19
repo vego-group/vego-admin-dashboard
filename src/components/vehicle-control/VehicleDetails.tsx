@@ -61,7 +61,7 @@ export function VehicleDetails({
             <VehicleIconTile status={vehicle.status} size="lg" />
             <div>
               <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
-                #{vehicle.id} — {vehicle.plateNumber}
+                <span dir="ltr">#{vehicle.id}</span> — <span dir="ltr">{vehicle.plateNumber}</span>
               </h2>
               <p className="text-sm text-slate-500">{vehicle.model}</p>
             </div>

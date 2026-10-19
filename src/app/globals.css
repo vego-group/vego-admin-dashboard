@@ -177,7 +177,31 @@
    The widget brings its own stylesheet ("card" style), so these only fit it
    to the page: full width, the app's primary button colour, and right-aligned
    labels in Arabic (the widget has no RTL layout of its own). The card number
-   and CVV live in HyperPay's iframes and keep their own styling. */
+   and CVV live in HyperPay's iframes and keep their own styling.
+
+   Its card is a light silver panel with white fields in both themes, so the
+   page's dark theme must stop at the widget: in dark mode the text colour
+   the card inherits is light, and so is the text the dark colour scheme gives
+   form fields — light labels on a light card, light text in white fields.
+   Everything inside the card, and every white field, gets dark text and a
+   light colour scheme in both themes. The page around it stays themed.
+   A field the widget flags as invalid keeps its own red. */
+.wpwl-container .wpwl-form-card,
+.wpwl-container .wpwl-control {
+  color-scheme: light;
+}
+.wpwl-container .wpwl-form-card,
+.wpwl-container .wpwl-control:not(.wpwl-has-error) {
+  color: #0f172a;                 /* slate-900 */
+}
+.wpwl-container .wpwl-control::placeholder {
+  color: #64748b;                 /* slate-500, as the iframe placeholders */
+  opacity: 1;
+}
+.wpwl-container .wpwl-control option {
+  color: #0f172a;
+  background-color: #fff;
+}
 .hyperpay-widget .wpwl-form {
   max-width: 100%;
   margin: 0;

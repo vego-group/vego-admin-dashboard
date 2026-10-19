@@ -7,6 +7,7 @@ import { MetricCard } from '@/components/dashboard/MetricCard';
 import { LiveFleetMap } from '@/components/dashboard/LiveFleetMap';
 import { StationCard } from '@/components/stations/StationCard';
 import { Card } from '@/components/ui/Card';
+import { NoAccessState } from '@/components/ui/NoAccessState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -15,6 +16,7 @@ import { Pagination } from '@/components/ui/Pagination';
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/i18n/I18nProvider';
 import { stationsApi } from '@/lib/api';
+import { isForbiddenError } from '@/lib/api-errors';
 import type { BatteryStation } from '@/types';
 import { logger } from '@/lib/logger';
 
@@ -31,6 +33,7 @@ export default function StationsPage() {
   const [page, setPage] = useState(1);
   const [selectedStation, setSelectedStation] = useState<BatteryStation | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,7 +46,8 @@ export default function StationsPage() {
         }
       } catch (err) {
         logger.error('[Stations] Failed to load stations:', err);
-        setApiError(err instanceof Error ? err.message : 'Failed to load stations');
+        if (isForbiddenError(err)) setForbidden(true);
+        else setApiError(err instanceof Error ? err.message : 'Failed to load stations');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -76,6 +80,14 @@ export default function StationsPage() {
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  if (forbidden) {
+    return (
+      <DashboardShell title={t('stations.title')} subtitle={t('stations.subtitle')}>
+        <NoAccessState />
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell title={t('stations.title')} subtitle={t('stations.subtitle')}>

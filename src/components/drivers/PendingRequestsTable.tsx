@@ -249,7 +249,7 @@ function ViewDetailsModal({
               {req.name}
             </h2>
             <p className="text-xs text-slate-400">
-              {req.id} · {t('drivers.requestedLabel', { time: timeAgo(req.requestedAt) })}
+              <span dir="ltr">{req.id}</span> · {t('drivers.requestedLabel', { time: timeAgo(req.requestedAt) })}
             </p>
           </div>
           <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
@@ -268,7 +268,7 @@ function ViewDetailsModal({
             <div className="space-y-2">
               <div className="flex items-center gap-2.5 text-sm text-slate-700 dark:text-slate-200">
                 <Phone className="h-4 w-4 shrink-0 text-slate-400" />
-                {req.phone}
+                <span dir="ltr">{req.phone}</span>
               </div>
               {req.email && (
                 <div className="flex items-center gap-2.5 text-sm text-slate-700 dark:text-slate-200">
@@ -351,7 +351,7 @@ function ViewDetailsModal({
                       {tv('drivers.licensePlate')}
                     </p>
                     {docs.plate.number && (
-                      <p className="text-xs text-slate-400">{docs.plate.number}</p>
+                      <p className="text-xs text-slate-400"><span dir="ltr">{docs.plate.number}</span></p>
                     )}
                   </div>
                 </div>
@@ -487,14 +487,14 @@ export function PendingRequestsTable({ requests, onApprove, onReject }: PendingR
                         </div>
                         <div>
                           <p className="font-semibold text-slate-900 dark:text-slate-100">{req.name}</p>
-                          <p className="text-xs text-slate-400">#{req.id}</p>
+                          <p className="text-xs text-slate-400"><span dir="ltr">#{req.id}</span></p>
                         </div>
                       </div>
                     </td>
 
                     {/* Contact */}
                     <td className="px-5 py-4">
-                      <p className="text-slate-700 dark:text-slate-200">{req.phone}</p>
+                      <p className="text-slate-700 dark:text-slate-200"><span dir="ltr">{req.phone}</span></p>
                       {req.email && <p className="text-xs text-slate-400">{req.email}</p>}
                     </td>
 

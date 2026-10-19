@@ -30,7 +30,7 @@ export function VehicleCard({ vehicle, onClick, onAssignDriver }: VehicleCardPro
         <div className="flex items-center gap-3">
           <VehicleIconTile status={vehicle.status} size="md" />
           <div className="min-w-0">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-50">{vehicle.id}</h3>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-50"><span dir="ltr">{vehicle.id}</span></h3>
             <p className="text-xs text-slate-500">{vehicle.model}</p>
           </div>
         </div>

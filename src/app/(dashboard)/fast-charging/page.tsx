@@ -7,6 +7,7 @@ import { MetricCard } from '@/components/dashboard/MetricCard';
 import { LiveFleetMap } from '@/components/dashboard/LiveFleetMap';
 import { FastChargingCabinetCard } from '@/components/stations/FastChargingCabinetCard';
 import { Card } from '@/components/ui/Card';
+import { NoAccessState } from '@/components/ui/NoAccessState';
 import { Input } from '@/components/ui/Input';
 import { LocationLabel } from '@/components/ui/LocationLabel';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -14,6 +15,7 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Pagination } from '@/components/ui/Pagination';
 import { useI18n } from '@/i18n/I18nProvider';
 import { fastChargingApi } from '@/lib/api';
+import { isForbiddenError } from '@/lib/api-errors';
 import { cn } from '@/lib/cn';
 import type { FastChargingCabinet, BatteryStation, FastChargingStatus } from '@/types';
 import { logger } from '@/lib/logger';
@@ -33,6 +35,7 @@ export default function FastChargingPage() {
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,7 +62,8 @@ export default function FastChargingPage() {
         }
       } catch (err) {
         logger.error('[FastCharging] Failed to load data:', err);
-        setApiError(err instanceof Error ? err.message : 'Failed to load fast charging data');
+        if (isForbiddenError(err)) setForbidden(true);
+        else setApiError(err instanceof Error ? err.message : 'Failed to load fast charging data');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -105,6 +109,14 @@ export default function FastChargingPage() {
     { value: 'charging',  label: `${t('fastCharging.charging')} (${totals.charging})` },
     { value: 'error',     label: `${t('fastCharging.error')} (${totals.error})` },
   ];
+
+  if (forbidden) {
+    return (
+      <DashboardShell title={t('fastCharging.title')} subtitle={t('fastCharging.subtitle')}>
+        <NoAccessState />
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell title={t('fastCharging.title')} subtitle={t('fastCharging.subtitle')}>
@@ -213,7 +225,7 @@ export default function FastChargingPage() {
                         return (
                           <tr key={c.id} className="border-b transition-colors hover:bg-slate-50/60 dark:hover:bg-slate-800/40"
                             style={{ borderColor: 'rgb(var(--border))' }}>
-                            <td className="px-5 py-3 font-mono font-medium text-slate-700 dark:text-slate-200">{c.cabinetId}</td>
+                            <td className="px-5 py-3 font-mono font-medium text-slate-700 dark:text-slate-200"><span dir="ltr">{c.cabinetId}</span></td>
                             <td className="px-5 py-3 text-slate-600 dark:text-slate-300">
                               <LocationLabel
                                 coordinates={c.coordinates}

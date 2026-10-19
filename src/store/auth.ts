@@ -48,6 +48,14 @@ export interface AuthResult {
   fieldError?: FieldError;
 }
 
+/**
+ * Why the app signed the operator out on its own, for the login page to say.
+ *
+ * - `not_fleet_admin` — the shared staff OTP login let a non-fleet-admin account
+ *   (e.g. a superadmin) in, and `/fleet-admin/me` answered 403.
+ */
+export type SignOutReason = 'not_fleet_admin';
+
 interface AuthState {
   user: User | null;
   token: string | null;
@@ -58,11 +66,13 @@ interface AuthState {
   pendingPhone: string | null;
   /** The country the phone belongs to. Persisted across sessions. */
   loginCountry: LoginCountry | null;
+  /** Set when the app signed the operator out itself. In memory only. */
+  signOutReason: SignOutReason | null;
 
   setLoginCountry: (country: LoginCountry) => void;
   sendOtp: (input: SendOtpInput) => Promise<AuthResult>;
   verifyOtp: (otp: string) => Promise<AuthResult>;
-  signOut: () => void;
+  signOut: (reason?: SignOutReason) => void;
   clearError: () => void;
 }
 
@@ -134,6 +144,7 @@ export const useAuthStore = create<AuthState>()(
       error: null,
       pendingPhone: null,
       loginCountry: null,
+      signOutReason: null,
 
       setLoginCountry: (country) => set({ loginCountry: country }),
 
@@ -143,7 +154,7 @@ export const useAuthStore = create<AuthState>()(
       // this posted a bare 9-digit number with no country code at all, which
       // could only ever resolve to a Saudi account.
       sendOtp: async ({ phone, country }) => {
-        set({ isLoading: true, error: null, loginCountry: country });
+        set({ isLoading: true, error: null, loginCountry: country, signOutReason: null });
 
         const e164 = toE164(phone, country.dialCode);
         try {
@@ -202,8 +213,11 @@ export const useAuthStore = create<AuthState>()(
 
       // The country choice survives sign-out on purpose: it is a preference, not
       // a credential, and re-login should not ask for it again.
-      signOut: () =>
-        set({ user: null, token: null, isAuthenticated: false, error: null, pendingPhone: null }),
+      signOut: (reason) =>
+        set({
+          user: null, token: null, isAuthenticated: false, error: null, pendingPhone: null,
+          signOutReason: reason ?? null,
+        }),
 
       clearError: () => set({ error: null }),
     }),

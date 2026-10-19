@@ -7,6 +7,7 @@ import { AlertTriangle, Lock, Power, ShieldCheck, Unlock, UserPlus, UserMinus, L
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { cn } from '@/lib/cn';
+import { ltrIsolate } from '@/lib/format';
 import { VEHICLE_SPEED_LIMIT_MAX, clampSpeedLimit } from '@/lib/vehicle-speed';
 import type { Vehicle } from '@/types';
 import type { Driver } from '@/types';
@@ -388,8 +389,10 @@ export function ControlPanel({
             >
               <option value="">{t('vehicleControl.selectDriver')}</option>
               {availableDrivers.map((d) => (
+                // <option> takes plain text only, so the phone is isolated
+                // with control characters rather than a <span dir="ltr">.
                 <option key={d.id} value={d.id}>
-                  {d.name} — {d.phone}
+                  {d.name} — {ltrIsolate(d.phone)}
                 </option>
               ))}
             </select>

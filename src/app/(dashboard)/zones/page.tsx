@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Plus, Search, Sparkles, X } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { Card } from '@/components/ui/Card';
+import { NoAccessState } from '@/components/ui/NoAccessState';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -13,6 +14,7 @@ import { ZoneMap } from '@/components/zones/ZoneMap';
 import { ZoneFormDrawer, type ZoneFormValues } from '@/components/zones/ZoneFormDrawer';
 import { useI18n } from '@/i18n/I18nProvider';
 import { zonesApi } from '@/lib/api';
+import { isForbiddenError } from '@/lib/api-errors';
 import {
   findOverlappingZones,
   findZoneAtPoint,
@@ -45,6 +47,7 @@ export default function ZonesPage() {
   const [zoneToDelete, setZoneToDelete] = useState<Zone | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
   const [successDialog, setSuccessDialog] = useState<
     | { kind: 'added' }
     | { kind: 'updated' }
@@ -61,6 +64,7 @@ export default function ZonesPage() {
         if (!cancelled) setZones(data);
       } catch (err) {
         logger.error('[Zones] Failed to load zones:', err);
+        if (!cancelled && isForbiddenError(err)) setForbidden(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -262,6 +266,14 @@ export default function ZonesPage() {
       : successDialog?.kind === 'deleted'
       ? t('zones.zoneDeletedDescription')
       : '';
+
+  if (forbidden) {
+    return (
+      <DashboardShell title={t('zones.title')} subtitle={t('zones.subtitle')}>
+        <NoAccessState />
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell title={t('zones.title')} subtitle={t('zones.subtitle')} fullHeight>

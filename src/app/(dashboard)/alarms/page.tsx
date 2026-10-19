@@ -9,9 +9,11 @@ import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { NoAccessState } from '@/components/ui/NoAccessState';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { alarmsApi } from '@/lib/api';
+import { isForbiddenError } from '@/lib/api-errors';
 import { formatRelativeTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import type { Alarm, AlarmSeverity, AlarmStatus } from '@/types';
@@ -36,6 +38,7 @@ export default function AlarmsPage() {
   const [alarms, setAlarms] = useState<Alarm[]>([]);
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
   const [tab, setTab] = useState<TabValue>('unresolved');
   const [resolvingId, setResolvingId] = useState<string | null>(null);
 
@@ -48,7 +51,9 @@ export default function AlarmsPage() {
         if (!cancelled) setAlarms(data);
       } catch (err) {
         logger.error('[Alarms] Failed to load alarms:', err);
-        if (!cancelled) setApiError(err instanceof Error ? err.message : 'Failed to load alarms');
+        if (cancelled) return;
+        if (isForbiddenError(err)) setForbidden(true);
+        else setApiError(err instanceof Error ? err.message : 'Failed to load alarms');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -81,6 +86,14 @@ export default function AlarmsPage() {
     }
     setResolvingId(null);
   };
+
+  if (forbidden) {
+    return (
+      <DashboardShell title={t('alarms.title')} subtitle={tv('alarms.subtitle')}>
+        <NoAccessState />
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell title={t('alarms.title')} subtitle={tv('alarms.subtitle')}>
@@ -142,7 +155,7 @@ export default function AlarmsPage() {
                       <Badge tone={cfg.tone}>{t(cfg.key)}</Badge>
                       {a.motorcycleId && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                          <Bike className="h-3 w-3" /> #{a.motorcycleId}
+                          <Bike className="h-3 w-3" /> <span dir="ltr">#{a.motorcycleId}</span>
                         </span>
                       )}
                       {isResolved ? (

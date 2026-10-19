@@ -97,7 +97,7 @@ export function AssignDriverModal({
               {isAssigned ? t('fleet.changeDriver') : t('vehicleControl.assignDriver')}
             </h2>
             <p className="truncate text-sm text-slate-500 dark:text-slate-400">
-              {vehicle.id} · {vehicle.model}
+              <span dir="ltr">{vehicle.id}</span> · {vehicle.model}
             </p>
           </div>
         </div>
@@ -172,7 +172,7 @@ export function AssignDriverModal({
                       <p className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
                         {d.name}
                       </p>
-                      <p className="truncate text-xs text-slate-400">{d.phone}</p>
+                      <p className="truncate text-xs text-slate-400"><span dir="ltr">{d.phone}</span></p>
                     </div>
                     {active && <Check className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />}
                   </button>

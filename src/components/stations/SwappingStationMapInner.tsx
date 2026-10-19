@@ -24,7 +24,7 @@ function stationPopup(s: SwappingStation): string {
   return `<div style="font-family:system-ui,sans-serif;width:250px;border-radius:12px;overflow:hidden">
   <div style="background:#1e293b;padding:12px 16px">
     <div style="font-size:13px;font-weight:700;color:#f8fafc;margin-bottom:2px">${s.name}</div>
-    <div style="font-size:11px;color:#94a3b8">Cabinet ID: ${s.cabinetId}</div>
+    <div style="font-size:11px;color:#94a3b8">Cabinet ID: <span dir="ltr">${s.cabinetId}</span></div>
   </div>
   <div style="background:#fff;padding:14px 16px">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
