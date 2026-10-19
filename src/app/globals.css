@@ -173,6 +173,17 @@
   }
 }
 
+/* ── Map tiles: OpenStreetMap stopgap in dark mode ─────────────────────────
+   Used while no CARTO key is set (src/lib/map-tiles.ts). OSM has no dark style,
+   so its tile layer is inverted, hue-rotated back and toned down. Only that
+   layer: markers, zones, popups, controls and the attribution sit in other
+   Leaflet panes and keep their own colours. CARTO's own dark tiles never carry
+   this class. Outside @layer, so Tailwind never purges it — the class is only
+   set from TypeScript in src/hooks. */
+.dark .leaflet-layer.map-tiles-fallback {
+  filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9);
+}
+
 /* ── HyperPay COPYandPAY widget (/wallet/top-up/pay) ──────────────────────
    The widget brings its own stylesheet ("card" style), so these only fit it
    to the page: full width, the app's primary button colour, and right-aligned

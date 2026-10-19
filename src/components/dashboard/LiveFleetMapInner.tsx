@@ -6,6 +6,7 @@ import type { Map as LeafletMap, Marker as LeafletMarker } from 'leaflet';
 import { fitToPoints, type LatLngTuple } from '@/lib/map-fit';
 import { clampPercent, html, trustedHtml, type TrustedHtml } from '@/lib/html';
 import { useI18n } from '@/i18n/I18nProvider';
+import { useBasemap } from '@/hooks/useBasemap';
 import type { Vehicle, BatteryStation } from '@/types';
 
 export interface LiveFleetMapProps {
@@ -104,6 +105,7 @@ export default function LiveFleetMapInner({
   height = 380,
 }: LiveFleetMapProps) {
   const { t } = useI18n();
+  const addBasemap   = useBasemap();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef       = useRef<LeafletMap | null>(null);
   const markersRef   = useRef<LeafletMarker[]>([]);
@@ -128,15 +130,7 @@ export default function LiveFleetMapInner({
         zoomControl: true,
       });
 
-      L.tileLayer(
-        'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-        {
-          attribution:
-            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-          subdomains: 'abcd',
-          maxZoom: 20,
-        }
-      ).addTo(map);
+      addBasemap(L, map);
 
       mapRef.current = map;
       if (!cancelled) setMapReady(true);
@@ -149,7 +143,7 @@ export default function LiveFleetMapInner({
       hasFittedRef.current = false;
       setMapReady(false);
     };
-  }, []);
+  }, [addBasemap]);
 
   /* Re-draw markers whenever map is ready or data changes */
   useEffect(() => {

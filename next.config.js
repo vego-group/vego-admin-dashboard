@@ -30,8 +30,11 @@ const nextConfig = {
             value: [
               "default-src 'self'",
               `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.moyasar.com ${HYPERPAY_HOSTS}`,
-              `style-src 'self' 'unsafe-inline' https://cdn.moyasar.com https://basemaps.cartocdn.com ${HYPERPAY_HOSTS}`,
-              `img-src 'self' data: blob: https://mobility-live.com https://*.basemaps.cartocdn.com https://cdn.moyasar.com ${HYPERPAY_HOSTS}`,
+              `style-src 'self' 'unsafe-inline' https://cdn.moyasar.com ${HYPERPAY_HOSTS}`,
+              // Map tiles (src/lib/map-tiles.ts): CARTO's keyed URLs use the bare
+              // host, which `*.basemaps.cartocdn.com` does not match; OSM is the
+              // stopgap while no key is set.
+              `img-src 'self' data: blob: https://mobility-live.com https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tile.openstreetmap.org https://cdn.moyasar.com ${HYPERPAY_HOSTS}`,
               `font-src 'self' data: https://cdn.moyasar.com ${HYPERPAY_HOSTS}`,
               `connect-src 'self' https://mobility-live.com https://api.moyasar.com https://*.basemaps.cartocdn.com ${HYPERPAY_HOSTS}`,
               `frame-src 'self' https://cdn.moyasar.com ${HYPERPAY_HOSTS}`,
