@@ -201,6 +201,18 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
     setValues((v) => ({ ...v, [fileKey]: file, [nameKey]: file.name }));
   };
 
+  /**
+   * An example address or city in the fleet's own country. This was "Al Olaya,
+   * Riyadh" for every fleet. A country with no example in the dictionary, or a
+   * fleet still loading, gets no placeholder rather than another country's city.
+   */
+  const examplePlaceholder = (field: 'addressPlaceholder' | 'cityPlaceholder'): string => {
+    if (!fleetIso) return '';
+    const key = `drivers.${field}.${fleetIso}`;
+    const text = t(key);
+    return text === key ? '' : text; // t() echoes a key it cannot find
+  };
+
   /** "Enter a valid Jordan mobile number (e.g. 791234567)" — from the country's own facts. */
   const invalidPhoneMessage = (c: Country): string => {
     const name = locale === 'ar' ? c.nameAr : c.nameEn;
@@ -413,14 +425,14 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label={`${t('drivers.address')} (${t('common.optional')})`}>
               <Input
-                placeholder="Al Olaya, Riyadh"
+                placeholder={examplePlaceholder('addressPlaceholder')}
                 value={values.address}
                 onChange={(e) => update('address', e.target.value)}
               />
             </Field>
             <Field label={`${t('drivers.city')} (${t('common.optional')})`}>
               <Input
-                placeholder="Riyadh"
+                placeholder={examplePlaceholder('cityPlaceholder')}
                 value={values.city}
                 onChange={(e) => update('city', e.target.value)}
               />

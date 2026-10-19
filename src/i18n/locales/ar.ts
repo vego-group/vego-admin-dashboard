@@ -248,6 +248,9 @@ const ar: Translations = {
     emailAddress: 'البريد الإلكتروني',
     address: 'العنوان',
     city: 'المدينة',
+    // مثال على العنوان والمدينة في دولة الأسطول، بحسب رمزها. الدولة غير المدرجة هنا بلا مثال.
+    addressPlaceholder: { SA: 'العليا، الرياض', JO: 'عبدون، عمّان' },
+    cityPlaceholder: { SA: 'الرياض', JO: 'عمّان' },
     vehicleAssignment: 'تعيين {{alVehicle}}',
     assignVehicle: 'تعيين {{vehicle}}',
     assignedVehicle: '{{alVehicle}} المعيّنة',

@@ -231,6 +231,10 @@ const en = {
     emailAddress: 'Email Address',
     address: 'Address',
     city: 'City',
+    // Example address and city in the fleet's own country, keyed by its ISO
+    // code. A country with no entry here gets no placeholder at all.
+    addressPlaceholder: { SA: 'Al Olaya, Riyadh', JO: 'Abdoun, Amman' },
+    cityPlaceholder: { SA: 'Riyadh', JO: 'Amman' },
     vehicleAssignment: '{{Vehicle}} Assignment',
     assignVehicle: 'Assign {{Vehicle}}',
     assignedVehicle: 'Assigned {{Vehicle}}',
