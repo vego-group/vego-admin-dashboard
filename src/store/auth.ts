@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { ApiError } from '@/lib/api/client';
+import { ApiError, setUnauthorizedHandler } from '@/lib/api/client';
 import { fieldErrorFrom, type FieldError } from '@/lib/api-errors';
 import { toE164 } from '@/lib/country';
+import { logger } from '@/lib/logger';
 import type { DialCode, IsoCountryCode, User } from '@/types';
 
 // ── Raw API shapes ────────────────────────────────────────────────────────────
@@ -53,8 +54,10 @@ export interface AuthResult {
  *
  * - `not_fleet_admin` — the shared staff OTP login let a non-fleet-admin account
  *   (e.g. a superadmin) in, and `/fleet-admin/me` answered 403.
+ * - `session_expired` — an authenticated request answered 401: the token
+ *   expired or was revoked.
  */
-export type SignOutReason = 'not_fleet_admin';
+export type SignOutReason = 'not_fleet_admin' | 'session_expired';
 
 interface AuthState {
   user: User | null;
@@ -72,6 +75,9 @@ interface AuthState {
   setLoginCountry: (country: LoginCountry) => void;
   sendOtp: (input: SendOtpInput) => Promise<AuthResult>;
   verifyOtp: (otp: string) => Promise<AuthResult>;
+  /** The operator's own sign-out: revoke the token on the server, then end the session here. */
+  logout: () => Promise<void>;
+  /** End the session in this browser only. */
   signOut: (reason?: SignOutReason) => void;
   clearError: () => void;
 }
@@ -113,6 +119,36 @@ async function authFetch<T>(path: string, body: Record<string, string>): Promise
   }
 
   return res.json() as Promise<T>;
+}
+
+/** How long sign-out waits for the server before ending the session locally anyway. */
+const LOGOUT_TIMEOUT_MS = 5_000;
+
+/**
+ * Revoke the token on the server: `POST /super-admin/logout`, the shared staff
+ * auth this app signs in through (`/super-admin/login`, `/super-admin/verify-otp`).
+ *
+ * Best effort. A failure, a timeout or a 401 (the token had already expired)
+ * is logged and the caller signs out locally regardless — the operator asked
+ * to leave, and nothing here may keep them signed in. It runs outside the
+ * shared apiClient so that a 401 here does not read as "your session expired".
+ */
+async function revokeToken(token: string): Promise<void> {
+  if (!BASE_URL) return;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LOGOUT_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE_URL}/super-admin/logout`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+    if (!res.ok) logger.warn(`[auth] Server logout answered ${res.status}; signing out locally anyway.`);
+  } catch (err) {
+    logger.warn('[auth] Server logout failed; signing out locally anyway:', err);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -211,6 +247,12 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
+      logout: async () => {
+        const { token } = get();
+        if (token) await revokeToken(token);
+        get().signOut();
+      },
+
       // The country choice survives sign-out on purpose: it is a preference, not
       // a credential, and re-login should not ask for it again.
       signOut: (reason) =>
@@ -232,3 +274,16 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
+
+// A 401 from any API call ends the session. Only the first one acts: signing
+// out clears `isAuthenticated`, so the 401s of requests that were in flight
+// alongside it, or that land after a deliberate sign-out, change nothing.
+// Signing out is enough to reach the login page: DashboardShell sends a
+// signed-out operator there once, and the login page reads the reason. A 403
+// stays a per-page "no access" state.
+setUnauthorizedHandler(() => {
+  const { isAuthenticated, signOut } = useAuthStore.getState();
+  if (!isAuthenticated) return;
+  logger.warn('[auth] An API request answered 401 — the session has expired; signing out.');
+  signOut('session_expired');
+});

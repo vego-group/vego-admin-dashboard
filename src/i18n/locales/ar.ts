@@ -295,6 +295,12 @@ const ar: Translations = {
     docPending: 'قيد المراجعة',
     docVerified: 'موثّق',
     docRejected: 'مرفوض',
+    // `{{count}}` هو "0/3" — الموثّق من أصل المستندات الثلاثة.
+    docsVerifiedCount: 'موثّق {{count}}',
+    docUploadFailedTitle: 'تم حفظ السائق، لكن لم يتم رفع المستندات.',
+    docUploadFailedStatus: 'ردّ الخادم برمز HTTP {{status}}.',
+    docUploadFailedNetwork: 'تعذّر الاتصال بالخادم.',
+    docUploadRetryHint: 'صحّح الملفات ثم احفظ مرة أخرى لإعادة محاولة الرفع.',
     // Pending requests tab
     pendingRequests: 'طلبات التسجيل',
     registrationRequests: 'طلبات التسجيل',
@@ -375,6 +381,7 @@ const ar: Translations = {
     motorcycleUnassignedDescription: 'لم يعد للسائق {{driver}} {{vehicle}} معيَّنة.',
     topUpWallet: 'شحن المحفظة',
     topUpWalletDescription: 'إضافة رصيد إلى محفظة السائق',
+    topUpBlockedNotice: 'هذا السائق محظور، ولن يتمكن من استخدام الرصيد حتى يتم إلغاء الحظر.',
     currentBalance: 'الرصيد الحالي',
     // عملة الأسطول نفسها (SAR أو JOD …) ولا تُفترض أبداً — يُستخدم الشكل بدون
     // عملة إلى أن يُحسم `/fleet-admin/me`.
@@ -674,6 +681,47 @@ const ar: Translations = {
     invalidPhone: 'يرجى إدخال رقم هاتف صحيح',
     smartMobility: 'نظام إدارة التنقل الذكي',
     noFleetAdminAccess: 'هذا الحساب ليس لديه صلاحية الدخول إلى لوحة إدارة الأسطول.',
+    sessionExpired: 'انتهت الجلسة، يرجى تسجيل الدخول مرة أخرى.',
+    // صفحة تسجيل الدخول
+    loginSubtitle: 'أدخل رقم هاتفك لتسجيل الدخول إلى حسابك',
+    country: 'الدولة',
+    loadingCountries: 'جارٍ تحميل الدول…',
+    selectCountry: 'يرجى اختيار الدولة',
+    selectCountryToContinue: 'اختر الدولة للمتابعة',
+    phoneDigitsHint: 'أدخل رقم جوالك في {{country}} المكوّن من {{digits}} أرقام',
+    continue: 'متابعة ←',
+    secureLogin: 'تسجيل دخول آمن عبر رمز التحقق',
+    agreePrefix: 'بتسجيل الدخول، فإنك توافق على',
+    termsOfService: 'شروط الخدمة',
+    agreeJoin: ' و',
+    privacyPolicy: 'سياسة الخصوصية',
+    // صفحة رمز التحقق
+    verifyTitle: 'تحقق من رقمك',
+    codeSentTo: 'أدخل الرمز المكوّن من 6 أرقام المرسل إلى',
+    verificationCode: 'رمز التحقق',
+    verifyAndSignIn: 'تحقق وسجّل الدخول ←',
+    didntReceiveCode: 'لم يصلك الرمز؟',
+    resendCode: 'إعادة إرسال الرمز',
+    otpDigit: 'الرقم {{n}} من الرمز',
+    // اللوحة التعريفية بجانب النموذجين
+    brandTagline: 'نظام إدارة أساطيل المركبات الكهربائية',
+    featureMonitoring: 'مراقبة الأسطول في الوقت الفعلي',
+    featureCharging: 'إدارة ذكية للشحن',
+    featureAnalytics: 'تحليلات شاملة',
+  },
+  notFound: {
+    title: 'الصفحة غير موجودة',
+    description: 'عذراً، لم نتمكن من العثور على الصفحة التي تبحث عنها.',
+    backToDashboard: 'العودة إلى لوحة التحكم',
+  },
+  // النوافذ المنبثقة والتلميحات على خرائط لوحة التحكم وتبديل البطاريات والمناطق
+  mapPopup: {
+    minWait: 'انتظار {{minutes}} دقيقة',
+    swapsToday: '{{count}} عملية تبديل اليوم',
+    speed: 'السرعة',
+    avgWait: 'متوسط الانتظار: {{minutes}} دقيقة',
+    todaySwaps: 'اليوم: {{count}} عملية تبديل',
+    liveUpdatesActive: 'التحديثات المباشرة: نشطة',
   },
   batterySwapping: {
     title: 'تبديل البطاريات',
@@ -830,6 +878,13 @@ const ar: Translations = {
     // الشحن عبر HyperPay (الأردن)
     saveCardForLater: 'حفظ هذه البطاقة لعمليات الشحن القادمة',
     saveCardForLaterHint: 'تظهر البطاقات المحفوظة في نموذج الدفع، وتُدخِل رمز التحقق (CVV) في كل مرة.',
+    // بطاقة محفوظة أو بطاقة جديدة — يُختار قبل إنشاء عملية الدفع
+    cardChoiceLabel: 'الدفع باستخدام',
+    cardChoiceSaved: 'بطاقة محفوظة',
+    cardChoiceSavedHint: 'اختر البطاقة وأدخِل رمز التحقق (CVV) في الصفحة التالية.',
+    cardChoiceNew: 'بطاقة جديدة',
+    cardChoiceNewHint: 'أدخِل بيانات البطاقة في الصفحة التالية.',
+    noSavedCardsFound: 'لا توجد بطاقة محفوظة، ادفع ببطاقة جديدة.',
     hyperpayAmountPrecision: 'يقبل الشحن بالبطاقة في الأردن منزلتين عشريتين كحدٍّ أقصى.',
     hyperpayWholeOnlyInTest: 'خادم الدفع التجريبي يقبل المبالغ الصحيحة فقط (مثلاً 7 وليس 7.50).',
     payPageTitle: 'الدفع بالبطاقة',

@@ -7,6 +7,7 @@ import { ZONE_TYPES, ZONE_TYPE_LIST } from '@/lib/zone-types';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import { fitToPoints, type LatLngTuple } from '@/lib/map-fit';
+import { html, trustedHtml, type TrustedHtml } from '@/lib/html';
 import type { Vehicle, Zone, ZonePoint } from '@/types';
 
 export interface ZoneMapProps {
@@ -40,28 +41,37 @@ function avgCenter(pts: ZonePoint[]): ZonePoint {
  * `noRide`, `parking` — that no longer exist in `ZONE_TYPES`. Every lookup but
  * `slow` therefore missed and printed the raw key, so an Arabic map read
  * "normal" and "restricted". The dictionary is the source for all three now.
+ *
+ * The zone name is API data and goes through the html`` tag, which escapes it
+ * (see @/lib/html). The tooltip card is rgb(var(--card)), so its text uses the
+ * theme tokens rather than a fixed dark colour.
  */
-function zoneTooltipHtml(zone: Zone, t: (key: string) => string): string {
+function zoneTooltipHtml(zone: Zone, t: (key: string) => string): TrustedHtml {
   const cfg = ZONE_TYPES[zone.type];
   const label = t(`zones.types.${cfg.labelKey}Long`);
   const speed = cfg.speedLabelOverride === 'no_riding'
     ? t('zones.noRiding')
     : `${zone.speedLimitKmh} ${t('common.kmh')}`;
-  return `<div style="font-family:system-ui,sans-serif;padding:10px 14px;min-width:170px">
+  return html`<div style="font-family:system-ui,sans-serif;padding:10px 14px;min-width:170px">
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
       <span style="width:8px;height:8px;border-radius:50%;background:${cfg.color};flex-shrink:0"></span>
-      <span style="font-size:12px;font-weight:700;color:#0f172a">${zone.name}</span>
+      <span style="font-size:12px;font-weight:700;color:rgb(var(--foreground))">${zone.name}</span>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;gap:12px">
-      <span style="color:#64748b">${label}</span>
+      <span style="color:rgb(var(--muted-foreground))">${label}</span>
       <span style="font-weight:700;padding:1px 7px;border-radius:999px;background:${cfg.color}22;color:${cfg.color}">${speed}</span>
     </div>
   </div>`;
 }
 
+/** The zone's name, pinned at its centre. */
+function zoneLabelHtml(zone: Zone, color: string): TrustedHtml {
+  return html`<div style="transform:translate(-50%,-50%);white-space:nowrap"><span style="display:inline-block;background:${color};color:white;padding:2px 8px;border-radius:5px;font-size:10px;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,0.25)">${zone.name}</span></div>`;
+}
+
 /* ── Vehicle icon HTML ───────────────────────────────────── */
 
-const BIKE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/></svg>`;
+const BIKE_SVG = trustedHtml(`<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/></svg>`);
 
 const V_COLORS: Record<string, string> = {
   active:      'linear-gradient(135deg,#10b981,#059669)',
@@ -179,7 +189,7 @@ export default function ZoneMapInner({
           opacity:      0.9,
         });
 
-        poly.bindTooltip(zoneTooltipHtml(zone, t), {
+        poly.bindTooltip(String(zoneTooltipHtml(zone, t)), {
           sticky:    true,
           className: 'zone-tooltip',
           direction: 'top',
@@ -197,7 +207,7 @@ export default function ZoneMapInner({
         const center = avgCenter(zone.polygon);
         const labelIcon = L.divIcon({
           className: '',
-          html: `<div style="transform:translate(-50%,-50%);white-space:nowrap"><span style="display:inline-block;background:${cfg.color};color:white;padding:2px 8px;border-radius:5px;font-size:10px;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,0.25)">${zone.name}</span></div>`,
+          html: String(zoneLabelHtml(zone, cfg.color)),
           iconSize:   [0, 0],
           iconAnchor: [0, 0],
         });
@@ -206,7 +216,8 @@ export default function ZoneMapInner({
         zoneLayers.current.push(label);
       }
     })();
-  }, [mapReady, zones, selectedZoneId]);
+    // `t` too: a language switch rebuilds the tooltips in the new language.
+  }, [mapReady, zones, selectedZoneId, t]);
 
   /* 2b ── Frame the real geometry, once. See @/lib/map-fit.
      Kept out of the drawing effects so it never re-runs mid-interaction, and it
@@ -248,7 +259,7 @@ export default function ZoneMapInner({
         const grad = V_COLORS[v.status] ?? V_COLORS.active;
         const icon = L.divIcon({
           className: '',
-          html: `<div style="width:28px;height:28px;border-radius:50%;background:${grad};display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.2);border:2px solid white">${BIKE_SVG}</div>`,
+          html: String(html`<div style="width:28px;height:28px;border-radius:50%;background:${grad};display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.2);border:2px solid white">${BIKE_SVG}</div>`),
           iconSize:   [28, 28],
           iconAnchor: [14, 14],
         });

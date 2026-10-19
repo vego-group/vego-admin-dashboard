@@ -157,7 +157,9 @@ function HyperPayPayment() {
             </div>
 
             <div className="px-6 py-5">
-              {checkout.tokenizationEnabled && (
+              {/* Only a "saved" checkout lists stored cards. A new-card checkout
+                  shows the card form alone, whether or not saving is on. */}
+              {checkout.cardChoice === 'saved' && (
                 <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">{t('wallet.payPageSavedCardsNote')}</p>
               )}
               {/* Re-keyed on the language: a switch tears the widget down and

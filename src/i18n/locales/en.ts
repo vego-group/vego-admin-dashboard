@@ -278,6 +278,12 @@ const en = {
     docPending: 'Pending Review',
     docVerified: 'Verified',
     docRejected: 'Rejected',
+    // `{{count}}` is "0/3" — verified out of the three documents.
+    docsVerifiedCount: '{{count}} verified',
+    docUploadFailedTitle: 'The driver was saved, but the documents were not uploaded.',
+    docUploadFailedStatus: 'The server answered HTTP {{status}}.',
+    docUploadFailedNetwork: 'The server could not be reached.',
+    docUploadRetryHint: 'Fix the files and save again to retry the upload.',
     // Pending requests tab
     pendingRequests: 'Pending Requests',
     registrationRequests: 'Registration Requests',
@@ -358,6 +364,7 @@ const en = {
     motorcycleUnassignedDescription: '{{driver}} no longer has a {{vehicle}} assigned.',
     topUpWallet: 'Top-Up Wallet',
     topUpWalletDescription: "Add funds to driver's wallet",
+    topUpBlockedNotice: "This driver is blocked. They can't use this balance until you unblock them.",
     currentBalance: 'Current Balance',
     // The currency is the fleet's own (SAR, JOD, …) and is never assumed — the
     // unlabelled form is used until `/fleet-admin/me` resolves it.
@@ -667,6 +674,47 @@ const en = {
     invalidPhone: 'Please enter a valid phone number',
     smartMobility: 'Smart Mobility Management System',
     noFleetAdminAccess: "This account doesn't have access to the Fleet Admin dashboard.",
+    sessionExpired: 'Your session has expired. Please sign in again.',
+    // Login page
+    loginSubtitle: 'Enter your phone number to sign in to your account',
+    country: 'Country',
+    loadingCountries: 'Loading countries…',
+    selectCountry: 'Please select a country',
+    selectCountryToContinue: 'Select a country to continue',
+    phoneDigitsHint: 'Enter your {{digits}}-digit {{country}} mobile number',
+    continue: 'Continue →',
+    secureLogin: 'Secure login with OTP verification',
+    agreePrefix: 'By signing in, you agree to our',
+    termsOfService: 'Terms of Service',
+    agreeJoin: ' and ',
+    privacyPolicy: 'Privacy Policy',
+    // OTP page
+    verifyTitle: 'Verify Your Number',
+    codeSentTo: 'Enter the 6-digit code sent to',
+    verificationCode: 'Verification Code',
+    verifyAndSignIn: 'Verify & Sign In →',
+    didntReceiveCode: "Didn't receive the code?",
+    resendCode: 'Resend Code',
+    otpDigit: 'Digit {{n}} of the code',
+    // Brand panel beside both forms
+    brandTagline: 'Electric Bike Fleet Management System',
+    featureMonitoring: 'Real-time Fleet Monitoring',
+    featureCharging: 'Smart Charging Management',
+    featureAnalytics: 'Comprehensive Analytics',
+  },
+  notFound: {
+    title: 'Page not found',
+    description: "Sorry, we couldn't find the page you're looking for.",
+    backToDashboard: 'Back to dashboard',
+  },
+  // Leaflet popups and tooltips on the Dashboard, Battery Swapping and Zones maps
+  mapPopup: {
+    minWait: '{{minutes}} min wait',
+    swapsToday: '{{count}} swaps today',
+    speed: 'Speed',
+    avgWait: 'Avg Wait: {{minutes}} min',
+    todaySwaps: 'Today: {{count}} swaps',
+    liveUpdatesActive: 'Live Updates: Active',
   },
   batterySwapping: {
     title: 'Battery Swapping',
@@ -823,6 +871,13 @@ const en = {
     // HyperPay top-up (Jordan)
     saveCardForLater: 'Save this card for future top-ups',
     saveCardForLaterHint: 'Saved cards appear in the payment form. You enter the CVV each time.',
+    // Saved card or new card — chosen before the checkout is created
+    cardChoiceLabel: 'Pay with',
+    cardChoiceSaved: 'Saved card',
+    cardChoiceSavedHint: 'Pick the card and enter its CVV on the next page.',
+    cardChoiceNew: 'New card',
+    cardChoiceNewHint: 'Enter the card details on the next page.',
+    noSavedCardsFound: 'No saved card found. Please pay with a new card.',
     hyperpayAmountPrecision: 'Card top-ups in Jordan accept at most 2 decimal places.',
     hyperpayWholeOnlyInTest: 'The test payment server accepts whole amounts only (for example 7, not 7.50).',
     payPageTitle: 'Card payment',
@@ -830,7 +885,7 @@ const en = {
     payPageAmount: 'Amount to pay',
     payPageForDriver: 'Top-up for {{name}}',
     payPageTestMode: 'Test mode',
-    payPageSavedCardsNote: 'Cards you saved appear in the form below. Enter the CVV to pay with one.',
+    payPageSavedCardsNote: 'Your saved cards appear below. Enter the CVV to pay with one.',
     payPageLoading: 'Loading the payment form…',
     payPageLoadFailed: 'The payment form could not be loaded. Go back and start the top-up again.',
     payPageExpiredTitle: 'Session expired',

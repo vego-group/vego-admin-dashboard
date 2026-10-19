@@ -4,6 +4,8 @@ import 'leaflet/dist/leaflet.css';
 import { useEffect, useRef, useState } from 'react';
 import type { Map as LeafletMap, Marker as LeafletMarker } from 'leaflet';
 import { fitToPoints, type LatLngTuple } from '@/lib/map-fit';
+import { clampPercent, html, trustedHtml, type TrustedHtml } from '@/lib/html';
+import { useI18n } from '@/i18n/I18nProvider';
 import type { Vehicle, BatteryStation } from '@/types';
 
 export interface LiveFleetMapProps {
@@ -11,6 +13,8 @@ export interface LiveFleetMapProps {
   stations?: BatteryStation[];
   height?: number;
 }
+
+type Translate = ReturnType<typeof useI18n>['t'];
 
 /* ── SVG icons (inline strings for divIcon) ─────────────── */
 const BIKE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/></svg>`;
@@ -23,65 +27,72 @@ const VEHICLE_COLORS: Record<string, { grad: string; ring: string }> = {
   maintenance: { grad: '#fb923c,#ea580c', ring: 'rgba(251,146,60,0.28)' },
 };
 
-function pinHtml(size: number, grad: string, ring: string, svg: string) {
+function pinHtml(size: number, grad: string, ring: string, svg: string): TrustedHtml {
   const pad = 10;
-  return `<div style="position:relative;width:${size}px;height:${size}px"><div style="position:absolute;inset:-${pad}px;border-radius:50%;background:${ring};animation:markerPulse 2s ease-in-out infinite"></div><div style="position:relative;width:${size}px;height:${size}px;border-radius:50%;background:linear-gradient(135deg,${grad});display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.22);border:2.5px solid white">${svg}</div></div>`;
+  return html`<div style="position:relative;width:${size}px;height:${size}px"><div style="position:absolute;inset:-${pad}px;border-radius:50%;background:${ring};animation:markerPulse 2s ease-in-out infinite"></div><div style="position:relative;width:${size}px;height:${size}px;border-radius:50%;background:linear-gradient(135deg,${grad});display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.22);border:2.5px solid white">${trustedHtml(svg)}</div></div>`;
 }
 
 /* ── Popup HTML generators ───────────────────────────────── */
+//
+// Every API value goes through the html`` tag, which escapes it (see
+// @/lib/html). Text sitting on the popup card uses the theme tokens: the card
+// is rgb(var(--card)), which is dark in dark mode.
 
-function stationPopup(s: BatteryStation): string {
-  const avail = Math.round((s.available / s.totalCapacity) * 100);
+function stationPopup(s: BatteryStation, t: Translate): TrustedHtml {
+  const avail = Math.round(clampPercent((s.available / s.totalCapacity) * 100));
   const barColor = avail >= 60 ? '#10b981' : avail >= 30 ? '#f59e0b' : '#ef4444';
   const batIconBlue = BAT_SVG.replace(/stroke="white"/g, 'stroke="#0284c7"').replace('width="15" height="15"', 'width="16" height="16"');
-  return `<div style="font-family:system-ui,sans-serif;width:256px;padding:16px">
+  return html`<div style="font-family:system-ui,sans-serif;width:256px;padding:16px">
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-    <div style="width:32px;height:32px;background:#e0f2fe;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${batIconBlue}</div>
-    <div><div style="font-size:13px;font-weight:600;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:185px">${s.name}</div><div style="font-size:11px;color:#64748b">${s.district} · Battery Station</div></div>
+    <div style="width:32px;height:32px;background:#e0f2fe;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${trustedHtml(batIconBlue)}</div>
+    <div style="min-width:0"><div style="font-size:13px;font-weight:600;color:rgb(var(--foreground));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:185px">${s.name}</div><div style="font-size:11px;color:rgb(var(--muted-foreground))">${s.district} · ${t('dashboard.batteryStation')}</div></div>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
-    <div style="background:#f0fdf4;border-radius:8px;padding:8px;text-align:center"><div style="font-size:16px;font-weight:700;color:#16a34a">${s.available}</div><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">Available</div></div>
-    <div style="background:#fff7ed;border-radius:8px;padding:8px;text-align:center"><div style="font-size:16px;font-weight:700;color:#ea580c">${s.inUse}</div><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">In Use</div></div>
-    <div style="background:#f1f5f9;border-radius:8px;padding:8px;text-align:center"><div style="font-size:16px;font-weight:700;color:#475569">${s.totalCapacity}</div><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">Total</div></div>
+    <div style="background:#f0fdf4;border-radius:8px;padding:8px;text-align:center"><div style="font-size:16px;font-weight:700;color:#16a34a">${s.available}</div><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">${t('dashboard.available')}</div></div>
+    <div style="background:#fff7ed;border-radius:8px;padding:8px;text-align:center"><div style="font-size:16px;font-weight:700;color:#ea580c">${s.inUse}</div><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">${t('dashboard.inUse')}</div></div>
+    <div style="background:#f1f5f9;border-radius:8px;padding:8px;text-align:center"><div style="font-size:16px;font-weight:700;color:#475569">${s.totalCapacity}</div><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">${t('dashboard.total')}</div></div>
   </div>
   <div style="margin-bottom:10px">
-    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:#64748b">Availability</span><span style="font-weight:600;color:#1e293b">${avail}%</span></div>
-    <div style="height:6px;background:#f1f5f9;border-radius:999px;overflow:hidden"><div style="height:100%;background:${barColor};width:${avail}%;border-radius:999px"></div></div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:rgb(var(--muted-foreground))">${t('dashboard.availability')}</span><span style="font-weight:600;color:rgb(var(--foreground))">${avail}%</span></div>
+    <div style="height:6px;background:rgb(var(--muted));border-radius:999px;overflow:hidden"><div style="height:100%;background:${barColor};width:${avail}%;border-radius:999px"></div></div>
   </div>
-  <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b"><span>&#9201; ${s.avgWaitTimeMinutes} min wait</span><span>${s.todaySwaps} swaps today</span></div>
+  <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:rgb(var(--muted-foreground))"><span>&#9201; ${t('mapPopup.minWait', { minutes: s.avgWaitTimeMinutes })}</span><span>${t('mapPopup.swapsToday', { count: s.todaySwaps })}</span></div>
 </div>`;
 }
 
-const STATUS_BADGE: Record<string, { label: string; bg: string; color: string }> = {
-  active:      { label: 'Active',      bg: '#dcfce7', color: '#15803d' },
-  charging:    { label: 'Charging',    bg: '#e0f2fe', color: '#0369a1' },
-  idle:        { label: 'Idle',        bg: '#f1f5f9', color: '#475569' },
-  maintenance: { label: 'Maintenance', bg: '#ffedd5', color: '#c2410c' },
+const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
+  active:      { bg: '#dcfce7', color: '#15803d' },
+  charging:    { bg: '#e0f2fe', color: '#0369a1' },
+  idle:        { bg: '#f1f5f9', color: '#475569' },
+  maintenance: { bg: '#ffedd5', color: '#c2410c' },
 };
 
-function vehiclePopup(v: Vehicle): string {
-  const sc = STATUS_BADGE[v.status] ?? STATUS_BADGE.idle;
-  const batColor = v.batteryLevel >= 60 ? '#10b981' : v.batteryLevel >= 30 ? '#f59e0b' : '#ef4444';
+function vehiclePopup(v: Vehicle, t: Translate): TrustedHtml {
+  // An unknown status is drawn as idle, label and colours alike.
+  const status = Object.prototype.hasOwnProperty.call(STATUS_BADGE, v.status) ? v.status : 'idle';
+  const sc = STATUS_BADGE[status];
+  const battery = clampPercent(v.batteryLevel);
+  const batColor = battery >= 60 ? '#10b981' : battery >= 30 ? '#f59e0b' : '#ef4444';
   const bikeIconIndigo = BIKE_SVG.replace(/stroke="white"/g, 'stroke="#4f46e5"');
   const driverLine = v.assignedDriverName
-    ? `<div style="font-size:11px;color:#475569;margin-bottom:10px">&#128100; ${v.assignedDriverName}</div>` : '';
+    ? html`<div style="font-size:11px;color:rgb(var(--muted-foreground));margin-bottom:10px">&#128100; ${v.assignedDriverName}</div>` : '';
   const speedLine = v.currentSpeedKmh > 0
-    ? `<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px"><span style="color:#64748b">Speed</span><span style="font-weight:600;color:#1e293b">${v.currentSpeedKmh} km/h</span></div>` : '';
-  return `<div style="font-family:system-ui,sans-serif;width:224px;padding:16px">
+    ? html`<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px"><span style="color:rgb(var(--muted-foreground))">${t('mapPopup.speed')}</span><span style="font-weight:600;color:rgb(var(--foreground))">${v.currentSpeedKmh} ${t('common.kmh')}</span></div>` : '';
+  return html`<div style="font-family:system-ui,sans-serif;width:224px;padding:16px">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px">
-    <div style="display:flex;align-items:center;gap:8px">
-      <div style="width:32px;height:32px;background:#eef2ff;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${bikeIconIndigo}</div>
-      <div><div style="font-size:13px;font-weight:600;color:#0f172a"><span dir="ltr">${v.plateNumber}</span></div><div style="font-size:11px;color:#64748b">${v.model}</div></div>
+    <div style="display:flex;align-items:center;gap:8px;min-width:0">
+      <div style="width:32px;height:32px;background:#eef2ff;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${trustedHtml(bikeIconIndigo)}</div>
+      <div style="min-width:0"><div style="font-size:13px;font-weight:600;color:rgb(var(--foreground))"><span dir="ltr">${v.plateNumber}</span></div><div style="font-size:11px;color:rgb(var(--muted-foreground))">${v.model}</div></div>
     </div>
-    <span style="font-size:10px;padding:2px 8px;border-radius:999px;font-weight:600;background:${sc.bg};color:${sc.color};flex-shrink:0;white-space:nowrap">${sc.label}</span>
+    <span style="font-size:10px;padding:2px 8px;border-radius:999px;font-weight:600;background:${sc.bg};color:${sc.color};flex-shrink:0;white-space:nowrap">${t(`status.${status}`)}</span>
   </div>
   ${driverLine}
   <div style="margin-bottom:8px">
-    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:#64748b">Battery</span><span style="font-weight:600;color:#1e293b">${v.batteryLevel}%</span></div>
-    <div style="height:6px;background:#f1f5f9;border-radius:999px;overflow:hidden"><div style="height:100%;background:${batColor};width:${v.batteryLevel}%;border-radius:999px"></div></div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:rgb(var(--muted-foreground))">${t('fleet.battery')}</span><span style="font-weight:600;color:rgb(var(--foreground))">${battery}%</span></div>
+    <div style="height:6px;background:rgb(var(--muted));border-radius:999px;overflow:hidden"><div style="height:100%;background:${batColor};width:${battery}%;border-radius:999px"></div></div>
   </div>
   ${speedLine}
-  <div style="font-size:11px;color:#64748b">&#128205; ${v.location}</div>
+  <div style="font-size:11px;color:rgb(var(--muted-foreground))">&#128205; ${v.location}</div>
 </div>`;
 }
 
@@ -92,6 +103,7 @@ export default function LiveFleetMapInner({
   stations = [],
   height = 380,
 }: LiveFleetMapProps) {
+  const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef       = useRef<LeafletMap | null>(null);
   const markersRef   = useRef<LeafletMarker[]>([]);
@@ -158,7 +170,7 @@ export default function LiveFleetMapInner({
         if (!s.coordinates) continue;
         const icon = L.divIcon({
           className: '',
-          html: pinHtml(40, '#38bdf8,#0284c7', 'rgba(56,189,248,0.25)', BAT_SVG),
+          html: String(pinHtml(40, '#38bdf8,#0284c7', 'rgba(56,189,248,0.25)', BAT_SVG)),
           iconSize: [40, 40],
           iconAnchor: [20, 20],
           popupAnchor: [0, -26],
@@ -166,7 +178,7 @@ export default function LiveFleetMapInner({
         const m: LeafletMarker = L.marker(
           [s.coordinates.lat, s.coordinates.lng],
           { icon }
-        ).bindPopup(stationPopup(s), {
+        ).bindPopup(String(stationPopup(s, t)), {
           maxWidth: 280,
           minWidth: 280,
           className: 'map-popup',
@@ -186,7 +198,7 @@ export default function LiveFleetMapInner({
         const c = VEHICLE_COLORS[v.status] ?? VEHICLE_COLORS.active;
         const icon = L.divIcon({
           className: '',
-          html: pinHtml(34, c.grad, c.ring, BIKE_SVG),
+          html: String(pinHtml(34, c.grad, c.ring, BIKE_SVG)),
           iconSize: [34, 34],
           iconAnchor: [17, 17],
           popupAnchor: [0, -22],
@@ -194,7 +206,7 @@ export default function LiveFleetMapInner({
         const m: LeafletMarker = L.marker(
           [v.coordinates.lat, v.coordinates.lng],
           { icon }
-        ).bindPopup(vehiclePopup(v), {
+        ).bindPopup(String(vehiclePopup(v, t)), {
           maxWidth: 260,
           minWidth: 240,
           className: 'map-popup',
@@ -213,7 +225,8 @@ export default function LiveFleetMapInner({
         hasFittedRef.current = fitToPoints(L, map, points);
       }
     })();
-  }, [mapReady, vehicles, stations]);
+    // `t` too: a language switch rebuilds the popups in the new language.
+  }, [mapReady, vehicles, stations, t]);
 
   return (
     <div
@@ -226,7 +239,7 @@ export default function LiveFleetMapInner({
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
           <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
         </span>
-        Live Updates
+        {t('common.liveUpdates')}
       </div>
       <div ref={containerRef} className="h-full w-full" />
     </div>

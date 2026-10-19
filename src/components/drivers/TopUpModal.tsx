@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Wallet, CreditCard, Shield, ChevronLeft, Plus, Loader2, MapPin } from 'lucide-react';
+import { Wallet, CreditCard, Shield, ChevronLeft, Plus, Loader2, MapPin, AlertTriangle, Info } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { BillingAddressForm } from '@/components/wallet/BillingAddressForm';
@@ -22,7 +22,7 @@ import { amountStep, fractionDigitsOf, toMinorUnits } from '@/lib/money';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { hyperPayRefusalFrom, topUpBelowMinimumFrom, walletApi, type MoyasarPaymentData } from '@/lib/api';
 import type {
-  Driver, HyperPayCheckout, MinTopUpReason, Money, SavedCard, ServicePrice, TopUpOptions,
+  CardChoice, Driver, HyperPayCheckout, MinTopUpReason, Money, SavedCard, ServicePrice, TopUpOptions,
 } from '@/types';
 
 interface TopUpModalProps {
@@ -60,6 +60,14 @@ function gatewayNameFor(isoCountryCode: string | null): string | null {
   return isoCountryCode === 'SA' ? 'Moyasar' : null;
 }
 
+/** "VISA •••• 0010 · 01/39" — one left-to-right token; render it inside `dir="ltr"`. */
+function savedCardToken(card: SavedCard): string {
+  const expiry = card.expMonth && card.expYear
+    ? ` · ${String(card.expMonth).padStart(2, '0')}/${String(card.expYear).slice(-2)}`
+    : '';
+  return `${brandLabel(card.brand)} •••• ${card.last4}${expiry}`;
+}
+
 export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const { t, locale } = useI18n();
   const { fleet, formatMoney, currency, currencyDecimals, currencyStatus, isoCountryCode } = useFleetContext();
@@ -75,10 +83,14 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
 
   // HyperPay (Jordan). `initiate` is the authority on the gateway; the fleet's
   // country only shapes this form before it answers — the saved-cards list is
-  // hidden, the amount is held to HyperPay's two decimals, and the "Save this
-  // card" choice is offered once a previous checkout said tokenization is on.
+  // hidden, the amount is held to HyperPay's two decimals, and the admin picks
+  // a saved card or a new one (with "Save this card") before the checkout is
+  // created, because `card_choice` decides what the widget will show.
   const [hints, setHints]             = useState<HyperPayHints | null>(null);
   const [saveCard, setSaveCard]       = useState(false);
+  const [cardChoice, setCardChoice]   = useState<CardChoice>('new');
+  /** Why the choice was switched to a new card (`422 no_saved_cards`). */
+  const [cardChoiceNotice, setCardChoiceNotice] = useState('');
   const [redirecting, setRedirecting] = useState(false);
   const expectHyperPay = isoCountryCode === 'JO';
   const fleetId = fleet?.id ?? null;
@@ -142,6 +154,22 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     await Promise.all([balance, opts]);
   }, []);
 
+  /**
+   * This admin's saved cards, both gateways. With `chooseDefault`, a Jordanian
+   * form also starts on "Saved card" when there is a HyperPay card to pay with.
+   */
+  const loadSavedCards = useCallback((chooseDefault: boolean) => {
+    setCardsLoading(true);
+    return walletApi.getSavedCards()
+      .then((cards) => {
+        setSavedCards(cards);
+        setSelectedCardId((current) => (cards.some((c) => c.id === current) ? current : cards[0]?.id ?? null));
+        if (chooseDefault) setCardChoice(cards.some((c) => c.gateway === 'hyperpay') ? 'saved' : 'new');
+      })
+      .catch(() => setSavedCards([]))
+      .finally(() => setCardsLoading(false));
+  }, []);
+
   // Reset on open
   useEffect(() => {
     if (!open || !driver) return;
@@ -158,20 +186,16 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     setSelectedCardId(null);
     setCharging(false);
     setSaveCard(false);
+    setCardChoice('new');
+    setCardChoiceNotice('');
     setRedirecting(false);
 
     void loadWallet(driver.id, driver.walletBalance ?? 0);
 
-    // Prefetch saved cards so the card step can default to the list view.
-    setCardsLoading(true);
-    walletApi.getSavedCards()
-      .then((cards) => {
-        setSavedCards(cards);
-        if (cards.length > 0) setSelectedCardId(cards[0].id);
-      })
-      .catch(() => setSavedCards([]))
-      .finally(() => setCardsLoading(false));
-  }, [open, driver, loadWallet]);
+    // Prefetch saved cards: the Saudi card step defaults to the list view, and
+    // a Jordanian form offers "Saved card" before anything is initiated.
+    void loadSavedCards(true);
+  }, [open, driver, loadWallet, loadSavedCards]);
 
   // Kept apart from the reset above: the fleet profile can resolve while the
   // modal is open, and that must not wipe what the admin has typed.
@@ -289,6 +313,18 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   // `charge-saved` can take are listed — on a Saudi fleet, all of them.
   const chargeableCards = expectHyperPay ? [] : savedCards.filter((c) => c.gateway !== 'hyperpay');
 
+  // Jordan: the HyperPay cards this admin saved. Choosing "Saved card" sends
+  // `card_choice: "saved"`, and the widget lists these for the admin to pick
+  // one and enter its CVV. With none there is nothing to choose: a new card.
+  const hyperPayCards = expectHyperPay ? savedCards.filter((c) => c.gateway === 'hyperpay') : [];
+  const effectiveChoice: CardChoice = hyperPayCards.length > 0 ? cardChoice : 'new';
+
+  const chooseCard = (choice: CardChoice) => {
+    setCardChoice(choice);
+    setCardChoiceNotice('');
+    if (apiError) setApiError('');
+  };
+
   const hyperPayAmountMessage = (code: 'amount_precision' | 'amount_whole_only_in_test'): string =>
     code === 'amount_precision' ? t('wallet.hyperpayAmountPrecision') : t('wallet.hyperpayWholeOnlyInTest');
 
@@ -365,6 +401,17 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
       setStep('amount');
       return true;
     }
+    if (refusal.code === 'no_saved_cards') {
+      // The card was deleted since this form loaded the list, or the backend
+      // cannot use stored cards right now. Say so, switch to a new card and
+      // re-read the list; the admin presses Pay again — no checkout was made.
+      setCardChoiceNotice(t('wallet.noSavedCardsFound'));
+      setCardChoice('new');
+      setApiError('');
+      setStep('amount');
+      void loadSavedCards(false);
+      return true;
+    }
     return false;
   };
 
@@ -404,8 +451,11 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
         amount:   numAmount,
         // Moyasar asks "save this card?" inside its own form, so the Saudi
         // request always allows it. The HyperPay widget asks nothing — the
-        // admin's checkbox on this form is the consent.
-        saveCard: expectHyperPay ? saveCard : true,
+        // admin's checkbox on this form is the consent, and only a new card
+        // can be saved (`save_card` is not sent with "saved").
+        ...(expectHyperPay
+          ? { cardChoice: effectiveChoice, saveCard: effectiveChoice === 'new' && saveCard }
+          : { saveCard: true }),
       });
       if (result.gateway === 'hyperpay') {
         openHyperPayCheckout(result);
@@ -428,6 +478,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const handleProceedToCard = async () => {
     if (!validateAmount()) return;
     setApiError('');
+    setCardChoiceNotice('');
     if (chargeableCards.length > 0) {
       setCardMode('list');
       setStep('card');
@@ -547,6 +598,19 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
               </div>
             </div>
 
+            {/* A blocked driver can still be funded — a fleet may top up before
+                unblocking — but the admin should know the balance is not
+                usable yet. Nothing about the payment changes. */}
+            {driver.status === 'blocked' && (
+              <div
+                role="note"
+                className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300"
+              >
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{t('drivers.topUpBlockedNotice')}</span>
+              </div>
+            )}
+
             {/* Amount input */}
             <div>
               <label className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-300">
@@ -660,10 +724,77 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
               </p>
             )}
 
-            {/* "Save this card" — HyperPay only, and only once a checkout has
-                said the backend can store cards. The card itself is entered,
+            {/* Jordan: saved card or new card, decided here because it decides
+                what the checkout will be. The cards themselves are picked, and
+                typed, inside the HyperPay widget on the next page. */}
+            {expectHyperPay && cardsLoading && (
+              <div className="h-[52px] animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />
+            )}
+            {expectHyperPay && !cardsLoading && hyperPayCards.length > 0 && (
+              <fieldset>
+                <legend className="mb-1.5 text-xs font-medium text-slate-600 dark:text-slate-300">
+                  {t('wallet.cardChoiceLabel')}
+                </legend>
+                <div className="space-y-2">
+                  {(['saved', 'new'] as const).map((choice) => {
+                    const selected = effectiveChoice === choice;
+                    return (
+                      <label
+                        key={choice}
+                        className={cn(
+                          'flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors',
+                          selected
+                            ? 'border-indigo-500 bg-indigo-50/60 dark:bg-indigo-500/10'
+                            : 'hover:bg-slate-50 dark:hover:bg-slate-800/40',
+                        )}
+                        style={!selected ? { borderColor: 'rgb(var(--border))' } : undefined}
+                      >
+                        <input
+                          type="radio"
+                          name="topup-card-choice"
+                          value={choice}
+                          checked={selected}
+                          onChange={() => chooseCard(choice)}
+                          className="mt-0.5 h-4 w-4 shrink-0 accent-indigo-600"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-medium text-slate-700 dark:text-slate-200">
+                            {choice === 'saved' ? t('wallet.cardChoiceSaved') : t('wallet.cardChoiceNew')}
+                          </span>
+                          {choice === 'saved' && hyperPayCards.map((card) => (
+                            <span key={card.id} className="block text-xs font-medium tabular-nums text-slate-600 dark:text-slate-300">
+                              <span dir="ltr">{savedCardToken(card)}</span>
+                            </span>
+                          ))}
+                          <span className="block text-[11px] text-slate-400">
+                            {choice === 'saved' ? t('wallet.cardChoiceSavedHint') : t('wallet.cardChoiceNewHint')}
+                          </span>
+                        </span>
+                        <CreditCard className={cn('mt-0.5 h-4 w-4 shrink-0', selected ? 'text-indigo-500' : 'text-slate-300 dark:text-slate-600')} />
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            )}
+
+            {/* `422 no_saved_cards`: switched to a new card, and why. */}
+            {expectHyperPay && cardChoiceNotice && (
+              <div
+                role="status"
+                className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300"
+              >
+                <Info className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{cardChoiceNotice}</span>
+              </div>
+            )}
+
+            {/* "Save this card" — HyperPay, new card only, unchecked by default.
+                Shown on every Jordanian new-card top-up: no flag says before
+                `initiate` whether the backend can store cards, and with
+                tokenization off it ignores `save_card`. The card is entered,
                 and later reused with its CVV, inside the HyperPay widget. */}
-            {expectHyperPay && hints?.tokenizationEnabled && (
+            {expectHyperPay && !cardsLoading && effectiveChoice === 'new' && (
               <label className="flex cursor-pointer items-start gap-2.5">
                 <input
                   type="checkbox"
@@ -735,7 +866,9 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                 type="button"
                 variant="primary"
                 isLoading={initiating || redirecting}
-                disabled={amountInvalid}
+                // Jordan: not before the saved cards are known — the choice
+                // they decide is part of what Pay sends.
+                disabled={amountInvalid || (expectHyperPay && cardsLoading)}
                 onClick={handleProceedToCard}
                 className="min-w-[160px]"
                 leftIcon={!(initiating || redirecting) ? <CreditCard className="h-4 w-4" /> : undefined}

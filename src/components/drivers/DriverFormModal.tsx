@@ -10,10 +10,41 @@ import { useCountries } from '@/hooks/useCountries';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { driversApi } from '@/lib/api';
+import { ApiError } from '@/lib/api/client';
 import { fieldErrorFrom } from '@/lib/api-errors';
 import { flagEmoji, matchesPhoneRegex, toNationalNumber } from '@/lib/country';
 import { cn } from '@/lib/cn';
 import type { Country, Driver, DocumentStatus, DriverDocuments } from '@/types';
+
+// ── Document upload failure ───────────────────────────────────────────────────
+
+/**
+ * The driver was saved, but `POST /drivers/{id}/documents` failed.
+ *
+ * Thrown by the submit handler so the form stays open and says why. It carries
+ * the saved driver's id: when a new driver was just created, saving again
+ * must update that driver and retry the upload — not create a second one.
+ */
+export class DocumentUploadError extends Error {
+  constructor(readonly driverId: string, readonly uploadError: unknown) {
+    super(uploadError instanceof Error ? uploadError.message : 'Document upload failed');
+    this.name = 'DocumentUploadError';
+  }
+}
+
+/** What the API said about a refused upload, as lines to show under the documents. */
+function uploadErrorLines(err: unknown, t: (key: string, params?: Record<string, string | number>) => string): string[] {
+  if (err instanceof ApiError) {
+    if (err.status === 0) return [t('drivers.docUploadFailedNetwork')];
+    // Laravel names every refused file ("must be an image", "may not be greater
+    // than 5120 kilobytes"); its top-level message only summarises them.
+    const fieldMessages = Array.from(new Set(Object.values(err.errors ?? {}).flat().filter(Boolean)));
+    if (fieldMessages.length > 0) return fieldMessages;
+    if (err.message && !/^HTTP \d{3}$/.test(err.message)) return [err.message];
+    return [t('drivers.docUploadFailedStatus', { status: err.status })];
+  }
+  return [err instanceof Error && err.message ? err.message : t('common.error')];
+}
 
 // ── Form value shape ──────────────────────────────────────────────────────────
 
@@ -94,6 +125,11 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
   const [countryError, setCountryError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // The documents the API refused after the driver itself was saved, and that
+  // driver's id: saving again then updates it and retries the upload.
+  const [docUploadError, setDocUploadError] = useState<string[] | null>(null);
+  const [savedDriverId, setSavedDriverId] = useState<string | null>(null);
+  const docUploadErrorRef = useRef<HTMLDivElement>(null);
   // Document detail (file_url + rejection_reason) — only the detail endpoint returns these.
   const [docDetail, setDocDetail] = useState<DriverDocuments | null>(null);
 
@@ -101,6 +137,8 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
     if (!open) return;
     setSubmitError(null);
     setCountryError(null);
+    setDocUploadError(null);
+    setSavedDriverId(null);
     if (driver) {
       // Reduce the stored number to its national form. The driver's own dial code
       // leads, because an existing record knows its country synchronously while
@@ -130,6 +168,11 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
     }
     setErrors({});
   }, [open, driver]);
+
+  // The submit button sits below the documents; bring the refusal into view.
+  useEffect(() => {
+    if (docUploadError) docUploadErrorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [docUploadError]);
 
   // On edit, fetch the driver's document detail (image URLs + rejection reasons)
   // which the list endpoint doesn't include.
@@ -204,10 +247,18 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
     setSubmitting(true);
     setSubmitError(null);
     setCountryError(null);
+    setDocUploadError(null);
     try {
-      await onSubmit(values, driver?.id);
+      await onSubmit(values, driver?.id ?? savedDriverId ?? undefined);
       onClose();
     } catch (err) {
+      // Saved, but the documents were refused: stay open, say why under them,
+      // and let a second save retry against the driver that now exists.
+      if (err instanceof DocumentUploadError) {
+        setSavedDriverId(err.driverId);
+        setDocUploadError(uploadErrorLines(err.uploadError, t));
+        return;
+      }
       // country_not_supported / phone_invalid_for_country and a refused blank
       // name or phone are input mistakes, not failures of the request: they
       // belong beside the field the operator has to fix, never in the form-wide
@@ -418,6 +469,24 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
           <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
             {t('drivers.allDocsOptional')}
           </p>
+
+          {/* The upload the API refused, in its own words */}
+          {docUploadError && (
+            <div
+              ref={docUploadErrorRef}
+              role="alert"
+              className="mt-3 flex items-start gap-2.5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-400"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div className="min-w-0 space-y-1">
+                <p className="font-semibold">{t('drivers.docUploadFailedTitle')}</p>
+                {docUploadError.map((line) => (
+                  <p key={line} className="break-words">{line}</p>
+                ))}
+                <p className="text-xs opacity-80">{t('drivers.docUploadRetryHint')}</p>
+              </div>
+            </div>
+          )}
 
           {/* Driving License */}
           <div className="mt-4 rounded-xl border p-4" style={{ borderColor: 'rgb(var(--border))' }}>

@@ -2,33 +2,21 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronDown, Phone, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { ChevronDown, Clock, Phone, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useCountries } from '@/hooks/useCountries';
 import { BrandPanel } from '@/components/auth/BrandPanel';
 import { flagEmoji, matchesPhoneRegex, toNationalNumber } from '@/lib/country';
 import { cn } from '@/lib/cn';
+import { bidiIsolate, ltrIsolate } from '@/lib/format';
 import type { Country } from '@/types';
-
-/** "Enter a valid Jordan mobile number (e.g. 791234567)" — built from the country's own facts. */
-function invalidPhoneMessage(country: Country | undefined): string {
-  if (!country) return 'Please enter a valid phone number';
-  // The example number, never the mask: `phone_placeholder` ("5X XXX XXXX") is
-  // what the input shows as a placeholder, and `phone_example` is the real
-  // number behind this "e.g.". With no example, the message drops the hint
-  // rather than offering a mask as something to type.
-  const hint = country.phoneExampleNational;
-  return hint
-    ? `Enter a valid ${country.nameEn} mobile number (e.g. ${hint})`
-    : `Enter a valid ${country.nameEn} mobile number`;
-}
 
 export default function LoginPage() {
   const router = useRouter();
   const { sendOtp, isLoading, isAuthenticated, error, clearError, loginCountry, signOutReason } = useAuthStore();
   const { countries, isLoading: countriesLoading } = useCountries();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
 
   const [iso, setIso] = useState<string>('');
   const [phone, setPhone] = useState('');
@@ -54,6 +42,21 @@ export default function LoginPage() {
 
   const maxDigits = country?.nationalNumberLength || 15;
 
+  const countryName = (c: Country): string => (locale === 'ar' && c.nameAr ? c.nameAr : c.nameEn);
+
+  /** "Enter a valid Jordan mobile number (e.g. 791234567)" — built from the country's own facts. */
+  const invalidPhoneMessage = (c: Country | undefined): string => {
+    if (!c) return t('auth.invalidPhone');
+    // The example number, never the mask: `phone_placeholder` ("5X XXX XXXX") is
+    // what the input shows as a placeholder, and `phone_example` is the real
+    // number behind this "e.g.". With no example, the message drops the hint
+    // rather than offering a mask as something to type.
+    const example = c.phoneExampleNational;
+    return example
+      ? t('drivers.phoneInvalidForCountry', { country: countryName(c), example })
+      : t('drivers.phoneInvalidForCountryShort', { country: countryName(c) });
+  };
+
   const handleCountryChange = (next: string) => {
     setIso(next);
     // The old number was validated against a different rule — re-check it rather
@@ -67,7 +70,7 @@ export default function LoginPage() {
     e.preventDefault();
 
     if (!country) {
-      setCountryError('Please select a country');
+      setCountryError(t('auth.selectCountry'));
       return;
     }
 
@@ -106,9 +109,9 @@ export default function LoginPage() {
         {/* ── Form card ─────────────────────────────── */}
         <div className="flex flex-1 flex-col rounded-3xl bg-white px-10 pb-8 pt-10 shadow-sm">
           <div className="flex-1">
-            <h1 className="text-[28px] font-bold leading-snug text-slate-900">Welcome Back</h1>
+            <h1 className="text-[28px] font-bold leading-snug text-slate-900">{t('auth.welcomeBack')}</h1>
             <p className="mt-2 text-base text-slate-500">
-              Enter your phone number to sign in to your account
+              {t('auth.loginSubtitle')}
             </p>
 
             {/* The app signed a non-fleet-admin account out (403 on /fleet-admin/me). */}
@@ -122,12 +125,26 @@ export default function LoginPage() {
               </div>
             )}
 
+            {/* An API call answered 401: the token expired or was revoked. */}
+            {signOutReason === 'session_expired' && (
+              <div
+                role="alert"
+                className="mt-6 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2.5 text-sm font-medium text-amber-800"
+              >
+                <Clock className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{t('auth.sessionExpired')}</span>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="mt-8">
               {/* Country */}
               <label htmlFor="login-country" className="mb-2 block text-sm font-semibold text-slate-700">
-                Country
+                {t('auth.country')}
               </label>
-              <div className="relative">
+              {/* Left-to-right in both languages, like the phone field it sets
+                  the dial code for: in Arabic, "🇯🇴 Jordan (+962)" otherwise
+                  reorders to "Jordan (+962) JO". */}
+              <div className="relative" dir="ltr">
                 <select
                   id="login-country"
                   value={iso}
@@ -142,11 +159,13 @@ export default function LoginPage() {
                   )}
                 >
                   {countries.length === 0 ? (
-                    <option value="">Loading countries…</option>
+                    <option value="">{t('auth.loadingCountries')}</option>
                   ) : (
                     countries.map((c) => (
+                      // Both parts isolated: an Arabic name otherwise pulls the
+                      // dial code into its own right-to-left run ("(962+) الأردن").
                       <option key={c.isoCountryCode} value={c.isoCountryCode}>
-                        {flagEmoji(c.isoCountryCode)} {c.nameEn} ({c.dialCode})
+                        {flagEmoji(c.isoCountryCode)} {bidiIsolate(countryName(c))} ({ltrIsolate(c.dialCode)})
                       </option>
                     ))
                   )}
@@ -162,10 +181,12 @@ export default function LoginPage() {
 
               {/* Phone */}
               <label htmlFor="login-phone" className="mb-2 mt-5 block text-sm font-semibold text-slate-700">
-                Phone Number
+                {t('auth.phoneNumber')}
               </label>
 
+              {/* Dial code then number, left to right, in both languages. */}
               <div
+                dir="ltr"
                 className={cn(
                   'flex overflow-hidden rounded-xl border transition-all focus-within:ring-2',
                   phoneError
@@ -175,7 +196,7 @@ export default function LoginPage() {
               >
                 <div className="flex shrink-0 items-center gap-2 border-e border-slate-200 bg-slate-50 px-4 py-4">
                   <Phone className="h-4 w-4 text-slate-400" />
-                  <span className="text-sm font-semibold text-slate-700" dir="ltr">
+                  <span className="text-sm font-semibold text-slate-700">
                     {country?.dialCode ?? '—'}
                   </span>
                 </div>
@@ -195,7 +216,6 @@ export default function LoginPage() {
                     if (countryError) setCountryError('');
                     if (error) clearError();
                   }}
-                  dir="ltr"
                   className="min-w-0 flex-1 bg-white px-4 py-4 text-sm text-slate-900 placeholder-slate-400 outline-none"
                   autoComplete="tel-national"
                 />
@@ -208,8 +228,8 @@ export default function LoginPage() {
               ) : (
                 <p className="mt-2 text-xs text-slate-400">
                   {country
-                    ? `Enter your ${maxDigits}-digit ${country.nameEn} mobile number`
-                    : 'Select a country to continue'}
+                    ? t('auth.phoneDigitsHint', { digits: maxDigits, country: countryName(country) })
+                    : t('auth.selectCountryToContinue')}
                 </p>
               )}
 
@@ -218,7 +238,7 @@ export default function LoginPage() {
                 disabled={isLoading || !country}
                 className="mt-6 w-full rounded-xl bg-indigo-500 py-4 text-base font-semibold text-white transition-colors hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isLoading ? 'Sending...' : 'Continue →'}
+                {isLoading ? t('auth.sending') : t('auth.continue')}
               </button>
 
               {error && (
@@ -232,7 +252,7 @@ export default function LoginPage() {
           {/* Secure badge */}
           <div className="mt-8 flex items-center justify-center gap-2 text-sm text-slate-400">
             <ShieldCheck className="h-4 w-4 shrink-0" />
-            Secure login with OTP verification
+            {t('auth.secureLogin')}
           </div>
         </div>
 
@@ -241,10 +261,10 @@ export default function LoginPage() {
 
       {/* Footer — outside both cards */}
       <p className="mt-5 text-center text-sm text-slate-400">
-        By signing in, you agree to our{' '}
-        <a href="https://www.vego.sa/en/terms-and-conditions" target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">Terms of Service</a>
-        {' '}and{' '}
-        <a href="https://www.vego.sa/en/privacy-policy" target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">Privacy Policy</a>
+        {t('auth.agreePrefix')}{' '}
+        <a href="https://www.vego.sa/en/terms-and-conditions" target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">{t('auth.termsOfService')}</a>
+        {t('auth.agreeJoin')}
+        <a href="https://www.vego.sa/en/privacy-policy" target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">{t('auth.privacyPolicy')}</a>
       </p>
     </div>
   );

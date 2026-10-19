@@ -65,6 +65,30 @@ export class ApiError extends Error {
   }
 }
 
+// ── Expired sessions ─────────────────────────────────────────────────────────
+//
+// A 401 means the session is gone: the token expired or was revoked. The auth
+// store registers what to do about it (sign out, which sends the operator to
+// the login page with a "session expired" message) — registered rather than
+// imported, because the store imports this module.
+//
+// Requests already in flight answer 401 too. The store only acts while it is
+// still signed in, so a page that fires six requests signs out, and
+// redirects, once.
+
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
+}
+
+function handleUnauthorized(sentToken: string | null): void {
+  // Sent with an older token than the stored one: that session was already
+  // replaced by a new sign-in, which this 401 says nothing about.
+  if (sentToken !== getToken()) return;
+  onUnauthorized?.();
+}
+
 export class ApiNotConfiguredError extends Error {
   constructor() {
     super(
@@ -113,6 +137,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       // ignore JSON parse failures — keep the status-code message
     }
+    // A 403 is not this: the session is valid, the account may not see the data.
+    if (res.status === 401) handleUnauthorized(token);
     throw new ApiError(res.status, message, body);
   }
 
