@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { ApiError, setUnauthorizedHandler } from '@/lib/api/client';
+import { ApiError, requestLanguage, setUnauthorizedHandler } from '@/lib/api/client';
 import { fieldErrorFrom, type FieldError } from '@/lib/api-errors';
 import { toE164 } from '@/lib/country';
 import { logger } from '@/lib/logger';
@@ -59,6 +59,48 @@ export interface AuthResult {
  */
 export type SignOutReason = 'not_fleet_admin' | 'session_expired';
 
+/**
+ * The store's `error` when an auth request never reached the server. It is the
+ * one auth failure with no server message to show, so the pages word it
+ * themselves, in the UI language (`auth.cannotConnect`).
+ */
+export const AUTH_NETWORK_ERROR = 'network_error';
+
+class AuthNetworkError extends Error {
+  constructor() {
+    super('Cannot connect to the server.');
+    this.name = 'AuthNetworkError';
+  }
+}
+
+// ── Sign-out reason across a full page load ──────────────────────────────────
+//
+// The reason lives in memory, so a full reload loses it — and the payment
+// callback leaves by `window.location`. It is therefore also kept in
+// sessionStorage until the login page has shown it once.
+
+const SIGN_OUT_REASON_KEY = 'myvego.signOutReason';
+
+function storeSignOutReason(reason: SignOutReason | null): void {
+  try {
+    if (reason) sessionStorage.setItem(SIGN_OUT_REASON_KEY, reason);
+    else sessionStorage.removeItem(SIGN_OUT_REASON_KEY);
+  } catch {
+    // Storage blocked: the in-memory reason still covers in-app navigation.
+  }
+}
+
+/** Read and remove the stored reason, so it is shown once. */
+function takeStoredSignOutReason(): SignOutReason | null {
+  try {
+    const stored = sessionStorage.getItem(SIGN_OUT_REASON_KEY);
+    sessionStorage.removeItem(SIGN_OUT_REASON_KEY);
+    return stored === 'not_fleet_admin' || stored === 'session_expired' ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
 interface AuthState {
   user: User | null;
   token: string | null;
@@ -69,7 +111,11 @@ interface AuthState {
   pendingPhone: string | null;
   /** The country the phone belongs to. Persisted across sessions. */
   loginCountry: LoginCountry | null;
-  /** Set when the app signed the operator out itself. In memory only. */
+  /**
+   * Set when the app signed the operator out itself. In memory, and in
+   * sessionStorage until the login page has shown it — see
+   * {@link takeSignOutReason}.
+   */
   signOutReason: SignOutReason | null;
 
   setLoginCountry: (country: LoginCountry) => void;
@@ -79,6 +125,11 @@ interface AuthState {
   logout: () => Promise<void>;
   /** End the session in this browser only. */
   signOut: (reason?: SignOutReason) => void;
+  /**
+   * For the login page, on mount: pick up a reason that outlived a full page
+   * load, and drop the stored copy so a later visit doesn't show it again.
+   */
+  takeSignOutReason: () => void;
   clearError: () => void;
 }
 
@@ -99,11 +150,15 @@ async function authFetch<T>(path: string, body: Record<string, string>): Promise
   try {
     res = await fetch(`${BASE_URL}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'Accept-Language': requestLanguage(),
+      },
       body: JSON.stringify(body),
     });
   } catch {
-    throw new Error('Cannot connect to the server. Please check your network connection.');
+    throw new AuthNetworkError();
   }
 
   if (!res.ok) {
@@ -140,7 +195,11 @@ async function revokeToken(token: string): Promise<void> {
   try {
     const res = await fetch(`${BASE_URL}/super-admin/logout`, {
       method: 'POST',
-      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+      headers: {
+        Accept: 'application/json',
+        'Accept-Language': requestLanguage(),
+        Authorization: `Bearer ${token}`,
+      },
       signal: controller.signal,
     });
     if (!res.ok) logger.warn(`[auth] Server logout answered ${res.status}; signing out locally anyway.`);
@@ -165,6 +224,9 @@ function toAuthResult(err: unknown, fallbackMessage: string): {
   const fieldError = fieldErrorFrom(err);
   if (fieldError) {
     return { result: { ok: false, fieldError }, globalError: null };
+  }
+  if (err instanceof AuthNetworkError) {
+    return { result: { ok: false }, globalError: AUTH_NETWORK_ERROR };
   }
   const message = err instanceof Error ? err.message : fallbackMessage;
   return { result: { ok: false }, globalError: message };
@@ -191,6 +253,7 @@ export const useAuthStore = create<AuthState>()(
       // could only ever resolve to a Saudi account.
       sendOtp: async ({ phone, country }) => {
         set({ isLoading: true, error: null, loginCountry: country, signOutReason: null });
+        storeSignOutReason(null);
 
         const e164 = toE164(phone, country.dialCode);
         try {
@@ -255,11 +318,18 @@ export const useAuthStore = create<AuthState>()(
 
       // The country choice survives sign-out on purpose: it is a preference, not
       // a credential, and re-login should not ask for it again.
-      signOut: (reason) =>
+      signOut: (reason) => {
         set({
           user: null, token: null, isAuthenticated: false, error: null, pendingPhone: null,
           signOutReason: reason ?? null,
-        }),
+        });
+        storeSignOutReason(reason ?? null);
+      },
+
+      takeSignOutReason: () => {
+        const stored = takeStoredSignOutReason();
+        if (stored && !get().signOutReason) set({ signOutReason: stored });
+      },
 
       clearError: () => set({ error: null }),
     }),

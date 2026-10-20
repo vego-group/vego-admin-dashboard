@@ -292,6 +292,11 @@ interface ApiTransaction {
    * is one. Seen on the mobile transactions endpoint; expected to match here.
    */
   ledger_type?: string | null;
+  /**
+   * Row metadata. A top-up a fleet admin made carries the admin's id here,
+   * next to `reference_type: "Topup"` (backend reply 2026-10-20).
+   */
+  meta?: { initiated_by_fleet_admin_id?: number | string | null } | null;
   /** Driver may be directly on the transaction or nested inside wallet */
   user?: { id: number | string; name: string };
   driver?: { id: number | string; name: string };
@@ -753,6 +758,19 @@ function toTransactionType(tx: ApiTransaction): Pick<WalletTransaction, 'type' |
   return kind ? { type: kind } : { type: 'other', rawType };
 }
 
+/**
+ * A top-up made by a fleet admin: `reference_type` "Topup" (namespace and case
+ * ignored, as in {@link debitKind}) **and** `meta.initiated_by_fleet_admin_id`.
+ * Its `note` is the backend's English audit text ("Wallet top-up by fleet admin
+ * #111"), so the UI shows its own label instead. Either half missing → the note.
+ */
+function isFleetAdminTopUp(tx: ApiTransaction): boolean {
+  const ref = tx.reference_type ?? '';
+  const adminId = tx.meta?.initiated_by_fleet_admin_id;
+  return ref.slice(ref.lastIndexOf('\\') + 1).toLowerCase() === 'topup'
+    && adminId != null && adminId !== '';
+}
+
 function mapTransaction(tx: ApiTransaction): WalletTransaction {
   // Driver may be nested under wallet.user, or directly on tx.user / tx.driver
   const driver = tx.wallet?.user ?? tx.user ?? tx.driver;
@@ -784,6 +802,7 @@ function mapTransaction(tx: ApiTransaction): WalletTransaction {
     ...toTransactionType(tx),
     paymentMethod: tx.payment_method,
     note:          tx.note ?? tx.description,
+    byFleetAdmin:  isFleetAdminTopUp(tx),
     ...toTransactionStatus(tx.status),
     adminName:     tx.admin?.name,
   };

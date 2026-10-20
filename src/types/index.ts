@@ -534,6 +534,11 @@ export interface WalletTransaction {
   rawType?: string;
   paymentMethod?: string;
   note?: string;
+  /**
+   * A top-up made by a fleet admin. Its `note` is the backend's English audit
+   * text, so the table and the CSV show a translated label instead.
+   */
+  byFleetAdmin?: boolean;
   status: TransactionStatus;
   /** The backend's status verbatim, when it is not one we know (`status: 'unknown'`). */
   rawStatus?: string;

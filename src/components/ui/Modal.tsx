@@ -1,8 +1,15 @@
 'use client';
 
 import { X } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { cn } from '@/lib/cn';
+
+/**
+ * Open modals, innermost last. A confirm dialog can open over another modal
+ * (removing a saved card inside the top-up modal); Escape closes only the top
+ * one, not both.
+ */
+const openModals: object[] = [];
 
 interface ModalProps {
   open: boolean;
@@ -29,15 +36,24 @@ export function Modal({
   hideCloseButton = false,
   className,
 }: ModalProps) {
-  // Close on ESC
+  // Close on ESC — the topmost modal only. `onClose` is read through a ref so a
+  // parent's re-render doesn't re-register this modal on top of one opened later.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
+
   useEffect(() => {
     if (!open) return;
+    const self = {};
+    openModals.push(self);
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && openModals[openModals.length - 1] === self) onCloseRef.current();
     };
     window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [open, onClose]);
+    return () => {
+      window.removeEventListener('keydown', handler);
+      openModals.splice(openModals.indexOf(self), 1);
+    };
+  }, [open]);
 
   // Lock body scroll while open
   useEffect(() => {

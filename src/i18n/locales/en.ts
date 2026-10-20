@@ -235,6 +235,8 @@ const en = {
     // code. A country with no entry here gets no placeholder at all.
     addressPlaceholder: { SA: 'Al Olaya, Riyadh', JO: 'Abdoun, Amman' },
     cityPlaceholder: { SA: 'Riyadh', JO: 'Amman' },
+    // Saudi only: there is no confirmed Jordanian licence format.
+    licenseNumberPlaceholder: { SA: 'SA-XXXXXX' },
     vehicleAssignment: '{{Vehicle}} Assignment',
     assignVehicle: 'Assign {{Vehicle}}',
     assignedVehicle: 'Assigned {{Vehicle}}',
@@ -679,6 +681,7 @@ const en = {
     smartMobility: 'Smart Mobility Management System',
     noFleetAdminAccess: "This account doesn't have access to the Fleet Admin dashboard.",
     sessionExpired: 'Your session has expired. Please sign in again.',
+    cannotConnect: 'Cannot connect to the server. Please check your connection and try again.',
     // Login page
     loginSubtitle: 'Enter your phone number to sign in to your account',
     country: 'Country',
@@ -835,6 +838,7 @@ const en = {
     typeBonus: 'Bonus',
     typeBonusReversal: 'Bonus reversal',
     typeOther: 'Other ({{value}})',
+    noteFleetAdminTopUp: 'Top-up by fleet admin',
     statusCompleted: 'Completed',
     statusPending: 'Pending',
     statusFailed: 'Failed',

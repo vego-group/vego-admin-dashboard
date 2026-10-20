@@ -8,7 +8,9 @@
  *   NEXT_PUBLIC_API_URL=https://your-backend.com/api
  */
 
+import { readStoredLocale } from '@/i18n/locale-storage';
 import { logger } from '@/lib/logger';
+import type { Locale } from '@/types';
 
 const BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '');
 
@@ -24,6 +26,19 @@ function getToken(): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The UI language, sent as `Accept-Language` on every request so the backend
+ * answers in it — validation messages included. Read per request, like the
+ * token, so a language switch applies to the next call without a reload.
+ *
+ * `Accept-Language` only: it is a CORS-safelisted header. `X-Locale`, which the
+ * backend also reads, is not, and would need a backend CORS change.
+ */
+export function requestLanguage(): Locale {
+  if (typeof document === 'undefined') return 'en';
+  return readStoredLocale() ?? (document.documentElement.lang === 'ar' ? 'ar' : 'en');
 }
 
 /**
@@ -112,6 +127,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   const headers: Record<string, string> = {
     Accept: 'application/json',
+    'Accept-Language': requestLanguage(),
     ...(init.body !== undefined && !isFormData ? { 'Content-Type': 'application/json' } : {}),
     ...(init.headers as Record<string, string> | undefined),
   };

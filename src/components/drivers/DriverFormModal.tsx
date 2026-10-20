@@ -202,11 +202,14 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
   };
 
   /**
-   * An example address or city in the fleet's own country. This was "Al Olaya,
-   * Riyadh" for every fleet. A country with no example in the dictionary, or a
-   * fleet still loading, gets no placeholder rather than another country's city.
+   * An example address, city or licence number in the fleet's own country. This
+   * was "Al Olaya, Riyadh" and "SA-XXXXXX" for every fleet. A country with no
+   * example in the dictionary, or a fleet still loading, gets no placeholder
+   * rather than another country's.
    */
-  const examplePlaceholder = (field: 'addressPlaceholder' | 'cityPlaceholder'): string => {
+  const examplePlaceholder = (
+    field: 'addressPlaceholder' | 'cityPlaceholder' | 'licenseNumberPlaceholder',
+  ): string => {
     if (!fleetIso) return '';
     const key = `drivers.${field}.${fleetIso}`;
     const text = t(key);
@@ -544,7 +547,7 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Field label={`${t('drivers.licenseNumber')} (${t('common.optional')})`}>
                     <Input
-                      placeholder="SA-XXXXXX"
+                      placeholder={examplePlaceholder('licenseNumberPlaceholder')}
                       value={values.licenseNumber}
                       onChange={(e) => update('licenseNumber', e.target.value)}
                     />

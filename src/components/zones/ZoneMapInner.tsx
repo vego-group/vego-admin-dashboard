@@ -344,8 +344,9 @@ export default function ZoneMapInner({
       )}
       style={{ borderColor: 'rgb(var(--border))', minHeight: 500 }}
     >
-      {/* Live badge */}
-      <div className="pointer-events-none absolute start-4 top-4 z-[1001] inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm backdrop-blur dark:bg-slate-900/90 dark:text-slate-200">
+      {/* Live badge. Top-right in both directions: Leaflet keeps its zoom
+          control top-left in Arabic too, so `end-4` would cover it there. */}
+      <div className="pointer-events-none absolute right-4 top-4 z-[1001] inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm backdrop-blur dark:bg-slate-900/90 dark:text-slate-200">
         <span className="relative flex h-2 w-2">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
           <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
@@ -353,9 +354,11 @@ export default function ZoneMapInner({
         {t('common.liveUpdates')}
       </div>
 
-      {/* Drawing hint */}
+      {/* Drawing hint. `left-1/2` with `-translate-x-1/2` centres it in both
+          directions; `start-1/2` is `right: 50%` in Arabic and pushed it off the
+          left edge. */}
       {drawingMode && (
-        <div className="pointer-events-none absolute start-1/2 top-14 z-[1001] -translate-x-1/2">
+        <div className="pointer-events-none absolute left-1/2 top-14 z-[1001] -translate-x-1/2">
           <div
             className={cn(
               'rounded-2xl border-2 bg-white px-5 py-3 shadow-elevated dark:bg-slate-900',

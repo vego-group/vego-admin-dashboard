@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, CreditCard, Loader2, MapPin, Pencil } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
 import { BillingAddressForm } from '@/components/wallet/BillingAddressForm';
 import { SavedCardsList } from '@/components/wallet/SavedCardsList';
 import { useFleetContext } from '@/hooks/useFleetContext';
@@ -53,6 +54,8 @@ export function PaymentSettings() {
   const [cardsState, setCardsState] = useState<LoadState>('loading');
   const [cardsError, setCardsError] = useState('');
   const [removingId, setRemovingId] = useState<string | null>(null);
+  /** The card awaiting "Remove this saved card?". */
+  const [confirmCardId, setConfirmCardId] = useState<string | null>(null);
 
   const loadCards = useCallback(() => {
     setCardsState('loading');
@@ -68,7 +71,7 @@ export function PaymentSettings() {
   useEffect(() => { loadCards(); }, [loadCards]);
 
   const handleRemove = async (cardId: string) => {
-    if (!window.confirm(t('drivers.removeCardConfirm'))) return;
+    setConfirmCardId(null);
     setRemovingId(cardId);
     setCardsError('');
     try {
@@ -189,7 +192,7 @@ export function PaymentSettings() {
             </p>
           ) : (
             <div className="space-y-2.5">
-              <SavedCardsList cards={cards} onRemove={handleRemove} removingId={removingId} />
+              <SavedCardsList cards={cards} onRemove={setConfirmCardId} removingId={removingId} />
             </div>
           )}
 
@@ -200,6 +203,15 @@ export function PaymentSettings() {
           )}
         </section>
       </div>
+
+      <ConfirmDeleteDialog
+        open={confirmCardId !== null}
+        onClose={() => setConfirmCardId(null)}
+        onConfirm={() => { if (confirmCardId) void handleRemove(confirmCardId); }}
+        title={t('drivers.removeCardConfirm')}
+        confirmLabel={t('drivers.removeCard')}
+        cancelLabel={t('common.cancel')}
+      />
     </Card>
   );
 }

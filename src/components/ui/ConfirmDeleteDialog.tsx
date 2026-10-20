@@ -10,11 +10,17 @@ interface ConfirmDeleteDialogProps {
   onClose: () => void;
   onConfirm: () => void;
   title: string;
-  description: string;
+  description?: string;
   confirmLabel?: string;
+  /** Default: "Close". */
+  cancelLabel?: string;
   isLoading?: boolean;
 }
 
+/**
+ * Confirmation for a destructive action. Focus starts on the safe button, so
+ * Enter or Space right after opening never confirms by accident.
+ */
 export function ConfirmDeleteDialog({
   open,
   onClose,
@@ -22,6 +28,7 @@ export function ConfirmDeleteDialog({
   title,
   description,
   confirmLabel,
+  cancelLabel,
   isLoading,
 }: ConfirmDeleteDialogProps) {
   const { t } = useI18n();
@@ -34,11 +41,11 @@ export function ConfirmDeleteDialog({
         </div>
 
         <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-slate-50">{title}</h2>
-        <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">{description}</p>
+        {description && <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">{description}</p>}
 
         <div className="mt-6 flex items-center justify-center gap-3">
-          <Button variant="secondary" onClick={onClose} className="min-w-[110px]" disabled={isLoading}>
-            {t('common.close')}
+          <Button variant="secondary" onClick={onClose} className="min-w-[110px]" disabled={isLoading} autoFocus>
+            {cancelLabel ?? t('common.close')}
           </Button>
           <Button
             variant="danger"

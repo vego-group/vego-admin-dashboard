@@ -251,6 +251,8 @@ const ar: Translations = {
     // مثال على العنوان والمدينة في دولة الأسطول، بحسب رمزها. الدولة غير المدرجة هنا بلا مثال.
     addressPlaceholder: { SA: 'العليا، الرياض', JO: 'عبدون، عمّان' },
     cityPlaceholder: { SA: 'الرياض', JO: 'عمّان' },
+    // السعودية فقط: لا توجد صيغة مؤكدة لرخصة القيادة الأردنية.
+    licenseNumberPlaceholder: { SA: 'SA-XXXXXX' },
     vehicleAssignment: 'تعيين {{alVehicle}}',
     assignVehicle: 'تعيين {{vehicle}}',
     assignedVehicle: '{{alVehicle}} المعيّنة',
@@ -685,6 +687,7 @@ const ar: Translations = {
     smartMobility: 'نظام إدارة التنقل الذكي',
     noFleetAdminAccess: 'هذا الحساب ليس لديه صلاحية الدخول إلى لوحة إدارة الأسطول.',
     sessionExpired: 'انتهت الجلسة، يرجى تسجيل الدخول مرة أخرى.',
+    cannotConnect: 'تعذّر الاتصال بالخادم. تحقّق من الاتصال وحاول مرة أخرى.',
     // صفحة تسجيل الدخول
     loginSubtitle: 'أدخل رقم هاتفك لتسجيل الدخول إلى حسابك',
     country: 'الدولة',
@@ -841,6 +844,7 @@ const ar: Translations = {
     typeBonus: 'مكافأة',
     typeBonusReversal: 'عكس مكافأة',
     typeOther: 'أخرى ({{value}})',
+    noteFleetAdminTopUp: 'شحن من مدير الأسطول',
     statusCompleted: 'مكتمل',
     statusPending: 'قيد الانتظار',
     statusFailed: 'فشل',

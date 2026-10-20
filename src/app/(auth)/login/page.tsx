@@ -3,10 +3,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronDown, Clock, Phone, ShieldAlert, ShieldCheck } from 'lucide-react';
-import { useAuthStore } from '@/store/auth';
+import { AUTH_NETWORK_ERROR, useAuthStore } from '@/store/auth';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useCountries } from '@/hooks/useCountries';
 import { BrandPanel } from '@/components/auth/BrandPanel';
+import { LanguageSwitcher } from '@/components/layout/LanguageSwitcher';
 import { flagEmoji, matchesPhoneRegex, toNationalNumber } from '@/lib/country';
 import { cn } from '@/lib/cn';
 import { bidiIsolate, ltrIsolate } from '@/lib/format';
@@ -14,7 +15,9 @@ import type { Country } from '@/types';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { sendOtp, isLoading, isAuthenticated, error, clearError, loginCountry, signOutReason } = useAuthStore();
+  const {
+    sendOtp, isLoading, isAuthenticated, error, clearError, loginCountry, signOutReason, takeSignOutReason,
+  } = useAuthStore();
   const { countries, isLoading: countriesLoading } = useCountries();
   const { t, locale } = useI18n();
 
@@ -26,6 +29,9 @@ export default function LoginPage() {
   useEffect(() => {
     if (isAuthenticated) router.replace('/dashboard');
   }, [isAuthenticated, router]);
+
+  // "Session expired" set before a full page load survives only in storage.
+  useEffect(() => { takeSignOutReason(); }, [takeSignOutReason]);
 
   // Default to the market this operator last signed in to, then to the first in
   // the roster. Runs only while nothing is selected, so it never fights the user.
@@ -104,6 +110,10 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[#eeeef8] px-4 py-12">
+      <div className="mb-4 flex w-full max-w-[880px] justify-end">
+        <LanguageSwitcher alwaysLight />
+      </div>
+
       <div className="flex w-full max-w-[880px] items-stretch gap-5">
 
         {/* ── Form card ─────────────────────────────── */}
@@ -243,7 +253,7 @@ export default function LoginPage() {
 
               {error && (
                 <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2.5 text-xs font-medium text-rose-600">
-                  {error}
+                  {error === AUTH_NETWORK_ERROR ? t('auth.cannotConnect') : error}
                 </div>
               )}
             </form>
