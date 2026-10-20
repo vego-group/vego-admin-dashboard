@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Wallet, CreditCard, Shield, ChevronLeft, Plus, Loader2, MapPin, AlertTriangle, Info } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
+import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
 import { BillingAddressForm } from '@/components/wallet/BillingAddressForm';
 import { SavedCardsList, brandLabel } from '@/components/wallet/SavedCardsList';
 import { useI18n } from '@/i18n/I18nProvider';
@@ -103,6 +104,8 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const [cardsLoading, setCardsLoading]   = useState(false);
   const [cardMode, setCardMode]           = useState<CardMode>('new');
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  /** The card awaiting "Remove this saved card?". */
+  const [confirmCardId, setConfirmCardId] = useState<string | null>(null);
   const [charging, setCharging]           = useState(false);
 
   // Balance
@@ -184,6 +187,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     setSavedCards([]);
     setCardMode('new');
     setSelectedCardId(null);
+    setConfirmCardId(null);
     setCharging(false);
     setSaveCard(false);
     setCardChoice('new');
@@ -530,7 +534,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   };
 
   const handleRemoveCard = async (cardId: string) => {
-    if (!window.confirm(t('drivers.removeCardConfirm'))) return;
+    setConfirmCardId(null);
     try {
       await walletApi.deleteSavedCard(cardId);
       setSavedCards((cards) => {
@@ -924,7 +928,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                     cards={chargeableCards}
                     selectedId={selectedCardId}
                     onSelect={setSelectedCardId}
-                    onRemove={handleRemoveCard}
+                    onRemove={setConfirmCardId}
                   />
 
                   {/* Add new card */}
@@ -1034,6 +1038,16 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
           </div>
         </>
       )}
+
+      {/* Opens over this modal; Escape closes only the dialog on top. */}
+      <ConfirmDeleteDialog
+        open={confirmCardId !== null}
+        onClose={() => setConfirmCardId(null)}
+        onConfirm={() => { if (confirmCardId) void handleRemoveCard(confirmCardId); }}
+        title={t('drivers.removeCardConfirm')}
+        confirmLabel={t('drivers.removeCard')}
+        cancelLabel={t('common.cancel')}
+      />
     </Modal>
   );
 }

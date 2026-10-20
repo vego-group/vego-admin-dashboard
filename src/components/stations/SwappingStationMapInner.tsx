@@ -176,7 +176,9 @@ export default function SwappingStationMapInner({ stations, height = 420 }: Swap
       className="relative overflow-hidden rounded-2xl border"
       style={{ borderColor: 'rgb(var(--border))', height }}
     >
-      <div className="pointer-events-none absolute start-4 top-4 z-[1001] inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm backdrop-blur dark:bg-slate-900/90 dark:text-slate-200">
+      {/* Top-right in both directions: Leaflet keeps its zoom control top-left
+          in Arabic too, so `end-4` would cover it there. */}
+      <div className="pointer-events-none absolute right-4 top-4 z-[1001] inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm backdrop-blur dark:bg-slate-900/90 dark:text-slate-200">
         <span className="relative flex h-2 w-2">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
           <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />

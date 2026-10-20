@@ -60,11 +60,20 @@ function typeLabel(tx: WalletTransaction, t: (key: string, params?: Record<strin
 }
 
 /**
+ * The note in the UI language: a fleet admin's top-up gets our own label, since
+ * its `note` is the backend's English audit text. Anything else keeps its note.
+ */
+function localisedNote(tx: WalletTransaction, t: (key: string) => string): string | undefined {
+  return tx.byFleetAdmin ? t('wallet.noteFleetAdminTopUp') : tx.note;
+}
+
+/**
  * The Note cell. A `bonus`, `bonus_reversal` or `other` row with no note of its
  * own shows the backend's raw type, so it never reads as an unexplained blank.
  */
-function noteText(tx: WalletTransaction): string | undefined {
-  if (tx.note?.trim()) return tx.note;
+function noteText(tx: WalletTransaction, t: (key: string) => string): string | undefined {
+  const note = localisedNote(tx, t);
+  if (note?.trim()) return note;
   return tx.type === 'bonus' || tx.type === 'bonus_reversal' || tx.type === 'other'
     ? tx.rawType || undefined
     : undefined;
@@ -179,6 +188,7 @@ function exportCsv(
   rows: WalletTransaction[],
   currency: CurrencyCode | null,
   decimals: number | null,
+  t: (key: string) => string,
 ) {
   // The header names the currency only when we actually know it — an unlabelled
   // "Amount" is honest, "Amount (SAR)" on a Jordanian export is not. A per-row
@@ -196,7 +206,7 @@ function exportCsv(
     r.money?.currency ?? currency ?? '',
     csvType(r),
     r.paymentMethod ?? '',
-    r.note ?? '',
+    localisedNote(r, t) ?? '',
     rawStatusOf(r),
     r.adminName ?? '',
   ].map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','));
@@ -379,7 +389,7 @@ export default function WalletPage() {
     setExporting(true);
     try {
       const res = await walletApi.getAllTransactions(query);
-      exportCsv(res.rows, currency, currencyDecimals);
+      exportCsv(res.rows, currency, currencyDecimals, t);
       if (res.truncated) setTruncated(true);
     } catch (err) {
       logger.error('[Wallet] CSV export failed:', err);
@@ -630,7 +640,7 @@ export default function WalletPage() {
                         {tx.paymentMethod ?? <span className="text-slate-300 dark:text-slate-600">—</span>}
                       </td>
                       <td className="px-5 py-4 italic text-slate-500 dark:text-slate-400">
-                        {noteText(tx) ?? <span className="not-italic text-slate-300 dark:text-slate-600">—</span>}
+                        {noteText(tx, t) ?? <span className="not-italic text-slate-300 dark:text-slate-600">—</span>}
                       </td>
                       <td className="px-5 py-4">
                         <div className={cn('inline-flex items-center gap-1.5 text-sm font-medium', STATUS_CLASS[tx.status] ?? STATUS_CLASS.unknown)}>

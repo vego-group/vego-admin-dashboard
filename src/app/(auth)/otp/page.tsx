@@ -3,9 +3,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
-import { useAuthStore } from '@/store/auth';
+import { AUTH_NETWORK_ERROR, useAuthStore } from '@/store/auth';
 import { useI18n } from '@/i18n/I18nProvider';
 import { BrandPanel } from '@/components/auth/BrandPanel';
+import { LanguageSwitcher } from '@/components/layout/LanguageSwitcher';
 import { toE164 } from '@/lib/country';
 import { cn } from '@/lib/cn';
 
@@ -88,6 +89,10 @@ export default function OtpPage() {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[#eeeef8] px-4 py-12">
+      <div className="mb-4 flex w-full max-w-[880px] justify-end">
+        <LanguageSwitcher alwaysLight />
+      </div>
+
       <div className="flex w-full max-w-[880px] items-stretch gap-5">
 
         {/* ── OTP card ──────────────────────────────── */}
@@ -138,7 +143,9 @@ export default function OtpPage() {
             </div>
 
             {error && (
-              <p className="mt-3 text-center text-sm text-rose-500">{error}</p>
+              <p className="mt-3 text-center text-sm text-rose-500">
+                {error === AUTH_NETWORK_ERROR ? t('auth.cannotConnect') : error}
+              </p>
             )}
 
             <button

@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import en, { type Translations } from './locales/en';
 import ar from './locales/ar';
+import { LOCALE_STORAGE_KEY, readStoredLocale } from './locale-storage';
 import type { Direction, Locale } from '@/types';
 
 const dictionaries: Record<Locale, Translations> = { en, ar };
@@ -25,8 +26,6 @@ interface I18nContextValue {
 
 const I18nContext = createContext<I18nContextValue | null>(null);
 
-const STORAGE_KEY = 'myvego.locale';
-
 function resolvePath(obj: unknown, path: string): string | undefined {
   return path.split('.').reduce<unknown>((acc, segment) => {
     if (acc && typeof acc === 'object' && segment in (acc as Record<string, unknown>)) {
@@ -48,10 +47,8 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 
   // Hydrate locale from storage on first render
   useEffect(() => {
-    const stored = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
-    if (stored === 'en' || stored === 'ar') {
-      setLocaleState(stored);
-    }
+    const stored = readStoredLocale();
+    if (stored) setLocaleState(stored);
   }, []);
 
   // Sync html lang/dir whenever locale changes — works without page reload
@@ -64,7 +61,7 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
   const setLocale = useCallback((next: Locale) => {
     setLocaleState(next);
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem(STORAGE_KEY, next);
+      window.localStorage.setItem(LOCALE_STORAGE_KEY, next);
     }
   }, []);
 
