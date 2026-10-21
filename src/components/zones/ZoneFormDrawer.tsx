@@ -8,7 +8,9 @@ import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
-import { ZONE_TYPES, ZONE_TYPE_LIST } from '@/lib/zone-types';
+import {
+  ZONE_SPEED_LIMIT_MAX, ZONE_SPEED_LIMIT_MIN, ZONE_TYPES, ZONE_TYPE_LIST, isValidZoneSpeedLimit,
+} from '@/lib/zone-types';
 import { isArabicOnly, isEnglishOnly } from '@/lib/text-script';
 import { VEHICLE_SPEED_LIMIT_MAX } from '@/lib/vehicle-speed';
 import { cn } from '@/lib/cn';
@@ -18,7 +20,8 @@ export interface ZoneFormValues {
   name_en: string;
   name_ar: string;
   type: ZoneType;
-  speedLimitKmh: number;
+  /** A `slow` zone's limit (1–200 km/h); `null` for every other type. */
+  speedLimitKmh: number | null;
   active: boolean;
 }
 
@@ -39,6 +42,11 @@ interface ZoneFormDrawerProps {
  */
 const MAX_SPEED = VEHICLE_SPEED_LIMIT_MAX;
 
+/** The form's speed limit for a zone: its own on a slow zone, `null` on any other. */
+function initialSpeedLimit(zone: Zone): number | null {
+  return zone.type === 'slow' ? zone.speedLimitKmh : null;
+}
+
 export function ZoneFormDrawer({
   open,
   onClose,
@@ -54,10 +62,10 @@ export function ZoneFormDrawer({
     name_en: '',
     name_ar: '',
     type: 'normal',
-    speedLimitKmh: 25,
+    speedLimitKmh: null,
     active: true,
   });
-  const [errors, setErrors] = useState<{ name_en?: string; name_ar?: string }>({});
+  const [errors, setErrors] = useState<{ name_en?: string; name_ar?: string; speedLimit?: string }>({});
   const [submitting, setSubmitting] = useState(false);
 
   /** Each name field only accepts letters from its own script. */
@@ -88,7 +96,7 @@ export function ZoneFormDrawer({
         name_en: zone.name_en,
         name_ar: zone.name_ar,
         type: zone.type,
-        speedLimitKmh: zone.speedLimitKmh,
+        speedLimitKmh: initialSpeedLimit(zone),
         active: zone.active,
       });
     } else {
@@ -96,7 +104,7 @@ export function ZoneFormDrawer({
         name_en: '',
         name_ar: '',
         type: 'normal',
-        speedLimitKmh: 25,
+        speedLimitKmh: null,
         active: true,
       });
     }
@@ -112,14 +120,28 @@ export function ZoneFormDrawer({
     setErrors((prev) => ({ ...prev, [field]: scriptError(field, value) }));
   };
 
+  // A speed limit only applies to a slow zone: switching to one starts at its
+  // default, switching away clears it so nothing but `null` is sent.
   const handleTypeChange = (next: ZoneType) => {
-    const config = ZONE_TYPES[next];
-    setValues((v) => ({ ...v, type: next, speedLimitKmh: config.defaultSpeedKmh }));
+    setValues((v) => ({
+      ...v,
+      type: next,
+      speedLimitKmh: next === 'slow' ? (v.speedLimitKmh ?? ZONE_TYPES.slow.defaultSpeedKmh) : null,
+    }));
+    setErrors((prev) => ({ ...prev, speedLimit: undefined }));
   };
+
+  /** Only a slow zone takes a limit, and it must be 1–200 km/h. */
+  const validateSpeedLimit = (next: ZoneFormValues) =>
+    next.type === 'slow' && !isValidZoneSpeedLimit(next.speedLimitKmh)
+      ? t('zones.speedLimitRequired', { min: String(ZONE_SPEED_LIMIT_MIN), max: String(ZONE_SPEED_LIMIT_MAX) })
+      : undefined;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const nextErrors = validateNames(values);
+    const nextErrors: typeof errors = validateNames(values);
+    const speedError = validateSpeedLimit(values);
+    if (speedError) nextErrors.speedLimit = speedError;
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
@@ -133,11 +155,18 @@ export function ZoneFormDrawer({
 
   // Speed slider label changes based on value
   const speedLabel =
-    values.speedLimitKmh === 0
-      ? t('zones.speedNoRideLabel')
+    values.speedLimitKmh == null
+      ? t('zones.noLimit')
       : values.speedLimitKmh <= 15
       ? t('zones.speedSlowLabel')
       : t('zones.speedNormalLabel');
+
+  // A stored limit above the shared scale widens the slider rather than being
+  // clamped — and silently saved — on the first edit.
+  const sliderMax = Math.min(
+    ZONE_SPEED_LIMIT_MAX,
+    Math.max(MAX_SPEED, zone ? initialSpeedLimit(zone) ?? 0 : 0),
+  );
 
   const typeConfig = ZONE_TYPES[values.type];
 
@@ -218,40 +247,46 @@ export function ZoneFormDrawer({
             </div>
           </div>
 
-          {/* Speed slider */}
-          <div className="mt-5">
-            <Field label={t('zones.maxSpeedLimit')} required>
-              <div className="rounded-xl border bg-slate-50 p-4 dark:bg-slate-900/40"
-                style={{ borderColor: 'rgb(var(--border))' }}>
-                <div className="flex items-center gap-4">
-                  <input
-                    type="range"
-                    min={0}
-                    max={MAX_SPEED}
-                    value={values.speedLimitKmh}
-                    onChange={(e) =>
-                      setValues((v) => ({ ...v, speedLimitKmh: Number(e.target.value) }))
-                    }
-                    className="flex-1 accent-brand-600"
-                  />
-                  <div className="text-end">
-                    <span className="text-2xl font-bold tabular-nums text-slate-900 dark:text-slate-50">
-                      {values.speedLimitKmh}
-                    </span>
-                    <span className="ms-1 text-xs font-medium text-slate-500">{t('common.kmh')}</span>
+          {/* Speed slider — a slow zone only. Every other type takes no limit
+              and sends `speed_limit: null`. */}
+          {values.type === 'slow' && (
+            <div className="mt-5">
+              <Field label={t('zones.maxSpeedLimit')} required error={errors.speedLimit}>
+                <div className="rounded-xl border bg-slate-50 p-4 dark:bg-slate-900/40"
+                  style={{ borderColor: 'rgb(var(--border))' }}>
+                  <div className="flex items-center gap-4">
+                    <input
+                      type="range"
+                      min={ZONE_SPEED_LIMIT_MIN}
+                      max={sliderMax}
+                      value={values.speedLimitKmh ?? ZONE_TYPES.slow.defaultSpeedKmh ?? ZONE_SPEED_LIMIT_MIN}
+                      onChange={(e) => {
+                        setValues((v) => ({ ...v, speedLimitKmh: Number(e.target.value) }));
+                        setErrors((prev) => ({ ...prev, speedLimit: undefined }));
+                      }}
+                      aria-label={t('zones.maxSpeedLimit')}
+                      aria-invalid={!!errors.speedLimit}
+                      className="flex-1 accent-brand-600"
+                    />
+                    <div className="text-end">
+                      <span className="text-2xl font-bold tabular-nums text-slate-900 dark:text-slate-50">
+                        {values.speedLimitKmh ?? '—'}
+                      </span>
+                      <span className="ms-1 text-xs font-medium text-slate-500">{t('common.kmh')}</span>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                    <span>{ZONE_SPEED_LIMIT_MIN} {t('common.kmh')}</span>
+                    <span className="font-semibold text-brand-600">{speedLabel}</span>
+                    <span>{sliderMax} {t('common.kmh')}</span>
                   </div>
                 </div>
-                <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
-                  <span>0 {t('common.kmh')}</span>
-                  <span className="font-semibold text-brand-600">{speedLabel}</span>
-                  <span>{MAX_SPEED} {t('common.kmh')}</span>
-                </div>
-              </div>
-              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                {tv('zones.speedHint')}
-              </p>
-            </Field>
-          </div>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                  {tv('zones.speedHint')}
+                </p>
+              </Field>
+            </div>
+          )}
 
           {/* Status */}
           <div className="mt-5">

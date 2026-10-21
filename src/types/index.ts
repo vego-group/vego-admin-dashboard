@@ -299,10 +299,12 @@ export interface Zone {
   name_ar: string;
   type: ZoneType;
   /**
-   * Maximum allowed speed inside the zone, in km/h. 0 means "no riding" allowed.
-   * Expressed on the single scale in @/lib/vehicle-speed, same as a vehicle's.
+   * Maximum allowed speed inside a `slow` zone, in km/h (1–200), or **`null`
+   * for "no limit"**. Always `null` on `normal` and `restricted` zones: a speed
+   * limit only applies to slow zones, and the backend ignores any number left on
+   * another type. Never 0. See {@link import('@/lib/zone-types').zoneSpeedLimitText}.
    */
-  speedLimitKmh: number;
+  speedLimitKmh: number | null;
   /** Whether the zone rules are currently being enforced. */
   active: boolean;
   /**
@@ -500,6 +502,18 @@ export type TransactionStatus = 'completed' | 'pending' | 'failed' | 'cancelled'
  */
 export type TransactionDirection = 'in' | 'out';
 
+/**
+ * A wallet row's `payment_method`, read into one of three shapes:
+ *
+ * - `card`: the gateway sent a brand **and** last 4 — "VISA •••• 0010";
+ * - `gateway`: a gateway row with no card on record (older Moyasar rows) — "Card";
+ * - `text`: the legacy plain string, shown as sent.
+ */
+export type TransactionPaymentMethod =
+  | { kind: 'card'; gateway?: string; brand: string; last4: string }
+  | { kind: 'gateway'; gateway?: string }
+  | { kind: 'text'; value: string };
+
 export interface WalletTransaction {
   id: string;
   createdAt: string;
@@ -532,7 +546,8 @@ export interface WalletTransaction {
    * it. Unset for the documented kinds.
    */
   rawType?: string;
-  paymentMethod?: string;
+  /** How the row was paid. Absent on rows no payment gateway handled (swaps, charging, manual credits). */
+  paymentMethod?: TransactionPaymentMethod;
   note?: string;
   /**
    * A top-up made by a fleet admin. Its `note` is the backend's English audit

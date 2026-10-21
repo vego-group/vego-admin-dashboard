@@ -23,6 +23,7 @@ import {
   toVehicleTerm,
 } from '@/lib/country';
 import { logger } from '@/lib/logger';
+import { isValidZoneSpeedLimit, zoneSpeedLimitPayload } from '@/lib/zone-types';
 import {
   decimalsForCurrency,
   fractionDigitsOf,
@@ -69,6 +70,7 @@ import type {
   SavedCard,
   SwappingStation,
   TransactionDirection,
+  TransactionPaymentMethod,
   TransactionType,
   UsagePoint,
   Vehicle,
@@ -285,7 +287,12 @@ interface ApiTransaction {
   status?: string;
   description?: string;
   note?: string;
-  payment_method?: string;
+  /**
+   * `{ gateway, brand, last4 }` since backend `7a5dcda` (2026-10-20); `null` on
+   * rows no gateway handled. `brand` / `last4` are `null` when the gateway row
+   * has no card on record. Was a plain string before. Read by {@link readPaymentMethod}.
+   */
+  payment_method?: { gateway?: string | null; brand?: string | null; last4?: string | null } | string | null;
   reference_type?: string | null;
   /**
    * The ledger's own classification — `bonus` / `bonus_reversal` — when the row
@@ -300,7 +307,8 @@ interface ApiTransaction {
   /** Driver may be directly on the transaction or nested inside wallet */
   user?: { id: number | string; name: string };
   driver?: { id: number | string; name: string };
-  admin?: { name: string };
+  /** The fleet admin who started the row, or `null`. Read by {@link readAdminName}. */
+  admin?: { id?: number | string | null; name?: string | null } | string | null;
   wallet?: {
     id?: number | string;
     user?: { id: number | string; name: string; phone?: string };
@@ -771,7 +779,118 @@ function isFleetAdminTopUp(tx: ApiTransaction): boolean {
     && adminId != null && adminId !== '';
 }
 
-function mapTransaction(tx: ApiTransaction): WalletTransaction {
+/** Fields already warned about, so a page of bad rows logs once per field. */
+const warnedTxFields = new Set<string>();
+
+/**
+ * `value` as text the UI can print, or undefined.
+ *
+ * Strings pass, numbers and booleans become strings, and `null` is absent.
+ * Anything else — an object or an array — is absent too, with a dev warning:
+ * rendered as a React child it throws, and takes the whole Wallet page down.
+ */
+function txText(value: unknown, field: string): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+  if (!warnedTxFields.has(field)) {
+    warnedTxFields.add(field);
+    logger.warn(`[Wallet] Unexpected ${Array.isArray(value) ? 'array' : typeof value} in transaction "${field}"; showing "—".`, value);
+  }
+  return undefined;
+}
+
+/** An amount: a decimal string or a number, or absent. */
+function txAmount(value: unknown, field: string): string | number | undefined {
+  return typeof value === 'number' ? value : txText(value, field);
+}
+
+/** A finite number, or absent. */
+function txNumber(value: unknown, field: string): number | undefined {
+  if (value == null) return undefined;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  txText(value, field);
+  return undefined;
+}
+
+/** A nested `{ id, name }` person with both fields as text. */
+function txPerson(value: unknown, field: string): { id: string; name: string } | undefined {
+  if (value == null) return undefined;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    txText(value, field);
+    return undefined;
+  }
+  const p = value as Record<string, unknown>;
+  return { id: txText(p.id, `${field}.id`) ?? '', name: txText(p.name, `${field}.name`) ?? '' };
+}
+
+/**
+ * The row with every field this mapper reads in the type it declares.
+ *
+ * Backend `7a5dcda` turned `payment_method` from a string into an object; the
+ * table rendered it as a React child, which threw (React #31) and took the
+ * Wallet page down in production. `payment_method` and `admin` have their own
+ * readers now, and every other field is checked here, so the next shape change
+ * renders "—" and logs a warning instead of crashing.
+ */
+function sanitizeTransaction(tx: ApiTransaction): ApiTransaction {
+  const raw  = tx as unknown as Record<string, unknown>;
+  const meta = raw.meta && typeof raw.meta === 'object' ? raw.meta as Record<string, unknown> : undefined;
+  const wallet = raw.wallet && typeof raw.wallet === 'object' ? raw.wallet as Record<string, unknown> : undefined;
+  return {
+    id:             txText(raw.id, 'id') ?? '',
+    created_at:     txText(raw.created_at, 'created_at'),
+    type:           txText(raw.type, 'type'),
+    direction:      txText(raw.direction, 'direction'),
+    amount:         txAmount(raw.amount, 'amount'),
+    signed_amount:  txAmount(raw.signed_amount, 'signed_amount'),
+    currency:       txText(raw.currency, 'currency'),
+    minor_units:    txNumber(raw.minor_units, 'minor_units'),
+    decimals:       txNumber(raw.decimals, 'decimals'),
+    status:         txText(raw.status, 'status'),
+    description:    txText(raw.description, 'description'),
+    note:           txText(raw.note, 'note'),
+    reference_type: txText(raw.reference_type, 'reference_type'),
+    ledger_type:    txText(raw.ledger_type, 'ledger_type'),
+    meta:           meta && {
+      initiated_by_fleet_admin_id: txText(meta.initiated_by_fleet_admin_id, 'meta.initiated_by_fleet_admin_id'),
+    },
+    user:           txPerson(raw.user, 'user'),
+    driver:         txPerson(raw.driver, 'driver'),
+    wallet:         wallet && { user: txPerson(wallet.user, 'wallet.user') },
+    payment_method: tx.payment_method,
+    admin:          tx.admin,
+  };
+}
+
+/**
+ * The row's `payment_method`: an object since `7a5dcda`, a string before it,
+ * `null` on rows no gateway handled. A `brand` **and** a `last4` make a card;
+ * an object with either missing is a gateway row with no card on record.
+ */
+function readPaymentMethod(value: unknown): TransactionPaymentMethod | undefined {
+  if (value == null || value === '') return undefined;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    const text = txText(value, 'payment_method');
+    return text ? { kind: 'text', value: text } : undefined;
+  }
+  const pm = value as Record<string, unknown>;
+  const gateway = txText(pm.gateway, 'payment_method.gateway') || undefined;
+  const brand   = txText(pm.brand, 'payment_method.brand')?.trim();
+  const last4   = txText(pm.last4, 'payment_method.last4')?.trim();
+  return brand && last4 ? { kind: 'card', gateway, brand, last4 } : { kind: 'gateway', gateway };
+}
+
+/** The row's `admin.name` (or a plain-string admin), or undefined. */
+function readAdminName(value: unknown): string | undefined {
+  const name = value != null && typeof value === 'object' && !Array.isArray(value)
+    ? txText((value as Record<string, unknown>).name, 'admin.name')
+    : txText(value, 'admin');
+  return name?.trim() || undefined;
+}
+
+function mapTransaction(row: ApiTransaction): WalletTransaction {
+  const tx = sanitizeTransaction(row);
   // Driver may be nested under wallet.user, or directly on tx.user / tx.driver
   const driver = tx.wallet?.user ?? tx.user ?? tx.driver;
 
@@ -800,11 +919,11 @@ function mapTransaction(tx: ApiTransaction): WalletTransaction {
     direction,
     signedAmount,
     ...toTransactionType(tx),
-    paymentMethod: tx.payment_method,
+    paymentMethod: readPaymentMethod(tx.payment_method),
     note:          tx.note ?? tx.description,
     byFleetAdmin:  isFleetAdminTopUp(tx),
     ...toTransactionStatus(tx.status),
-    adminName:     tx.admin?.name,
+    adminName:     readAdminName(tx.admin),
   };
 }
 
@@ -1653,6 +1772,7 @@ interface ApiZone {
   name_en: string;
   name_ar: string;
   type: string;
+  /** km/h, 1–200, meaningful only on `slow` zones; `null` = no limit. */
   speed_limit: number | null;
   coordinates: string; // WKT POLYGON
   is_active: boolean;
@@ -1732,15 +1852,30 @@ function toZoneType(raw: unknown): ZoneType {
   return 'normal';
 }
 
+/**
+ * The zone's effective speed limit, by the backend's rules (reply 2026-10-20):
+ * `null` is "no limit", a limit only applies to `slow` zones — the 25–60 some
+ * `normal` zones still carry is ignored — and `0` is never valid. A slow zone
+ * without a valid limit shouldn't exist; it reads as "no limit" with a warning.
+ */
+function zoneSpeedLimit(api: ApiZone, type: ZoneType): number | null {
+  if (type !== 'slow') return null;
+  const kmh = typeof api.speed_limit === 'string' ? Number(api.speed_limit) : api.speed_limit;
+  if (isValidZoneSpeedLimit(kmh)) return kmh;
+  logger.warn(`[Zones] Slow zone ${api.id} has no valid speed_limit (${JSON.stringify(api.speed_limit)}); showing "no limit".`);
+  return null;
+}
+
 function mapApiZone(api: ApiZone): Zone {
   const nameEn = api.name_en ?? '';
+  const type   = toZoneType(api.type);
   return {
     id:           String(api.id),
     name:         nameEn || api.name_ar || 'Unnamed',
     name_en:      nameEn,
     name_ar:      api.name_ar ?? '',
-    type:         toZoneType(api.type),
-    speedLimitKmh: api.speed_limit ?? 0,
+    type,
+    speedLimitKmh: zoneSpeedLimit(api, type),
     active:       api.is_active,
     // `?? undefined` on purpose: a payload without the flag says nothing about
     // enforcement, and the card must not claim it either way.
@@ -1755,7 +1890,8 @@ export interface ZoneCreateInput {
   name_en: string;
   name_ar: string;
   type: ZoneType;
-  speedLimitKmh: number;
+  /** Sent only for a `slow` zone; every other type sends `null`. */
+  speedLimitKmh: number | null;
   active: boolean;
   polygon: ZonePoint[];
 }
@@ -1776,7 +1912,7 @@ export const zonesApi = {
       name_en:     input.name_en,
       name_ar:     input.name_ar,
       type:        input.type,
-      speed_limit: input.speedLimitKmh || null,
+      speed_limit: zoneSpeedLimitPayload(input.type, input.speedLimitKmh),
       coordinates: pointsToWkt(input.polygon),
       is_active:   input.active,
     });
@@ -1791,7 +1927,9 @@ export const zonesApi = {
     if (rest.name_en      !== undefined) body.name_en     = rest.name_en;
     if (rest.name_ar      !== undefined) body.name_ar     = rest.name_ar;
     if (rest.type         !== undefined) body.type        = rest.type;
-    if (rest.speedLimitKmh !== undefined) body.speed_limit = rest.speedLimitKmh || null;
+    if (rest.speedLimitKmh !== undefined || rest.type !== undefined) {
+      body.speed_limit = zoneSpeedLimitPayload(rest.type, rest.speedLimitKmh);
+    }
     if (rest.active       !== undefined) body.is_active   = rest.active;
     if (rest.polygon      !== undefined) body.coordinates = pointsToWkt(rest.polygon);
 
