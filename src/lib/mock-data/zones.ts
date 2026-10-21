@@ -7,7 +7,7 @@ export const mockZones: Zone[] = [
     name_en: 'Downtown District',
     name_ar: 'حي وسط المدينة',
     type: 'normal',
-    speedLimitKmh: 45,
+    speedLimitKmh: null,
     active: true,
     visible: true,
     polygon: [
@@ -25,7 +25,7 @@ export const mockZones: Zone[] = [
     name_en: 'Airport No-Ride Zone',
     name_ar: 'منطقة المطار الممنوعة',
     type: 'restricted',
-    speedLimitKmh: 0,
+    speedLimitKmh: null,
     active: true,
     visible: true,
     polygon: [

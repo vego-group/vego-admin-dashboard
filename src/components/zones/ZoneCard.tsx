@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Switch } from '@/components/ui/Switch';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
-import { ZONE_TYPES } from '@/lib/zone-types';
+import { ZONE_TYPES, zoneSpeedLimitText } from '@/lib/zone-types';
 import { cn } from '@/lib/cn';
 import type { Zone } from '@/types';
 
@@ -147,9 +147,7 @@ export function ZoneCard({
       >
         <span className="text-slate-500">{t('zones.speedLimit')}</span>
         <span className={cn('font-bold tabular-nums', speedColor)}>
-          {config.speedLabelOverride === 'no_riding'
-            ? t('zones.noRiding')
-            : `${zone.speedLimitKmh} ${t('common.kmh')}`}
+          {zoneSpeedLimitText(zone, t)}
         </span>
       </div>
     </div>

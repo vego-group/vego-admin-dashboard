@@ -3,7 +3,7 @@
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Sparkles } from 'lucide-react';
-import { ZONE_TYPES, ZONE_TYPE_LIST } from '@/lib/zone-types';
+import { ZONE_TYPES, ZONE_TYPE_LIST, zoneSpeedLimitText } from '@/lib/zone-types';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useBasemap } from '@/hooks/useBasemap';
 import { cn } from '@/lib/cn';
@@ -50,9 +50,7 @@ function avgCenter(pts: ZonePoint[]): ZonePoint {
 function zoneTooltipHtml(zone: Zone, t: (key: string) => string): TrustedHtml {
   const cfg = ZONE_TYPES[zone.type];
   const label = t(`zones.types.${cfg.labelKey}Long`);
-  const speed = cfg.speedLabelOverride === 'no_riding'
-    ? t('zones.noRiding')
-    : `${zone.speedLimitKmh} ${t('common.kmh')}`;
+  const speed = zoneSpeedLimitText(zone, t);
   return html`<div style="font-family:system-ui,sans-serif;padding:10px 14px;min-width:170px">
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
       <span style="width:8px;height:8px;border-radius:50%;background:${cfg.color};flex-shrink:0"></span>

@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Pagination } from '@/components/ui/Pagination';
 import { NoAccessState } from '@/components/ui/NoAccessState';
 import { PaymentSettings } from '@/components/wallet/PaymentSettings';
+import { brandLabel } from '@/components/wallet/SavedCardsList';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import { useFleetContext } from '@/hooks/useFleetContext';
@@ -77,6 +78,26 @@ function noteText(tx: WalletTransaction, t: (key: string) => string): string | u
   return tx.type === 'bonus' || tx.type === 'bonus_reversal' || tx.type === 'other'
     ? tx.rawType || undefined
     : undefined;
+}
+
+/** Gateways that only take cards, so a row of theirs with no card on record is still "Card". */
+const CARD_GATEWAYS: ReadonlySet<string> = new Set(['hyperpay', 'moyasar']);
+
+/**
+ * The Payment method cell and CSV column: "VISA •••• 0010", "Card" for a card
+ * gateway's row with no card on record, or undefined ("—") for rows no gateway
+ * handled. Another gateway's row shows that gateway's name rather than "Card",
+ * which it may not be. A `card` value is a left-to-right token: render it in
+ * `dir="ltr"`.
+ */
+function paymentMethodText(tx: WalletTransaction, t: (key: string) => string): string | undefined {
+  const pm = tx.paymentMethod;
+  if (!pm) return undefined;
+  if (pm.kind === 'card') return `${brandLabel(pm.brand)} •••• ${pm.last4}`;
+  if (pm.kind === 'text') return pm.value;
+  return !pm.gateway || CARD_GATEWAYS.has(pm.gateway.toLowerCase())
+    ? t('wallet.paymentMethodCard')
+    : pm.gateway;
 }
 
 /** The CSV's Type column: our kind, or the backend's own value when we have none. */
@@ -205,7 +226,7 @@ function exportCsv(
     csvAmount(r, decimals),
     r.money?.currency ?? currency ?? '',
     csvType(r),
-    r.paymentMethod ?? '',
+    paymentMethodText(r, t) ?? '',
     localisedNote(r, t) ?? '',
     rawStatusOf(r),
     r.adminName ?? '',
@@ -607,6 +628,7 @@ export default function WalletPage() {
                   // type "debit" — reading `amount >= 0` painted every debit
                   // green as if it were a credit.
                   const isCredit   = tx.direction === 'in';
+                  const payment    = paymentMethodText(tx, t);
                   return (
                     <tr
                       key={tx.id}
@@ -637,7 +659,10 @@ export default function WalletPage() {
                         </span>
                       </td>
                       <td className="px-5 py-4 text-slate-600 dark:text-slate-300">
-                        {tx.paymentMethod ?? <span className="text-slate-300 dark:text-slate-600">—</span>}
+                        {/* "VISA •••• 0010" stays in card order in Arabic too. */}
+                        {payment != null
+                          ? <span dir={tx.paymentMethod?.kind === 'card' ? 'ltr' : undefined} className="whitespace-nowrap">{payment}</span>
+                          : <span className="text-slate-300 dark:text-slate-600">—</span>}
                       </td>
                       <td className="px-5 py-4 italic text-slate-500 dark:text-slate-400">
                         {noteText(tx, t) ?? <span className="not-italic text-slate-300 dark:text-slate-600">—</span>}
