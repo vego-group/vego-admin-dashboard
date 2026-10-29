@@ -618,7 +618,7 @@ export interface HyperPayCheckout {
   widgetScriptUrl: string;
   /** Card brands for the widget's `data-brands`, e.g. ['VISA', 'MASTER']. */
   brands: string[];
-  /** `'test'` on HyperPay's test server, which only takes whole amounts. */
+  /** `'test'` or `'live'`, as `initiate` says. The payment page tags a test checkout. */
   mode: string | null;
   /** Whether the backend can store cards right now (`save_card` is honoured). */
   tokenizationEnabled: boolean;

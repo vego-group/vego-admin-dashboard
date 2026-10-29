@@ -2587,17 +2587,20 @@ interface ApiHyperPayCheckout {
 }
 
 /**
- * The URL if it is an absolute https URL, else ''. `allowLocalHttp` also lets
- * `http://localhost` through — for the return URL of a local backend, never for
- * the widget script.
+ * The URL exactly as sent (trimmed) if it is an absolute https URL, else ''.
+ * It is only checked, never rebuilt: the backend picks the HyperPay host (test
+ * or live), so the widget script must load from the very string it returned.
+ * `allowLocalHttp` also lets `http://localhost` through — for the return URL of
+ * a local backend, never for the widget script.
  */
 function httpsUrl(raw: unknown, allowLocalHttp = false): string {
   if (typeof raw !== 'string' || !raw.trim()) return '';
+  const text = raw.trim();
   try {
-    const url = new URL(raw.trim());
-    if (url.protocol === 'https:') return url.toString();
+    const url = new URL(text);
+    if (url.protocol === 'https:') return text;
     const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
-    return allowLocalHttp && local && url.protocol === 'http:' ? url.toString() : '';
+    return allowLocalHttp && local && url.protocol === 'http:' ? text : '';
   } catch {
     return '';
   }
