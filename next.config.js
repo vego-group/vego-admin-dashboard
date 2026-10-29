@@ -2,8 +2,13 @@
  * HyperPay COPYandPAY (Jordan card top-ups). The widget script URL itself
  * always comes from the backend (`widget_script_url`); these are only the hosts
  * the browser may load the widget, its frames and its styles from, and post its
- * card form to. eu-test is HyperPay's test server; eu-prod is the production
- * host their docs give — confirm it against the host HyperPay issues at go-live.
+ * card form to. eu-test is HyperPay's test server; eu-prod serves their LIVE
+ * environment (its public bootstrap says so, checked 2026-10-29) and is where
+ * the backend's live URL is expected — confirm against the first live checkout.
+ *
+ * The widget loads everything from the script's own host: no other oppwa
+ * sub-host, so no `*.oppwa.com`. The jQuery it pulls from ajax.googleapis.com
+ * loads inside HyperPay's own iframes, under their CSP, not ours.
  */
 const HYPERPAY_HOSTS = ['https://eu-test.oppwa.com', 'https://eu-prod.oppwa.com'].join(' ');
 

@@ -74,66 +74,23 @@ export function isCheckoutExpired(expiresAt: string | null, now = Date.now()): b
   return Number.isFinite(at) && at <= now;
 }
 
-// ── What the last checkout told us about this fleet ─────────────────────────
-//
-// `mode` only arrives with an `initiate` response, which is too late for the
-// amount step of that same top-up. So the last answer is remembered per fleet
-// and used from the next top-up on: the test server's whole-amounts rule is
-// enforced on the field once we have seen `mode: "test"`. The backend still
-// decides; a stale hint only costs one 422.
-//
-// `tokenization_enabled` used to be remembered here too, and it decided
-// whether the "Save this card" checkbox showed. That made the checkbox depend
-// on what the *previous* checkout in this browser had said: hidden on the first
-// top-up after tokenization was switched on, shown from the second. The
-// checkbox no longer reads it (see TopUpModal); an old stored value is ignored.
-
-const HINTS_KEY = 'myvego.hyperpay.hints';
-
-export interface HyperPayHints {
-  mode: string | null;
-}
-
-function readAllHints(): Record<string, HyperPayHints> {
-  try {
-    const raw = localStorage.getItem(HINTS_KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, HyperPayHints> : {};
-  } catch {
-    return {};
-  }
-}
-
-export function readHyperPayHints(fleetId: string | null | undefined): HyperPayHints | null {
-  const hints = readAllHints()[fleetId || '_'];
-  return hints && typeof hints === 'object' ? hints : null;
-}
-
-export function rememberHyperPayHints(fleetId: string | null | undefined, checkout: HyperPayCheckout): void {
-  try {
-    const all = readAllHints();
-    all[fleetId || '_'] = { mode: checkout.mode };
-    localStorage.setItem(HINTS_KEY, JSON.stringify(all));
-  } catch {
-    // A hint, nothing more.
-  }
-}
-
 // ── HyperPay's amount rules ─────────────────────────────────────────────────
+//
+// The test server's whole-amounts rule is not checked here. It only applies in
+// test, the backend enforces it itself (`422 amount_whole_only_in_test`, shown
+// on the field), and live takes two decimals. The `mode` hint this app used to
+// remember in localStorage (`myvego.hyperpay.hints`) only fed that rule; an old
+// stored value is ignored.
 
 /**
- * Which HyperPay amount rule an entered amount breaks, if any — the same codes
+ * Which HyperPay amount rule an entered amount breaks, if any — the same code
  * the backend answers with. HyperPay takes at most two decimals (our JOD
- * wallet has three), and its test server whole amounts only.
+ * wallet has three): 7.50 passes, 7.505 does not.
  */
-export function hyperPayAmountIssue(
-  amount: string,
-  mode: string | null | undefined,
-): 'amount_precision' | 'amount_whole_only_in_test' | null {
+export function hyperPayAmountIssue(amount: string): 'amount_precision' | null {
   const digits = Math.max(2, fractionDigitsOf(amount));
   const minor  = toMinorUnits(amount, digits);
   if (minor % 10 ** (digits - 2) !== 0) return 'amount_precision';
-  if (mode === 'test' && minor % 10 ** digits !== 0) return 'amount_whole_only_in_test';
   return null;
 }
 

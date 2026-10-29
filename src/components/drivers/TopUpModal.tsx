@@ -11,13 +11,7 @@ import { SavedCardsList, brandLabel } from '@/components/wallet/SavedCardsList';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import { formatCurrency } from '@/lib/format';
-import {
-  hyperPayAmountIssue,
-  readHyperPayHints,
-  rememberHyperPayHints,
-  storeHyperPayCheckout,
-  type HyperPayHints,
-} from '@/lib/hyperpay';
+import { hyperPayAmountIssue, storeHyperPayCheckout } from '@/lib/hyperpay';
 import { logger } from '@/lib/logger';
 import { amountStep, fractionDigitsOf, toMinorUnits } from '@/lib/money';
 import { useFleetContext } from '@/hooks/useFleetContext';
@@ -71,7 +65,7 @@ function savedCardToken(card: SavedCard): string {
 
 export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const { t, locale } = useI18n();
-  const { fleet, formatMoney, currency, currencyDecimals, currencyStatus, isoCountryCode } = useFleetContext();
+  const { formatMoney, currency, currencyDecimals, currencyStatus, isoCountryCode } = useFleetContext();
   const router = useRouter();
 
   const [step, setStep]               = useState<Step>('amount');
@@ -87,14 +81,12 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   // hidden, the amount is held to HyperPay's two decimals, and the admin picks
   // a saved card or a new one (with "Save this card") before the checkout is
   // created, because `card_choice` decides what the widget will show.
-  const [hints, setHints]             = useState<HyperPayHints | null>(null);
   const [saveCard, setSaveCard]       = useState(false);
   const [cardChoice, setCardChoice]   = useState<CardChoice>('new');
   /** Why the choice was switched to a new card (`422 no_saved_cards`). */
   const [cardChoiceNotice, setCardChoiceNotice] = useState('');
   const [redirecting, setRedirecting] = useState(false);
   const expectHyperPay = isoCountryCode === 'JO';
-  const fleetId = fleet?.id ?? null;
 
   // Card step — data returned by initiateTopUp (only for the "new card" form)
   const [paymentData, setPaymentData] = useState<PaymentData | null>(null);
@@ -200,12 +192,6 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     // a Jordanian form offers "Saved card" before anything is initiated.
     void loadSavedCards(true);
   }, [open, driver, loadWallet, loadSavedCards]);
-
-  // Kept apart from the reset above: the fleet profile can resolve while the
-  // modal is open, and that must not wipe what the admin has typed.
-  useEffect(() => {
-    if (open) setHints(readHyperPayHints(fleetId));
-  }, [open, fleetId]);
 
   // Initialize Moyasar form once we're on the "new card" view and paymentData is ready
   useEffect(() => {
@@ -332,12 +318,12 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const hyperPayAmountMessage = (code: 'amount_precision' | 'amount_whole_only_in_test'): string =>
     code === 'amount_precision' ? t('wallet.hyperpayAmountPrecision') : t('wallet.hyperpayWholeOnlyInTest');
 
-  // HyperPay's amount rules, checked as the admin types — like the minimum, they
-  // keep Pay disabled and put the reason under the field, rather than letting
-  // an enabled-looking button answer with an error. The whole-amounts rule
-  // applies only once a checkout has said `mode: "test"`.
+  // HyperPay's two-decimals rule, checked as the admin types — like the minimum,
+  // it keeps Pay disabled and puts the reason under the field, rather than
+  // letting an enabled-looking button answer with an error. The test server's
+  // whole-amounts rule is the backend's to enforce (see handledAsHyperPayRefusal).
   const hyperPayIssue = expectHyperPay && amountMinorUnits > 0
-    ? hyperPayAmountIssue(amount.trim(), hints?.mode)
+    ? hyperPayAmountIssue(amount.trim())
     : null;
   const amountInvalid = belowMinimum || hyperPayIssue !== null;
 
@@ -350,8 +336,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     if (amountMinorUnits <= 0)    { setAmountError(t('drivers.topUpAmountInvalid'));  return false; }
     if (belowMinimum && minTopUp) { setAmountError(minimumMessage(minTopUp, minReason)); return false; }
     if (expectHyperPay) {
-      // The whole-amounts rule is only known once a checkout has said `mode: "test"`.
-      const issue = hyperPayAmountIssue(trimmed, hints?.mode);
+      const issue = hyperPayAmountIssue(trimmed);
       if (issue) { setAmountError(hyperPayAmountMessage(issue)); return false; }
     }
     return true;
@@ -425,7 +410,6 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
    * mounted inside this modal.
    */
   const openHyperPayCheckout = (checkout: HyperPayCheckout) => {
-    rememberHyperPayHints(fleetId, checkout);
     storeHyperPayCheckout({
       ...checkout,
       driverName: driver.name || null,
@@ -638,8 +622,8 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                   onChange={(e) => { setAmount(e.target.value); if (amountError) setAmountError(''); if (apiError) setApiError(''); }}
                   min="0"
                   step={
-                    // HyperPay takes two decimals, and whole amounts on its test server.
-                    expectHyperPay ? (hints?.mode === 'test' ? 1 : 0.01)
+                    // HyperPay takes two decimals.
+                    expectHyperPay ? 0.01
                       : knownDecimals != null ? amountStep(knownDecimals) : 'any'
                   }
                   className={cn(
