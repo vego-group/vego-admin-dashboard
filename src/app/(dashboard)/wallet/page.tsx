@@ -346,6 +346,8 @@ export default function WalletPage() {
   // error itself so its lines follow the UI language.
   const [loadError, setLoadError] = useState<unknown>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // The CSV export failed for a reason other than a refused filter (FA-414).
+  const [exportError, setExportError] = useState<unknown>(null);
 
   // Filters
   const [fromDate, setFromDate] = useState(defaultFrom);
@@ -440,13 +442,17 @@ export default function WalletPage() {
    */
   const handleExport = async () => {
     setExporting(true);
+    setExportError(null);
     try {
       const res = await walletApi.getAllTransactions(query);
       exportCsv(res.rows, currency, currencyDecimals, t);
       if (res.truncated) setTruncated(true);
     } catch (err) {
       logger.error('[Wallet] CSV export failed:', err);
-      setFilterError(walletFilterErrorFrom(err)?.message ?? null);
+      const refused = walletFilterErrorFrom(err);
+      setFilterError(refused?.message ?? null);
+      // Anything but a refused filter used to fail silently (FA-414).
+      if (!refused) setExportError(err);
     } finally {
       setExporting(false);
     }
@@ -603,6 +609,17 @@ export default function WalletPage() {
               <span className="font-semibold">{t('wallet.filterRejected')}</span> {filterError}
             </span>
           </p>
+        )}
+
+        {/* The export failed, and why — never a button that silently did nothing. */}
+        {exportError != null && (
+          <LoadError
+            className="mt-3"
+            title={t('wallet.exportFailed')}
+            lines={failureLines(exportError, t)}
+            onRetry={() => { void handleExport(); }}
+            retrying={exporting}
+          />
         )}
 
         {/* A capped result must say so — a short export that looks complete is

@@ -873,6 +873,7 @@ const en = {
     contactFinanceTeam: 'Contact Finance Team',
     noTransactions: 'No transactions found',
     loadFailed: "Couldn't load wallet transactions",
+    exportFailed: "Couldn't export the CSV",
     noTransactionsHint: 'Try adjusting your filters or date range.',
     // Payment settings — billing address (Jordan / HyperPay) and saved cards
     paymentSettingsTitle: 'Payment settings',

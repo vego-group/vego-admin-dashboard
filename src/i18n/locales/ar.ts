@@ -876,6 +876,7 @@ const ar: Translations = {
     contactFinanceTeam: 'تواصل مع فريق المالية',
     noTransactions: 'لا توجد معاملات',
     loadFailed: 'تعذّر تحميل معاملات المحفظة',
+    exportFailed: 'تعذّر تصدير ملف CSV',
     noTransactionsHint: 'حاول تعديل الفلاتر أو نطاق التاريخ.',
     // إعدادات الدفع — عنوان الفوترة (الأردن / HyperPay) والبطاقات المحفوظة
     paymentSettingsTitle: 'إعدادات الدفع',
