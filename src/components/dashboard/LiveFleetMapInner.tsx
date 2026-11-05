@@ -150,7 +150,7 @@ export default function LiveFleetMapInner({
       hasFittedRef.current = false;
       setMapReady(false);
     };
-  }, [addBasemap]);
+  }, [addBasemap, viewRef]);
 
   /* Re-draw markers whenever map is ready or data changes */
   useEffect(() => {

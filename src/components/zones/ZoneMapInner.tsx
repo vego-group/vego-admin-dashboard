@@ -157,7 +157,7 @@ export default function ZoneMapInner({
       hasFittedRef.current = false;
       setMapReady(false);
     };
-  }, [addBasemap]);
+  }, [addBasemap, viewRef]);
 
   /* 2 ── Draw zone polygons + labels */
   useEffect(() => {

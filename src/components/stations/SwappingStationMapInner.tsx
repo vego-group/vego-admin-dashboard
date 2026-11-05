@@ -114,7 +114,7 @@ export default function SwappingStationMapInner({ stations, height = 420 }: Swap
       hasFittedRef.current = false;
       setMapReady(false);
     };
-  }, [addBasemap]);
+  }, [addBasemap, viewRef]);
 
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
