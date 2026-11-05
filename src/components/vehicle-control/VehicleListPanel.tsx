@@ -9,6 +9,7 @@ import { Search, User } from 'lucide-react';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { cn } from '@/lib/cn';
+import { formatBatteryLevel } from '@/lib/format';
 import { vehicleDisplayName, vehicleMatches } from '@/lib/vehicle-label';
 import { useState, useMemo } from 'react';
 import type { Vehicle } from '@/types';
@@ -80,7 +81,7 @@ export function VehicleListPanel({ vehicles, selectedId, onSelect }: VehicleList
                   <div className="flex items-center justify-between text-[10px]">
                     <span className="text-slate-500">{t('fleet.battery')}</span>
                     <span className="font-bold tabular-nums text-slate-900 dark:text-slate-100">
-                      {v.batteryLevel}%
+                      {formatBatteryLevel(v.batteryLevel)}
                     </span>
                   </div>
                   <BatteryBar value={v.batteryLevel} size="sm" className="mt-1" />

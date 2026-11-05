@@ -555,16 +555,17 @@ function mapMotorcycle(m: ApiMotorcycle): Vehicle {
     plateNumber:        m.plate_number?.trim() || undefined,
     model,
     status:             toVehicleStatus(m.status),
-    // Real API: battery.battery_percentage is the SOC.
-    batteryLevel:       m.battery?.battery_percentage ?? m.battery?.soc_pct ?? 0,
+    // Real API: battery.battery_percentage is the SOC. Absent stays absent: a
+    // vehicle with no reading is not at 0 % (FA-207).
+    batteryLevel:       readNumber(m.battery?.battery_percentage, m.battery?.soc_pct),
     location:           m.city ?? '',
     coordinates,
     assignedDriverId:   driver ? String(driver.id) : undefined,
     assignedDriverName: driver?.name,
     lastTripAt:         m.last_trip_at ?? new Date().toISOString(),
-    totalDistanceKm:    m.total_distance_km ?? 0,
+    totalDistanceKm:    readNumber(m.total_distance_km),
     currentSpeedKmh:    gps?.speed ?? iot?.speed_kmh ?? 0,
-    estimatedRangeKm:   m.estimated_range_km ?? 0,
+    estimatedRangeKm:   readNumber(m.estimated_range_km),
     // No default. This was `?? 80` — a ceiling no fleet had set, shown back to
     // the operator as theirs, on a slider that stopped at 45. Unknown is
     // unknown; the control panel says so rather than picking a number.
@@ -1254,21 +1255,76 @@ function extractList<T>(raw: unknown): T[] {
   return [];
 }
 
-// Shape returned by getBattery()
+/**
+ * What `GET …/motorcycles/{id}/battery` reported. **Every field is absent when
+ * the payload does not carry it**: these used to default to 0, and the details
+ * card then preferred that 0 over the list's real SOC and showed 0 % / 0 km
+ * (FA-207).
+ */
 export interface MotorcycleBattery {
-  level: number;          // soc_pct  0-100
-  sohPct?: number;        // state-of-health %
-  rangeKm: number;        // estimated_range_km
+  level?: number;         // state of charge, 0–100
+  sohPct?: number;        // state of health, %
+  rangeKm?: number;
   voltage?: number;
   temperature?: number;
 }
 
-// Shape returned by getStatistics()
+/**
+ * What `GET …/motorcycles/{id}/statistics` reported, every field absent when
+ * missing. No trips: the platform has none — activity is swap and charging
+ * sessions (FA-206).
+ */
 export interface MotorcycleStatistics {
-  trips: number;
-  swaps: number;
-  alarms: number;
-  totalDistanceKm: number;
+  swaps?: number;
+  charges?: number;
+  alarms?: number;
+  totalDistanceKm?: number;
+}
+
+/**
+ * A finite number from a payload field, or **undefined**. Takes the first
+ * candidate that is a number, a numeric string ("24.5"), or an object with a
+ * numeric `total` — the statistics endpoint is recorded as nesting its counts
+ * (`swap_sessions.total`, `alarms.total`). `Number()` on such an object is
+ * NaN, and "NaN" was what the Alarms card showed (FA-206).
+ */
+function readNumber(...candidates: unknown[]): number | undefined {
+  for (const raw of candidates) {
+    const value = raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? (raw as { total?: unknown }).total
+      : raw;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim() !== '') {
+      const n = Number(value);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return undefined;
+}
+
+/** A plain object, or undefined. */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+/** A single-resource answer's payload: `{ data: {...} }` or the object itself. */
+function payloadRecord(res: unknown): Record<string, unknown> {
+  const obj = asRecord(res) ?? {};
+  return asRecord(obj.data) ?? obj;
+}
+
+const warnedShapes = new Set<string>();
+
+/** Log, once per endpoint, a 2xx whose fields we could not find. */
+function warnUnreadShape(endpoint: string, payload: Record<string, unknown>): void {
+  if (warnedShapes.has(endpoint)) return;
+  warnedShapes.add(endpoint);
+  logger.warn(
+    `[fleetApi] ${endpoint} answered without any field this page reads; showing "—". ` +
+    `Keys: ${Object.keys(payload).join(', ') || '(none)'}`,
+  );
 }
 
 // ── Vehicle control commands ─────────────────────────────────────────────────
@@ -1363,38 +1419,51 @@ export const fleetApi = {
     }
   },
 
-  /** Real-time battery state + latest log */
+  /**
+   * Battery state + latest log. The shape is unconfirmed (⏳ D1.1), so both
+   * the flat form and the nested ones (`battery`, `latest_log`,
+   * `latest_battery`) are read, flat first. A field none of them carries is
+   * left out, never 0.
+   */
   async getBattery(id: string): Promise<MotorcycleBattery | null> {
     try {
       const res = await apiClient.get<unknown>(`/fleet-admin/motorcycles/${id}/battery`);
-      const obj = res as Record<string, unknown>;
-      const d   = (obj.data && typeof obj.data === 'object'
-        ? obj.data : obj) as Record<string, unknown>;
-      return {
-        level:       Number(d.soc_pct       ?? d.battery_level  ?? 0),
-        sohPct:      d.soh_pct       != null ? Number(d.soh_pct)       : undefined,
-        rangeKm:     Number(d.estimated_range_km ?? d.range_km ?? 0),
-        voltage:     d.voltage       != null ? Number(d.voltage)       : undefined,
-        temperature: d.temperature   != null ? Number(d.temperature)   : undefined,
+      const d = payloadRecord(res);
+      const sources = [d, asRecord(d.battery), asRecord(d.latest_log), asRecord(d.latest_battery)]
+        .filter((s): s is Record<string, unknown> => !!s);
+      const pick = (...keys: string[]) => readNumber(...sources.flatMap((s) => keys.map((k) => s[k])));
+      const battery: MotorcycleBattery = {
+        level:       pick('battery_percentage', 'soc_pct', 'soc', 'battery_level'),
+        sohPct:      pick('soh_pct', 'soh'),
+        rangeKm:     pick('estimated_range_km', 'range_km'),
+        voltage:     pick('voltage'),
+        temperature: pick('temperature'),
       };
+      if (Object.values(battery).every((v) => v === undefined)) warnUnreadShape('GET …/battery', d);
+      return battery;
     } catch {
       return null;
     }
   },
 
-  /** Trip / swap / alarm statistics for a motorcycle */
+  /**
+   * Swap / charging / alarm counts for a motorcycle. Reads the nested
+   * `{ swap_sessions: { total } }` shape recorded from the backend and the flat
+   * `*_count` one until the shape is confirmed (⏳ D1.1). No trips (FA-206).
+   */
   async getStatistics(id: string): Promise<MotorcycleStatistics | null> {
     try {
       const res = await apiClient.get<unknown>(`/fleet-admin/motorcycles/${id}/statistics`);
-      const obj = res as Record<string, unknown>;
-      const d   = (obj.data && typeof obj.data === 'object'
-        ? obj.data : obj) as Record<string, unknown>;
-      return {
-        trips:           Number(d.trips_count          ?? d.total_trips  ?? d.trips  ?? 0),
-        swaps:           Number(d.swap_sessions_count  ?? d.total_swaps  ?? d.swaps  ?? 0),
-        alarms:          Number(d.alarms_count         ?? d.total_alarms ?? d.alarms ?? 0),
-        totalDistanceKm: Number(d.total_distance_km    ?? d.distance_km  ?? 0),
+      const top = payloadRecord(res);
+      const d = asRecord(top.statistics) ?? top;
+      const stats: MotorcycleStatistics = {
+        swaps:           readNumber(d.swap_sessions, d.swap_sessions_count, d.total_swaps, d.swaps),
+        charges:         readNumber(d.charging_sessions, d.charging_sessions_count, d.total_charges, d.charges),
+        alarms:          readNumber(d.alarms, d.alarms_count, d.total_alarms),
+        totalDistanceKm: readNumber(d.total_distance_km, d.distance_km),
       };
+      if (Object.values(stats).every((v) => v === undefined)) warnUnreadShape('GET …/statistics', d);
+      return stats;
     } catch {
       return null;
     }

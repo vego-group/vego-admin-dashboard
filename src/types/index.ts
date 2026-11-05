@@ -149,7 +149,8 @@ export interface Vehicle {
   /** Brand + model as the API sends them ("VEGO Pro 400"); absent when it has none. */
   model?: string;
   status: VehicleStatus;
-  batteryLevel: number;
+  /** State of charge, 0–100. Absent when not reported — "—", never "0%" (FA-207). */
+  batteryLevel?: number;
   location: string;
   /**
    * Last known position, **absent when nothing has ever reported one**.
@@ -162,9 +163,11 @@ export interface Vehicle {
   assignedDriverId?: string;
   assignedDriverName?: string;
   lastTripAt: string;
-  totalDistanceKm: number;
+  /** Absent when not reported — rendered "—", never 0 (FA-206). */
+  totalDistanceKm?: number;
   currentSpeedKmh: number;
-  estimatedRangeKm: number;
+  /** Absent when not reported (FA-207). */
+  estimatedRangeKm?: number;
   /**
    * Speed ceiling the fleet has set on this vehicle, in km/h — **absent when the
    * backend did not report one**.

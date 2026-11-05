@@ -456,10 +456,13 @@ const ar: Translations = {
     offline: 'غير متصل',
     // Statistics card
     statistics: 'الإحصائيات',
-    statTrips: 'الرحلات',
     statSwaps: 'التبديلات',
+    statCharges: 'الشحنات',
     statAlarms: 'التنبيهات',
     statDistance: 'إجمالي المسافة',
+    stateOfHealth: 'صحة البطارية',
+    voltage: 'الجهد',
+    temperature: 'الحرارة',
     // Driver assignment card
     driverAssignment: 'تعيين السائق',
     noDriverAssigned: 'لا يوجد سائق معين حالياً لهذه {{alVehicle}}.',

@@ -447,10 +447,15 @@ const en = {
     offline: 'Offline',
     // Statistics card
     statistics: 'Statistics',
-    statTrips: 'Trips',
+    // Sessions, not trips: the platform has no trips (FA-206).
     statSwaps: 'Swaps',
+    statCharges: 'Charges',
     statAlarms: 'Alarms',
     statDistance: 'Total Distance',
+    // Battery detail chips (were hard-coded English).
+    stateOfHealth: 'Health',
+    voltage: 'Voltage',
+    temperature: 'Temperature',
     // Driver assignment card
     driverAssignment: 'Driver Assignment',
     noDriverAssigned: 'No driver currently assigned to this {{vehicle}}.',

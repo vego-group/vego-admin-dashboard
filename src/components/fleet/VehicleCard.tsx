@@ -7,7 +7,7 @@ import { StatusPill } from '@/components/ui/StatusPill';
 import { VehicleIconTile } from '@/components/ui/VehicleIconTile';
 import { LocationLabel } from '@/components/ui/LocationLabel';
 import { useI18n } from '@/i18n/I18nProvider';
-import { formatNumber, formatRelativeTime } from '@/lib/format';
+import { formatBatteryLevel, formatNumber, formatRelativeTime } from '@/lib/format';
 import { vehicleDisplayName } from '@/lib/vehicle-label';
 import type { Vehicle } from '@/types';
 
@@ -50,7 +50,7 @@ export function VehicleCard({ vehicle, onClick, onAssignDriver }: VehicleCardPro
             {t('fleet.battery')}
           </span>
           <span className="font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-            {vehicle.batteryLevel}%
+            {formatBatteryLevel(vehicle.batteryLevel)}
           </span>
         </div>
         <BatteryBar value={vehicle.batteryLevel} className="mt-1.5" />
@@ -83,7 +83,9 @@ export function VehicleCard({ vehicle, onClick, onAssignDriver }: VehicleCardPro
         <div className="text-end">
           <p className="text-slate-500">{t('fleet.totalDistance')}</p>
           <p className="mt-0.5 font-semibold tabular-nums text-slate-700 dark:text-slate-200">
-            {formatNumber(vehicle.totalDistanceKm, locale)} {t('common.kilometers')}
+            {vehicle.totalDistanceKm === undefined
+              ? '—'
+              : `${formatNumber(vehicle.totalDistanceKm, locale)} ${t('common.kilometers')}`}
           </p>
         </div>
       </div>

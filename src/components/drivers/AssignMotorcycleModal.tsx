@@ -11,6 +11,7 @@ import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { failureLines } from '@/lib/api-errors';
 import { cn } from '@/lib/cn';
 import { vehicleDisplayName, vehicleMatches } from '@/lib/vehicle-label';
+import { formatBatteryLevel } from '@/lib/format';
 import type { Driver, Vehicle } from '@/types';
 
 interface AssignMotorcycleModalProps {
@@ -188,7 +189,7 @@ export function AssignMotorcycleModal({
                     </div>
                     <span className="inline-flex items-center gap-1 text-xs tabular-nums text-slate-400">
                       <Battery className="h-3.5 w-3.5" />
-                      {m.batteryLevel}%
+                      {formatBatteryLevel(m.batteryLevel)}
                     </span>
                     {active && <Check className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />}
                   </button>

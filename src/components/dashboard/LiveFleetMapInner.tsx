@@ -8,6 +8,7 @@ import { clampPercent, html, trustedHtml, type TrustedHtml } from '@/lib/html';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useBasemap } from '@/hooks/useBasemap';
 import { vehicleDisplayName } from '@/lib/vehicle-label';
+import { formatBatteryLevel } from '@/lib/format';
 import type { Vehicle, BatteryStation } from '@/types';
 
 export interface LiveFleetMapProps {
@@ -73,8 +74,10 @@ function vehiclePopup(v: Vehicle, t: Translate): TrustedHtml {
   // An unknown status is drawn as idle, label and colours alike.
   const status = Object.prototype.hasOwnProperty.call(STATUS_BADGE, v.status) ? v.status : 'idle';
   const sc = STATUS_BADGE[status];
+  // No reading: "—" and an empty bar, never "0%" in red (FA-207).
+  const hasBattery = v.batteryLevel !== undefined;
   const battery = clampPercent(v.batteryLevel);
-  const batColor = battery >= 60 ? '#10b981' : battery >= 30 ? '#f59e0b' : '#ef4444';
+  const batColor = !hasBattery ? 'transparent' : battery >= 60 ? '#10b981' : battery >= 30 ? '#f59e0b' : '#ef4444';
   const bikeIconIndigo = BIKE_SVG.replace(/stroke="white"/g, 'stroke="#4f46e5"');
   const driverLine = v.assignedDriverName
     ? html`<div style="font-size:11px;color:rgb(var(--muted-foreground));margin-bottom:10px">&#128100; ${v.assignedDriverName}</div>` : '';
@@ -90,7 +93,7 @@ function vehiclePopup(v: Vehicle, t: Translate): TrustedHtml {
   </div>
   ${driverLine}
   <div style="margin-bottom:8px">
-    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:rgb(var(--muted-foreground))">${t('fleet.battery')}</span><span style="font-weight:600;color:rgb(var(--foreground))">${battery}%</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:rgb(var(--muted-foreground))">${t('fleet.battery')}</span><span style="font-weight:600;color:rgb(var(--foreground))">${formatBatteryLevel(v.batteryLevel)}</span></div>
     <div style="height:6px;background:rgb(var(--muted));border-radius:999px;overflow:hidden"><div style="height:100%;background:${batColor};width:${battery}%;border-radius:999px"></div></div>
   </div>
   ${speedLine}

@@ -11,14 +11,17 @@ import {
   User,
   Maximize2,
   Gauge,
-  Route,
+  Repeat,
+  Zap,
   BatteryCharging,
   Bell,
-  RefreshCw,
+  Thermometer,
+  Activity,
 } from 'lucide-react';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { cn } from '@/lib/cn';
+import { formatBatteryLevel, formatNumber } from '@/lib/format';
 import { vehicleDisplayName } from '@/lib/vehicle-label';
 import type { Vehicle } from '@/types';
 import type { MotorcycleBattery, MotorcycleStatistics } from '@/lib/api';
@@ -36,22 +39,32 @@ export function VehicleDetails({
   statistics,
   loadingExtra,
 }: VehicleDetailsProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { tv } = useVehicleTerm();
 
-  // Use real battery from dedicated endpoint if available, else fallback to list data
+  // The battery endpoint's reading when it has one, else the list's. Neither
+  // is replaced by 0: a missing reading shows "—" and a grey bar (FA-207).
   const batteryLevel = battery?.level  ?? vehicle.batteryLevel;
   const rangeKm      = battery?.rangeKm ?? vehicle.estimatedRangeKm;
+  const hasLevel     = batteryLevel !== undefined;
+  const barWidth     = hasLevel ? Math.min(100, Math.max(0, batteryLevel)) : 0;
 
   const batteryColor =
-    batteryLevel > 50 ? 'from-emerald-400 to-emerald-500'
+    !hasLevel ? 'from-slate-300 to-slate-300'
+    : batteryLevel > 50 ? 'from-emerald-400 to-emerald-500'
     : batteryLevel > 20 ? 'from-amber-400 to-amber-500'
     : 'from-rose-400 to-rose-500';
 
   const batteryIconBg =
-    batteryLevel > 50 ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400'
+    !hasLevel ? 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+    : batteryLevel > 50 ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400'
     : batteryLevel > 20 ? 'bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400'
     : 'bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400';
+
+  /** A count or distance as reported, or "—" — never 0 / NaN for "not reported" (FA-206). */
+  const shown = (value: number | undefined, unit?: string): string =>
+    value === undefined ? '—' : unit ? `${formatNumber(value, locale)} ${unit}` : formatNumber(value, locale);
+  const distanceKm = statistics?.totalDistanceKm ?? vehicle.totalDistanceKm;
 
   return (
     <div className="space-y-4">
@@ -91,7 +104,7 @@ export function VehicleDetails({
               {t('vehicleControl.currentLevel')}
             </p>
             <p className="text-2xl font-bold tabular-nums text-slate-900 dark:text-slate-50">
-              {batteryLevel}%
+              {formatBatteryLevel(batteryLevel)}
             </p>
           </div>
           <div className="text-end">
@@ -99,7 +112,7 @@ export function VehicleDetails({
               {t('vehicleControl.estRange')}
             </p>
             <p className="text-2xl font-bold tabular-nums text-slate-900 dark:text-slate-50">
-              {rangeKm} {t('common.kilometers')}
+              {shown(rangeKm, t('common.kilometers'))}
             </p>
           </div>
         </div>
@@ -107,7 +120,7 @@ export function VehicleDetails({
         <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
           <div
             className={cn('h-full rounded-full bg-gradient-to-r transition-all', batteryColor)}
-            style={{ width: `${batteryLevel}%` }}
+            style={{ width: `${barWidth}%` }}
           />
         </div>
 
@@ -115,13 +128,13 @@ export function VehicleDetails({
         {battery && (battery.sohPct != null || battery.voltage != null || battery.temperature != null) && (
           <div className="mt-3 flex flex-wrap gap-3">
             {battery.sohPct != null && (
-              <StatChip icon={<BatteryCharging className="h-3.5 w-3.5" />} label="SoH" value={`${battery.sohPct}%`} />
+              <StatChip icon={<BatteryCharging className="h-3.5 w-3.5" />} label={t('vehicleControl.stateOfHealth')} value={`${formatNumber(battery.sohPct, locale)}%`} />
             )}
             {battery.voltage != null && (
-              <StatChip icon={<RefreshCw className="h-3.5 w-3.5" />} label="Voltage" value={`${battery.voltage}V`} />
+              <StatChip icon={<Activity className="h-3.5 w-3.5" />} label={t('vehicleControl.voltage')} value={`${formatNumber(battery.voltage, locale)} V`} />
             )}
             {battery.temperature != null && (
-              <StatChip icon={<RefreshCw className="h-3.5 w-3.5" />} label="Temp" value={`${battery.temperature}°C`} />
+              <StatChip icon={<Thermometer className="h-3.5 w-3.5" />} label={t('vehicleControl.temperature')} value={`${formatNumber(battery.temperature, locale)} °C`} />
             )}
           </div>
         )}
@@ -139,30 +152,31 @@ export function VehicleDetails({
             ))}
           </div>
         ) : (
+          // Sessions, not trips: the platform has no trips (FA-206).
           <div className="grid grid-cols-2 gap-3">
             <StatCard
-              icon={<Route className="h-4 w-4" />}
-              iconCls="bg-indigo-50 text-indigo-500 dark:bg-indigo-500/15"
-              label={t('vehicleControl.statTrips')}
-              value={statistics?.trips ?? vehicle.totalDistanceKm > 0 ? (statistics?.trips ?? '—') : '—'}
-            />
-            <StatCard
-              icon={<BatteryCharging className="h-4 w-4" />}
+              icon={<Repeat className="h-4 w-4" />}
               iconCls="bg-emerald-50 text-emerald-500 dark:bg-emerald-500/15"
               label={t('vehicleControl.statSwaps')}
-              value={statistics?.swaps ?? '—'}
+              value={shown(statistics?.swaps)}
+            />
+            <StatCard
+              icon={<Zap className="h-4 w-4" />}
+              iconCls="bg-indigo-50 text-indigo-500 dark:bg-indigo-500/15"
+              label={t('vehicleControl.statCharges')}
+              value={shown(statistics?.charges)}
             />
             <StatCard
               icon={<Bell className="h-4 w-4" />}
               iconCls="bg-rose-50 text-rose-500 dark:bg-rose-500/15"
               label={t('vehicleControl.statAlarms')}
-              value={statistics?.alarms ?? '—'}
+              value={shown(statistics?.alarms)}
             />
             <StatCard
               icon={<Gauge className="h-4 w-4" />}
               iconCls="bg-amber-50 text-amber-500 dark:bg-amber-500/15"
               label={t('vehicleControl.statDistance')}
-              value={statistics != null ? `${statistics.totalDistanceKm} ${t('common.kilometers')}` : (vehicle.totalDistanceKm > 0 ? `${vehicle.totalDistanceKm} ${t('common.kilometers')}` : '—')}
+              value={shown(distanceKm, t('common.kilometers'))}
             />
           </div>
         )}

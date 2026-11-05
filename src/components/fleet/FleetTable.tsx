@@ -6,6 +6,7 @@ import { StatusPill } from '@/components/ui/StatusPill';
 import { LocationLabel } from '@/components/ui/LocationLabel';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
+import { formatBatteryLevel } from '@/lib/format';
 import type { Vehicle } from '@/types';
 
 interface FleetTableProps {
@@ -58,7 +59,7 @@ export function FleetTable({ vehicles, onAssignDriver }: FleetTableProps) {
                   <StatusPill status={v.status} />
                 </td>
                 <td className="px-5 py-4 font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-                  {v.batteryLevel}%
+                  {formatBatteryLevel(v.batteryLevel)}
                 </td>
                 {onAssignDriver && (
                   <td className="px-5 py-4">

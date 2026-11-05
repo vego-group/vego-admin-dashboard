@@ -160,6 +160,17 @@ export function ltrIsolate(value: string): string {
   return `\u2066${value}\u2069`;
 }
 
+/**
+ * A battery level as "64%", or "—" when it was not reported. A vehicle with no
+ * telemetry used to read "0%" — an empty battery — which is a claim, not an
+ * absence (FA-207).
+ */
+export function formatBatteryLevel(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? `${Math.round(Math.min(100, Math.max(0, value)))}%`
+    : '—';
+}
+
 export function formatPercent(value: number, locale: Locale = 'en'): string {
   return new Intl.NumberFormat(localeMap[locale], {
     style: 'percent',
