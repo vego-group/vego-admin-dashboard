@@ -412,6 +412,8 @@ const en = {
     removeCardConfirm: 'Remove this saved card?',
     saveCardHint: 'You can choose to save this card on the next step for faster future top-ups.',
     chargeFailed: 'The payment could not be completed. Please try again or use another card.',
+    chargeUncertain: "We couldn't confirm this payment. It may still go through. Check Wallet Transactions before trying again.",
+    paymentAlreadyProcessing: 'This payment is already being processed. Check Wallet Transactions before trying again.',
     cardFormLoadFailed: 'The card form could not be loaded. Check your connection and try again. Nothing has been charged.',
     paymentAmountMismatch: 'The payment server prepared {{prepared}}, not the {{shown}} shown here, so the card form was not opened. Nothing has been charged. Close this form and start the top-up again.',
     initiateNoAnswer: "The payment server didn't answer, so no card form was opened. Nothing has been charged. Please try again.",

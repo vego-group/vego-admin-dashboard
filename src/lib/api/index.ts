@@ -2715,6 +2715,16 @@ export function hyperPayRefusalFrom(
   return { code: err.code as HyperPayRefusalCode, message };
 }
 
+/**
+ * `409 idempotency_key_conflict`: the Idempotency-Key sent with a charge was
+ * already used for another admin or another driver. The backend did not run
+ * this charge, but one under that key may be in progress, so the caller says
+ * "already being processed, check the ledger" — never "failed".
+ */
+export function isIdempotencyConflict(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 409 && err.code === 'idempotency_key_conflict';
+}
+
 /** `verify` for a HyperPay checkout. Every field past `status` is optional. */
 export interface HyperPayVerifyResult {
   /** Lower-cased: 'completed' | 'pending' | 'failed', or whatever else the backend sends. */
@@ -3161,13 +3171,18 @@ export const walletApi = {
    * (it needs the Moyasar secret key), so this hits a backend endpoint that
    * performs the charge and may return a 3DS `transactionUrl` to redirect to.
    * Endpoint: POST /fleet-admin/wallet/top-up/charge-saved
+   *
+   * `idempotencyKey` goes out as the `Idempotency-Key` header (FA-403): one
+   * UUID per attempt, the same one again when the caller retries an attempt
+   * that got no answer. `status` is lower-cased, or null when none was sent.
    */
   async chargeSavedCard(params: {
     driverId: string;
     amount:   number;
     cardId:   string;
+    idempotencyKey: string;
   }): Promise<{
-    status:          string;
+    status:          string | null;
     transactionUrl?: string;   // present when 3DS authentication is required
     paymentId?:      string;
     amount?:         number;
@@ -3187,13 +3202,13 @@ export const walletApi = {
       driver_id: Number(params.driverId),
       amount:    params.amount,
       card_id:   params.cardId,
-    }, { timeoutMs: PAYMENT_TIMEOUT_MS });
+    }, { timeoutMs: PAYMENT_TIMEOUT_MS, headers: { 'Idempotency-Key': params.idempotencyKey } });
 
     if (res.success === false) throw new Error(res.message ?? 'Could not charge the saved card.');
 
     const d = res.data ?? {};
     return {
-      status:         d.status ?? 'failed',
+      status:         optionalString(d.status)?.toLowerCase() ?? null,
       transactionUrl: d.transaction_url || undefined,
       paymentId:      d.payment_id,
       amount:         d.amount,

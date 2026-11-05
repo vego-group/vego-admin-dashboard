@@ -12,11 +12,14 @@ import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import { formatCurrency } from '@/lib/format';
 import { hyperPayAmountIssue, storeHyperPayCheckout } from '@/lib/hyperpay';
+import { newIdempotencyKey } from '@/lib/idempotency';
 import { logger } from '@/lib/logger';
 import { amountStep, decimalsForCurrency, fractionDigitsOf, fromMinorUnits, toMinorUnits } from '@/lib/money';
 import { loadMoyasar } from '@/lib/moyasar';
 import { useFleetContext } from '@/hooks/useFleetContext';
-import { hyperPayRefusalFrom, topUpBelowMinimumFrom, walletApi, type MoyasarPaymentData } from '@/lib/api';
+import {
+  hyperPayRefusalFrom, isIdempotencyConflict, topUpBelowMinimumFrom, walletApi, type MoyasarPaymentData,
+} from '@/lib/api';
 import { isIndeterminateFailure } from '@/lib/api/client';
 import type {
   CardChoice, CurrencyCode, Driver, HyperPayCheckout, MinTopUpReason, Money, SavedCard, ServicePrice, TopUpOptions,
@@ -110,6 +113,15 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   /** The card awaiting "Remove this saved card?". */
   const [confirmCardId, setConfirmCardId] = useState<string | null>(null);
   const [charging, setCharging]           = useState(false);
+  /**
+   * The saved-card charge being attempted (FA-403): one Idempotency-Key per
+   * attempt — this driver, card and amount. Pressing Pay again after a charge
+   * that got no answer reuses the key, so the backend can tell a retry from a
+   * second payment; a final answer, or any change to the attempt, starts anew.
+   */
+  const chargeAttempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  /** "Not confirmed, check the ledger" — amber, because it is not a failure. */
+  const [paymentNotice, setPaymentNotice] = useState('');
 
   // Balance
   const [fetchedBalance, setFetchedBalance]   = useState<number | null>(null);
@@ -196,6 +208,8 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     setSelectedCardId(null);
     setConfirmCardId(null);
     setCharging(false);
+    chargeAttempt.current = null;
+    setPaymentNotice('');
     setSaveCard(false);
     setCardChoice('new');
     setCardChoiceNotice('');
@@ -548,14 +562,26 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const handleChargeSaved = async () => {
     if (!selectedCardId) return;
     setApiError('');
+    setPaymentNotice('');
+
+    const fingerprint = `${attemptKey}|${selectedCardId}`;
+    if (chargeAttempt.current?.fingerprint !== fingerprint) {
+      chargeAttempt.current = { fingerprint, key: newIdempotencyKey() };
+    }
+    const idempotencyKey = chargeAttempt.current.key;
+    /** A final answer: the next press is a new payment, with a new key. */
+    const endAttempt = () => { chargeAttempt.current = null; };
+
     setCharging(true);
     try {
-      const res = await walletApi.chargeSavedCard({ driverId: driver.id, amount: numAmount, cardId: selectedCardId });
+      const res = await walletApi.chargeSavedCard({
+        driverId: driver.id, amount: numAmount, cardId: selectedCardId, idempotencyKey,
+      });
 
       // 3DS authentication required — hand off to Moyasar, which returns to /payment-callback.
       if (res.transactionUrl) { window.location.href = res.transactionUrl; return; }
 
-      const s = res.status.toLowerCase();
+      const s = res.status ?? '';
       if (s === 'paid' || s === 'completed' || s === 'captured') {
         // Already settled server-side — show success without re-verifying (no double credit).
         //
@@ -570,14 +596,40 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
         window.location.href = `/payment-callback?${q.toString()}`;
         return;
       }
-      setApiError(t('drivers.chargeFailed'));
+      if (s === 'failed') {
+        endAttempt();
+        setApiError(t('drivers.chargeFailed'));
+        return;
+      }
+      // `pending`, `authorized`, `initiated`… or no status: the charge may still
+      // complete. Never "could not be completed" — the callback says pending
+      // and points at the ledger, without verifying anything.
+      logger.warn(`[TopUpModal] charge-saved answered status "${res.status ?? '(none)'}"; showing pending.`);
+      const q = new URLSearchParams({ status: 'pending', settled: '1' });
+      if (res.paymentId) q.set('id', res.paymentId);
+      if (!res.status) q.set('uncertain', '1');
+      window.location.href = `/payment-callback?${q.toString()}`;
     } catch (err) {
+      // The key is already in use for another charge — this one did not run,
+      // but that one may be in progress. Keep the key: never "failed".
+      if (isIdempotencyConflict(err)) {
+        setPaymentNotice(t('drivers.paymentAlreadyProcessing'));
+        return;
+      }
       // A Jordanian fleet: its saved cards are used inside the HyperPay widget,
       // never charged server-side. Go to the widget instead.
       if (hyperPayRefusalFrom(err)?.code === 'use_widget_for_saved_cards') {
+        endAttempt();
         await enterNewCard();
         return;
       }
+      // No usable answer (network, timeout, 5xx): the card may have been
+      // charged. Keep the key, so pressing Pay again is the same payment.
+      if (isIndeterminateFailure(err)) {
+        setPaymentNotice(t('drivers.chargeUncertain'));
+        return;
+      }
+      endAttempt();
       if (!handledAsBelowMinimum(err)) {
         setApiError(err instanceof Error ? err.message : t('drivers.chargeFailed'));
       }
@@ -1001,6 +1053,16 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
               {apiError && (
                 <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-400">
                   {apiError}
+                </div>
+              )}
+
+              {paymentNotice && (
+                <div
+                  role="status"
+                  className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300"
+                >
+                  <Info className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{paymentNotice}</span>
                 </div>
               )}
 
