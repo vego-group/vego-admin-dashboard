@@ -13,12 +13,12 @@ import { cn } from '@/lib/cn';
 import { formatCurrency } from '@/lib/format';
 import { hyperPayAmountIssue, storeHyperPayCheckout } from '@/lib/hyperpay';
 import { logger } from '@/lib/logger';
-import { amountStep, fractionDigitsOf, toMinorUnits } from '@/lib/money';
+import { amountStep, decimalsForCurrency, fractionDigitsOf, fromMinorUnits, toMinorUnits } from '@/lib/money';
 import { loadMoyasar } from '@/lib/moyasar';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { hyperPayRefusalFrom, topUpBelowMinimumFrom, walletApi, type MoyasarPaymentData } from '@/lib/api';
 import type {
-  CardChoice, Driver, HyperPayCheckout, MinTopUpReason, Money, SavedCard, ServicePrice, TopUpOptions,
+  CardChoice, CurrencyCode, Driver, HyperPayCheckout, MinTopUpReason, Money, SavedCard, ServicePrice, TopUpOptions,
 } from '@/types';
 
 interface TopUpModalProps {
@@ -89,8 +89,17 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const [redirecting, setRedirecting] = useState(false);
   const expectHyperPay = isoCountryCode === 'JO';
 
-  // Card step — data returned by initiateTopUp (only for the "new card" form)
-  const [paymentData, setPaymentData] = useState<PaymentData | null>(null);
+  // Card step — what initiateTopUp returned for the Moyasar "new card" form,
+  // tagged with the exact top-up it was created for (FA-401). It is only used
+  // while that tag still matches the form: another amount, driver or precision
+  // means a new `initiate`, never the old payment.
+  const [initiated, setInitiated] = useState<{ attemptKey: string; data: PaymentData } | null>(null);
+  /**
+   * Bumped whenever an in-flight `initiate` stops describing the form (the
+   * amount changed, the admin went back, the modal closed), so its late answer
+   * is dropped instead of opening a form — or a HyperPay page — for the old amount.
+   */
+  const initiateSeq = useRef(0);
 
   // Saved cards
   const [savedCards, setSavedCards]       = useState<SavedCard[]>([]);
@@ -176,7 +185,8 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     setAmount('');
     setAmountError('');
     setApiError('');
-    setPaymentData(null);
+    initiateSeq.current += 1;
+    setInitiated(null);
     setFetchedBalance(null);
     setOptions(null);
     setMinOverride(null);
@@ -198,10 +208,60 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     void loadSavedCards(true);
   }, [open, driver, loadWallet, loadSavedCards]);
 
+  // Closing the modal drops any `initiate` still in flight: a late answer must
+  // not open a card form, or navigate to a HyperPay page, after Cancel.
+  useEffect(() => {
+    if (!open) initiateSeq.current += 1;
+  }, [open]);
+
+  const currentBalance = fetchedBalance ?? driver?.walletBalance ?? 0;
+
+  // The currency this form is denominated in. The fleet profile is the primary
+  // source; `topup-options` states its own currency in the same response as the
+  // amounts, so it is an equally authoritative stand-in while the profile is
+  // still in flight — and it is never a guess.
+  const currencyLabel = currency ?? options?.currency ?? null;
+  const knownDecimals = currencyDecimals ?? options?.decimals ?? null;
+
+  // Amounts are held as the raw input string and converted through integer minor
+  // units — never parseFloat, so a three-decimal JOD total does not drift.
+  //
+  // Until the currency resolves we do not know its precision, so we scale to
+  // whatever the values themselves carry rather than assuming two decimals.
+  // That keeps both operands exact without inventing a currency.
+  const scaleDecimals = knownDecimals
+    ?? Math.max(fractionDigitsOf(amount), fractionDigitsOf(currentBalance));
+  const scale            = 10 ** scaleDecimals;
+  const amountMinorUnits = toMinorUnits(amount, scaleDecimals);
+  const numAmount        = amountMinorUnits / scale;
+  const newBalance       = (toMinorUnits(currentBalance, scaleDecimals) + amountMinorUnits) / scale;
+
+  // The top-up this form describes right now. A Moyasar payment prepared for
+  // anything else is stale and is never shown (FA-401).
+  const attemptKey  = `${driver?.id ?? ''}|${scaleDecimals}|${amountMinorUnits}`;
+  const paymentData = initiated?.attemptKey === attemptKey ? initiated.data : null;
+
+  // Moyasar charges `paymentData.amount` (minor units of its own currency); the
+  // form says it will charge `numAmount` in the fleet currency. The card form is
+  // only shown while both agree, so the amount charged is the amount shown.
+  const gatewayDecimals = paymentData ? decimalsForCurrency(paymentData.currency) : undefined;
+  const paymentAmountMismatch = paymentData != null && (
+    gatewayDecimals == null
+    || (currencyLabel != null && paymentData.currency.toUpperCase() !== String(currencyLabel).toUpperCase())
+    || paymentData.amount !== toMinorUnits(fromMinorUnits(amountMinorUnits, scaleDecimals), gatewayDecimals)
+  );
+
   // Initialize Moyasar form once we're on the "new card" view and paymentData is ready.
   // The script is loaded here, on demand — not on every page (FA-002).
   useEffect(() => {
     if (step !== 'card' || cardMode !== 'new' || !paymentData) return;
+    if (paymentAmountMismatch) {
+      logger.error('[TopUpModal] initiate prepared a different amount than the form shows; card form withheld.', {
+        prepared: `${paymentData.amount} ${paymentData.currency} (minor units)`,
+        shown: `${fromMinorUnits(amountMinorUnits, scaleDecimals)} ${currencyLabel ?? '?'}`,
+      });
+      return;
+    }
 
     let cancelled = false;
     setMoyasarFailed(false);
@@ -235,31 +295,9 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
 
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, cardMode, paymentData, moyasarAttempt]);
+  }, [step, cardMode, paymentData, paymentAmountMismatch, moyasarAttempt]);
 
   if (!driver) return null;
-
-  const currentBalance = fetchedBalance ?? driver.walletBalance ?? 0;
-
-  // The currency this form is denominated in. The fleet profile is the primary
-  // source; `topup-options` states its own currency in the same response as the
-  // amounts, so it is an equally authoritative stand-in while the profile is
-  // still in flight — and it is never a guess.
-  const currencyLabel = currency ?? options?.currency ?? null;
-  const knownDecimals = currencyDecimals ?? options?.decimals ?? null;
-
-  // Amounts are held as the raw input string and converted through integer minor
-  // units — never parseFloat, so a three-decimal JOD total does not drift.
-  //
-  // Until the currency resolves we do not know its precision, so we scale to
-  // whatever the values themselves carry rather than assuming two decimals.
-  // That keeps both operands exact without inventing a currency.
-  const scaleDecimals = knownDecimals
-    ?? Math.max(fractionDigitsOf(amount), fractionDigitsOf(currentBalance));
-  const scale            = 10 ** scaleDecimals;
-  const amountMinorUnits = toMinorUnits(amount, scaleDecimals);
-  const numAmount        = amountMinorUnits / scale;
-  const newBalance       = (toMinorUnits(currentBalance, scaleDecimals) + amountMinorUnits) / scale;
 
   /**
    * Render an amount the backend sent as part of the top-up options.
@@ -370,7 +408,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
 
     // The amount field lives on step 1; there is nothing to fix on the card step.
     setApiError('');
-    setPaymentData(null);
+    setInitiated(null);
     setStep('amount');
     return true;
   };
@@ -386,14 +424,14 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
 
     if (refusal.code === 'billing_address_required') {
       setApiError('');
-      setPaymentData(null);
+      setInitiated(null);
       setStep('billing');
       return true;
     }
     if (refusal.code === 'amount_precision' || refusal.code === 'amount_whole_only_in_test') {
       setAmountError(refusal.message ?? hyperPayAmountMessage(refusal.code));
       setApiError('');
-      setPaymentData(null);
+      setInitiated(null);
       setStep('amount');
       return true;
     }
@@ -441,7 +479,10 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
       setCardMode('new');
       setStep('card');
     }
+    // Reuse a payment only if it was prepared for exactly this top-up.
     if (paymentData) return;
+    const seq = ++initiateSeq.current;
+    const forAttempt = attemptKey;
     setInitiating(true);
     try {
       const result = await walletApi.initiateTopUp({
@@ -455,6 +496,9 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
           ? { cardChoice: effectiveChoice, saveCard: effectiveChoice === 'new' && saveCard }
           : { saveCard: true }),
       });
+      // The form moved on (new amount, Back, closed): this answer is for a top-up
+      // nobody is looking at any more.
+      if (seq !== initiateSeq.current) return;
       if (result.gateway === 'hyperpay') {
         openHyperPayCheckout(result);
         return;
@@ -463,14 +507,26 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
         setCardMode('new');
         setStep('card');
       }
-      setPaymentData(result.paymentData);
+      setInitiated({ attemptKey: forAttempt, data: result.paymentData });
     } catch (err) {
+      if (seq !== initiateSeq.current) return;
       if (!handledAsBelowMinimum(err) && !handledAsHyperPayRefusal(err)) {
         setApiError(err instanceof Error ? err.message : 'Failed to initialize payment. Please try again.');
       }
     } finally {
-      setInitiating(false);
+      if (seq === initiateSeq.current) setInitiating(false);
     }
+  };
+
+  /**
+   * Forget the Moyasar payment prepared for the previous amount, and drop any
+   * `initiate` still in flight. Called when the amount changes and when the
+   * admin leaves the card step (FA-401).
+   */
+  const discardInitiated = () => {
+    initiateSeq.current += 1;
+    setInitiated(null);
+    setInitiating(false);
   };
 
   const handleProceedToCard = async () => {
@@ -543,7 +599,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
 
   const headerBack = () => {
     if (cardMode === 'new' && chargeableCards.length > 0) { setApiError(''); setCardMode('list'); }
-    else setStep('amount');
+    else { discardInitiated(); setStep('amount'); }
   };
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -629,7 +685,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                   type="number"
                   placeholder={t('drivers.topUpAmountPlaceholder')}
                   value={amount}
-                  onChange={(e) => { setAmount(e.target.value); if (amountError) setAmountError(''); if (apiError) setApiError(''); }}
+                  onChange={(e) => { setAmount(e.target.value); discardInitiated(); if (amountError) setAmountError(''); if (apiError) setApiError(''); }}
                   min="0"
                   step={
                     // HyperPay takes two decimals.
@@ -696,6 +752,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                       onClick={() => {
                         // The backend's own fixed-precision string, unrounded.
                         setAmount(suggested.amount);
+                        discardInitiated();
                         if (amountError) setAmountError('');
                         if (apiError) setApiError('');
                       }}
@@ -975,6 +1032,21 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
               {initiating || !paymentData ? (
                 <div className="flex items-center justify-center py-16 text-slate-400">
                   <Loader2 className="h-6 w-6 animate-spin" />
+                </div>
+              ) : paymentAmountMismatch ? (
+                <div
+                  role="alert"
+                  className="flex flex-col items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-8 text-center text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-400"
+                >
+                  <AlertTriangle className="h-5 w-5" />
+                  <span>
+                    {t('drivers.paymentAmountMismatch', {
+                      prepared: gatewayDecimals != null
+                        ? formatCurrency(fromMinorUnits(paymentData.amount, gatewayDecimals), paymentData.currency as CurrencyCode, gatewayDecimals, locale)
+                        : `${paymentData.currency} ${paymentData.amount}`,
+                      shown: formatMoney(numAmount, locale),
+                    })}
+                  </span>
                 </div>
               ) : moyasarFailed ? (
                 <div
