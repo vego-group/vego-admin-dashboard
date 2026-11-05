@@ -445,7 +445,6 @@ function mapDriver(d: ApiDriver): Driver {
   const plate   = d.plate;
   const customs = d.customs_card;
 
-  const hasLicense   = d.has_license ?? license?.has_license ?? !!license;
   const licenseNum   = license?.number ?? license?.license_number ?? d.driving_license_number ?? undefined;
   // The explicit status (nested block, or the list's flat field) when there is
   // one. Without it, a licence image on record is "Pending review" — never
@@ -454,6 +453,12 @@ function mapDriver(d: ApiDriver): Driver {
   const licenseFileUrl = license?.file_url ?? d.driving_license_file_url ?? undefined;
   const hasLicenseFile = !!(licenseFileUrl || license?.back_file_url || d.driving_license_file);
   const licenseStatus  = toDocStatus(license?.status ?? d.driving_license_status, hasLicenseFile);
+  // The saved answer when the payload has one (FA-212). Otherwise, whether
+  // there is anything licence-shaped on record. Not `!!license`: the detail
+  // endpoint sends a `driving_license` block even when it is "not_uploaded",
+  // which made every driver read as "Has licence".
+  const hasLicense = d.has_license ?? license?.has_license
+    ?? (licenseStatus !== 'not_uploaded' || !!licenseNum);
 
   // The document block is the truth and the flat column is the fallback, in that
   // order: a detail edited on a driver who has a licence or plate on file is
@@ -1537,10 +1542,13 @@ export const driversApi = {
 
   async create(input: DriverCreateInput): Promise<Driver> {
     // POST /fleet-admin/drivers — only send fields the backend accepts
-    const body: Record<string, string | undefined> = {
+    const body: Record<string, string | boolean | undefined> = {
       name:  input.name,
       phone: input.phone,
     };
+    // "Has licence / No licence" was collected and never sent (FA-212).
+    // ⏳ The backend is confirming it accepts `has_license` on POST and PUT.
+    if (input.documents?.license)                body['has_license']            = input.documents.license.hasLicense;
     if (input.dialCode)                          body['country_code']           = input.dialCode;
     if (input.email)                             body['email']                  = input.email;
     if (input.address)                           body['address']                = input.address;
@@ -1575,7 +1583,7 @@ export const driversApi = {
     // `phone` — a blank one is a 422 naming the field rather than a silent wipe
     // (a driver with no phone cannot log in). The form blocks both before they
     // get here; if one slips through, the form shows the 422 on its field.
-    const body: Record<string, string | undefined> = {};
+    const body: Record<string, string | boolean | undefined> = {};
     if (updates.name     !== undefined) body['name']         = updates.name;
     if (updates.phone    !== undefined) body['phone']        = updates.phone;
     if (updates.dialCode !== undefined) body['country_code'] = updates.dialCode;
@@ -1589,6 +1597,8 @@ export const driversApi = {
     // documents endpoint carried them.
     const license = updates.documents?.license;
     const plate   = updates.documents?.plate;
+    // Persist the operator's "Has licence / No licence" answer (FA-212).
+    if (license?.hasLicense !== undefined) body['has_license']            = license.hasLicense;
     if (license?.number     !== undefined) body['driving_license_number'] = license.number;
     if (license?.expiryDate !== undefined) body['driving_license_expiry'] = license.expiryDate;
     if (plate?.number       !== undefined) body['plate_number']           = plate.number;

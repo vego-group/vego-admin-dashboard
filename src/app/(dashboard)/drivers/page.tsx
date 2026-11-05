@@ -157,13 +157,18 @@ export default function DriversPage() {
    * with the API's reason, and saving again retries against the same driver.
    */
   const uploadDocsIfAny = async (driverId: string, values: DriverFormValues) => {
-    if (!values.licenseFrontFile && !values.licenseBackFile && !values.plateImageFile) return null;
+    // "No licence" uploads no licence images or details, even ones picked
+    // before the operator switched to it (FA-212).
+    const withLicense  = values.hasLicense;
+    const licenseFront = withLicense ? values.licenseFrontFile : null;
+    const licenseBack  = withLicense ? values.licenseBackFile : null;
+    if (!licenseFront && !licenseBack && !values.plateImageFile) return null;
     try {
       return await driversApi.uploadDocuments(driverId, {
-        licenseFront:  values.licenseFrontFile,
-        licenseBack:   values.licenseBackFile,
-        licenseNumber: values.licenseNumber || undefined,
-        licenseExpiry: values.licenseExpiry || undefined,
+        licenseFront,
+        licenseBack,
+        licenseNumber: withLicense ? values.licenseNumber || undefined : undefined,
+        licenseExpiry: withLicense ? values.licenseExpiry || undefined : undefined,
         plateImage:    values.plateImageFile,
         plateNumber:   values.plateNumber || undefined,
       });
@@ -186,8 +191,10 @@ export default function DriversPage() {
         license: {
           status: values.licenseFrontName ? 'pending' : 'not_uploaded',
           hasLicense: values.hasLicense,
-          number: values.licenseNumber || undefined,
-          expiryDate: values.licenseExpiry || undefined,
+          // "No licence" sends no licence details, whatever was typed before
+          // switching to it (FA-212).
+          number: values.hasLicense ? values.licenseNumber || undefined : undefined,
+          expiryDate: values.hasLicense ? values.licenseExpiry || undefined : undefined,
         },
         customsCard: { status: 'not_uploaded' },
         plate: {
@@ -233,8 +240,11 @@ export default function DriversPage() {
         license: {
           status:     'not_uploaded',
           hasLicense: values.hasLicense,
-          number:     values.licenseNumber.trim(),
-          expiryDate: values.licenseExpiry.trim(),
+          // With "No licence", has_license says so and the licence details on
+          // the server are left alone (`undefined`), not wiped: a reviewed
+          // licence document is not this form's to delete (FA-212).
+          number:     values.hasLicense ? values.licenseNumber.trim() : undefined,
+          expiryDate: values.hasLicense ? values.licenseExpiry.trim() : undefined,
         },
         customsCard: { status: 'not_uploaded' },
         plate: { status: 'not_uploaded', number: values.plateNumber.trim() },
