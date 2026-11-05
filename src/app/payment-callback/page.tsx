@@ -24,6 +24,9 @@ type Status = 'loading' | 'success' | 'failed' | 'pending';
  */
 const hyperPayVerifications = new Map<string, Promise<HyperPayVerifyResult>>();
 
+/** The same for Moyasar payments, keyed by payment id (FA-407). */
+const moyasarVerifications = new Map<string, ReturnType<typeof walletApi.verifyTopUp>>();
+
 /**
  * A failed verify call that is a refusal of the request itself (unknown
  * payment, bad input): the payment failed. Anything else — the network, a
@@ -156,12 +159,21 @@ export default function PaymentCallbackPage() {
     const urlStatus = params.get('status');
     const urlMsg    = params.get('message');
 
-    // Saved-card direct charge already settled server-side (wallet credited).
-    // Show the result straight away — re-verifying would risk a double credit.
-    if (params.get('settled') === '1' && urlStatus === 'paid') {
-      setAmount(params.get('amount'));
-      setBalance(params.get('balance'));
-      setStatus('success');
+    // Already answered: by the verify below in this tab, or by a saved-card
+    // charge that settled server-side. Show that answer again and never verify
+    // twice — a second verify could credit the wallet twice (FA-407).
+    if (params.get('settled') === '1') {
+      if (urlStatus === 'paid') {
+        setAmount(params.get('amount'));
+        setBalance(params.get('balance'));
+        setStatus('success');
+      } else if (urlStatus === 'failed') {
+        setGatewayMsg(urlMsg);
+        setStatus('failed');
+      } else {
+        setUncertain(params.get('uncertain') === '1');
+        setStatus('pending');
+      }
       return;
     }
 
@@ -177,28 +189,60 @@ export default function PaymentCallbackPage() {
       return;
     }
 
-    // Verify with the backend — `metadata.transaction_id` links to the wallet transaction
-    walletApi.verifyTopUp(paymentId)
+    // Verify with the backend — `metadata.transaction_id` links to the wallet
+    // transaction. Once per payment in this tab: React's development
+    // double-mount reuses the promise.
+    let verification = moyasarVerifications.get(paymentId);
+    if (!verification) {
+      verification = walletApi.verifyTopUp(paymentId);
+      moyasarVerifications.set(paymentId, verification);
+    }
+
+    verification
       .then((result) => {
         const s = result.status ?? '';
+        let shown: 'paid' | 'failed' | 'pending';
+        const shownAmount  = result.amount  != null ? String(result.amount)  : null;
+        const shownBalance = result.balance != null ? String(result.balance) : null;
         if (s === 'completed' || s === 'paid' || s === 'captured') {
-          setAmount(result.amount  != null ? String(result.amount)  : null);
-          setBalance(result.balance != null ? String(result.balance) : null);
+          shown = 'paid';
+          setAmount(shownAmount);
+          setBalance(shownBalance);
           setStatus('success');
         } else if (s === 'failed') {
+          shown = 'failed';
           setStatus('failed');
         } else {
           // `pending`, `initiated`, `authorized`… or no status at all: not a
           // final answer, so never "failed" (FA-402).
+          shown = 'pending';
           if (!result.status) {
             logger.warn('[payment-callback] Moyasar verify answered without a status; showing pending.');
             setUncertain(true);
           }
           setStatus('pending');
         }
+
+        // Mark the URL as answered (FA-407), as the HyperPay branch does: a
+        // refresh, or Back into this page, shows this answer instead of
+        // verifying again.
+        const marked = new URLSearchParams(params);
+        marked.set('settled', '1');
+        marked.set('status', shown);
+        marked.delete('message');
+        for (const [key, value] of Object.entries({
+          amount:    shown === 'paid' ? shownAmount : null,
+          balance:   shown === 'paid' ? shownBalance : null,
+          uncertain: shown === 'pending' && !result.status ? '1' : null,
+        })) {
+          if (value) marked.set(key, value); else marked.delete(key);
+        }
+        window.history.replaceState(null, '', `${window.location.pathname}?${marked.toString()}`);
       })
       .catch((err) => {
         logger.error('[payment-callback] verifyTopUp error:', err);
+        // No answer: the URL stays unmarked, so a refresh asks again.
+        moyasarVerifications.delete(paymentId);
         // Same rule as HyperPay (isRefusal): only a refusal of the request is
         // "failed"; the network, a timeout or a 5xx is "check the ledger".
         if (isRefusal(err)) {
