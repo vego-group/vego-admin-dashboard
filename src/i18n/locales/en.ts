@@ -414,6 +414,7 @@ const en = {
     chargeFailed: 'The payment could not be completed. Please try again or use another card.',
     cardFormLoadFailed: 'The card form could not be loaded. Check your connection and try again. Nothing has been charged.',
     paymentAmountMismatch: 'The payment server prepared {{prepared}}, not the {{shown}} shown here, so the card form was not opened. Nothing has been charged. Close this form and start the top-up again.',
+    initiateNoAnswer: "The payment server didn't answer, so no card form was opened. Nothing has been charged. Please try again.",
     // These four were hardcoded English in TopUpModal — invisible to the
     // language switch, and the two naming Moyasar were wrong outright for a
     // Jordanian fleet, where Moyasar is not the gateway. The gateway is now a

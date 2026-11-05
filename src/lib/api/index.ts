@@ -9,7 +9,7 @@
  * Auth prefix:  /fleet-admin/*
  */
 
-import { ApiError, apiClient } from '@/lib/api/client';
+import { ApiError, apiClient, PAYMENT_TIMEOUT_MS } from '@/lib/api/client';
 import { isFieldLevelError } from '@/lib/api-errors';
 import {
   SEEDED_COUNTRIES,
@@ -2953,7 +2953,7 @@ export const walletApi = {
           metadata?:        Record<string, string>;
         };
       } & ApiHyperPayCheckout;
-    } & ApiHyperPayCheckout>('/fleet-admin/wallet/top-up/initiate', body);
+    } & ApiHyperPayCheckout>('/fleet-admin/wallet/top-up/initiate', body, { timeoutMs: PAYMENT_TIMEOUT_MS });
 
     if (res.success === false) throw new Error(res.message ?? 'Top-up initiation failed');
 
@@ -3007,7 +3007,7 @@ export const walletApi = {
     const res = await apiClient.post<{
       success?: boolean;
       data?: { status?: string; amount?: number; balance?: number };
-    }>('/fleet-admin/wallet/top-up/verify', { payment_id: paymentId });
+    }>('/fleet-admin/wallet/top-up/verify', { payment_id: paymentId }, { timeoutMs: PAYMENT_TIMEOUT_MS });
 
     return {
       status:  res.data?.status  ?? 'failed',
@@ -3030,7 +3030,7 @@ export const walletApi = {
     } & Record<string, unknown>>('/fleet-admin/wallet/top-up/verify', {
       gateway:     'hyperpay',
       checkout_id: checkoutId,
-    });
+    }, { timeoutMs: PAYMENT_TIMEOUT_MS });
 
     if (res.success === false) throw new Error(res.message ?? 'Payment verification failed');
 
@@ -3178,7 +3178,7 @@ export const walletApi = {
       driver_id: Number(params.driverId),
       amount:    params.amount,
       card_id:   params.cardId,
-    });
+    }, { timeoutMs: PAYMENT_TIMEOUT_MS });
 
     if (res.success === false) throw new Error(res.message ?? 'Could not charge the saved card.');
 

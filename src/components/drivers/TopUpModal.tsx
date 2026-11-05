@@ -17,6 +17,7 @@ import { amountStep, decimalsForCurrency, fractionDigitsOf, fromMinorUnits, toMi
 import { loadMoyasar } from '@/lib/moyasar';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { hyperPayRefusalFrom, topUpBelowMinimumFrom, walletApi, type MoyasarPaymentData } from '@/lib/api';
+import { isIndeterminateFailure } from '@/lib/api/client';
 import type {
   CardChoice, CurrencyCode, Driver, HyperPayCheckout, MinTopUpReason, Money, SavedCard, ServicePrice, TopUpOptions,
 } from '@/types';
@@ -511,7 +512,9 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     } catch (err) {
       if (seq !== initiateSeq.current) return;
       if (!handledAsBelowMinimum(err) && !handledAsHyperPayRefusal(err)) {
-        setApiError(err instanceof Error ? err.message : 'Failed to initialize payment. Please try again.');
+        // No answer (network, timeout, 5xx): `initiate` never charges, so say so.
+        if (isIndeterminateFailure(err)) setApiError(t('drivers.initiateNoAnswer'));
+        else setApiError(err instanceof Error ? err.message : 'Failed to initialize payment. Please try again.');
       }
     } finally {
       if (seq === initiateSeq.current) setInitiating(false);

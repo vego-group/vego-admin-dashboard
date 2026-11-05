@@ -114,7 +114,51 @@ export class ApiNotConfiguredError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+// ── Timeouts (FA-419) ─────────────────────────────────────────────────────────
+//
+// Every request is aborted after a deadline, so nothing spins forever. A timed
+// out request throws ApiError(0) with `code === REQUEST_TIMEOUT_CODE`, which
+// the payment screens treat like a network error: the outcome is unknown —
+// "check the wallet ledger", never "failed".
+
+/** Default deadline for any API call. */
+export const DEFAULT_TIMEOUT_MS = 30_000;
+/** Payment calls — initiate, charge-saved, verify — may wait on the gateway. */
+export const PAYMENT_TIMEOUT_MS = 60_000;
+/** Multipart uploads (driver documents) carry files over slow links. */
+export const UPLOAD_TIMEOUT_MS = 120_000;
+
+/** `ApiError.code` of a request that hit its deadline. */
+export const REQUEST_TIMEOUT_CODE = 'request_timeout';
+
+export interface RequestOptions {
+  /** Abort after this many ms. Defaults to {@link DEFAULT_TIMEOUT_MS}. */
+  timeoutMs?: number;
+  /** Extra request headers, e.g. `Idempotency-Key`. */
+  headers?: Record<string, string>;
+}
+
+/** True when the request hit its deadline. */
+export function isTimeoutError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 0 && err.code === REQUEST_TIMEOUT_CODE;
+}
+
+/**
+ * True when a failed call says nothing about what the server did: no answer at
+ * all (network, timeout), a server error (5xx), 408/429, a 401 (the session
+ * ended, not the request), or a success status whose body could not be read.
+ * For a payment call this means "may have gone through": the caller must not
+ * say it failed.
+ */
+export function isIndeterminateFailure(err: unknown): boolean {
+  if (err instanceof ApiError) {
+    return err.status === 0 || err.status >= 500 || err.status === 401 || err.status === 408 || err.status === 429;
+  }
+  // `res.json()` on a 2xx answer that is not JSON.
+  return err instanceof SyntaxError;
+}
+
+async function request<T>(path: string, init: RequestInit = {}, options: RequestOptions = {}): Promise<T> {
   if (!BASE_URL) {
     logger.warn('[apiClient] NEXT_PUBLIC_API_URL is not set — requests will fail.');
     throw new ApiNotConfiguredError();
@@ -130,51 +174,74 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     'Accept-Language': requestLanguage(),
     ...(init.body !== undefined && !isFormData ? { 'Content-Type': 'application/json' } : {}),
     ...(init.headers as Record<string, string> | undefined),
+    ...options.headers,
   };
 
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  let res: Response;
+  // The deadline covers the whole exchange, body included.
+  const timeoutMs  = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timer      = setTimeout(() => controller.abort(), timeoutMs);
+  const timedOut   = () => new ApiError(
+    0,
+    `The server did not answer within ${Math.round(timeoutMs / 1000)} s.`,
+    { error_code: REQUEST_TIMEOUT_CODE },
+  );
+
   try {
-    res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
-  } catch (networkErr) {
-    // Network-level failure (no connection, CORS preflight rejected, DNS error, …)
-    const msg =
-      networkErr instanceof Error ? networkErr.message : 'Network error';
-    throw new ApiError(0, `Network error: ${msg}`);
-  }
-
-  if (!res.ok) {
-    let message = `HTTP ${res.status}`;
-    let body: ApiErrorBody | null = null;
+    let res: Response;
     try {
-      body = (await res.json()) as ApiErrorBody;
-      if (body.message) message = body.message;
-    } catch {
-      // ignore JSON parse failures — keep the status-code message
+      res = await fetch(`${BASE_URL}${path}`, { ...init, headers, signal: controller.signal });
+    } catch (networkErr) {
+      if (controller.signal.aborted) throw timedOut();
+      // Network-level failure (no connection, CORS preflight rejected, DNS error, …)
+      const msg =
+        networkErr instanceof Error ? networkErr.message : 'Network error';
+      throw new ApiError(0, `Network error: ${msg}`);
     }
-    // A 403 is not this: the session is valid, the account may not see the data.
-    if (res.status === 401) handleUnauthorized(token);
-    throw new ApiError(res.status, message, body);
+
+    if (!res.ok) {
+      let message = `HTTP ${res.status}`;
+      let body: ApiErrorBody | null = null;
+      try {
+        body = (await res.json()) as ApiErrorBody;
+        if (body.message) message = body.message;
+      } catch {
+        // ignore JSON parse failures — keep the status-code message
+      }
+      // A 403 is not this: the session is valid, the account may not see the data.
+      if (res.status === 401) handleUnauthorized(token);
+      throw new ApiError(res.status, message, body);
+    }
+
+    // 204 No Content — return undefined rather than trying to parse an empty body
+    if (res.status === 204) return undefined as unknown as T;
+
+    try {
+      return (await res.json()) as T;
+    } catch (parseErr) {
+      if (controller.signal.aborted) throw timedOut();
+      throw parseErr;
+    }
+  } finally {
+    clearTimeout(timer);
   }
-
-  // 204 No Content — return undefined rather than trying to parse an empty body
-  if (res.status === 204) return undefined as unknown as T;
-
-  return res.json() as Promise<T>;
 }
 
+const json = (body: unknown) => (body !== undefined ? JSON.stringify(body) : undefined);
+
 export const apiClient = {
-  get:    <T>(path: string)               => request<T>(path),
-  post:   <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'POST',   body: body !== undefined ? JSON.stringify(body) : undefined }),
+  get:    <T>(path: string, options?: RequestOptions) => request<T>(path, {}, options),
+  post:   <T>(path: string, body?: unknown, options?: RequestOptions) =>
+    request<T>(path, { method: 'POST', body: json(body) }, options),
   /** POST multipart/form-data — pass a FormData; the browser sets the boundary header. */
-  postForm: <T>(path: string, form: FormData) =>
-    request<T>(path, { method: 'POST', body: form }),
-  patch:  <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'PATCH',  body: body !== undefined ? JSON.stringify(body) : undefined }),
-  put:    <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'PUT',    body: body !== undefined ? JSON.stringify(body) : undefined }),
-  delete: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'DELETE', body: body !== undefined ? JSON.stringify(body) : undefined }),
+  postForm: <T>(path: string, form: FormData, options?: RequestOptions) =>
+    request<T>(path, { method: 'POST', body: form }, { timeoutMs: UPLOAD_TIMEOUT_MS, ...options }),
+  patch:  <T>(path: string, body?: unknown, options?: RequestOptions) =>
+    request<T>(path, { method: 'PATCH', body: json(body) }, options),
+  put:    <T>(path: string, body?: unknown, options?: RequestOptions) =>
+    request<T>(path, { method: 'PUT', body: json(body) }, options),
+  delete: <T>(path: string, body?: unknown, options?: RequestOptions) =>
+    request<T>(path, { method: 'DELETE', body: json(body) }, options),
 };
