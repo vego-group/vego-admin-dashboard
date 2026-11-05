@@ -2608,11 +2608,17 @@ interface ApiWalletStats {
   current_month_spent?: ApiStatsAmount;
   total_spent?: ApiStatsAmount;
   avg_per_driver?: ApiStatsAmount;
-  top_up_trend_pct?: number;
-  top_up_trend?: number;
-  budget_used_pct?: number;
-  budget_used_percent?: number;
+  top_up_trend_pct?: number | string | null;
+  top_up_trend?: number | string | null;
+  budget_used_pct?: number | string | null;
+  budget_used_percent?: number | string | null;
   active_drivers_count?: number;
+}
+
+/** A percentage as a finite number, from a number or a numeric string; else null. */
+function optionalPercent(value: unknown): number | null {
+  const n = typeof value === 'string' && /^\s*[+-]?\d+(?:\.\d+)?\s*$/.test(value) ? Number(value) : value;
+  return typeof n === 'number' && Number.isFinite(n) ? n : null;
 }
 
 // ── Top-up options (minimum + suggested chips) ───────────────────────────────
@@ -3034,8 +3040,10 @@ export const walletApi = {
       totalTopUps:        statsAmount(s.current_month_top_ups ?? s.total_top_ups),
       totalSpent:         statsAmount(s.current_month_spent   ?? s.total_spent),
       avgPerDriver:       statsAmount(s.avg_per_driver),
-      topUpTrend:         s.top_up_trend_pct ?? s.top_up_trend ?? 0,
-      budgetUsedPercent:  s.budget_used_pct ?? s.budget_used_percent ?? 0,
+      // Absent is absent, not 0 (FA-417): "+0%" and "0% of budget" were both
+      // claims the backend never made.
+      topUpTrend:         optionalPercent(s.top_up_trend_pct ?? s.top_up_trend),
+      budgetUsedPercent:  optionalPercent(s.budget_used_pct ?? s.budget_used_percent),
       activeDriversCount: s.active_drivers_count ?? 0,
     };
   },

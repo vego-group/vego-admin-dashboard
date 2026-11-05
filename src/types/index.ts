@@ -561,8 +561,10 @@ export interface WalletStats {
   totalTopUps: number | null;
   totalSpent: number | null;
   avgPerDriver: number | null;
-  topUpTrend: number;   // %
-  budgetUsedPercent: number;
+  /** % change. **null** when the backend sent none — the chip is hidden, never "+0%" (FA-417). */
+  topUpTrend: number | null;
+  /** % of the fleet's budget used. **null** when there is no budget — the line is hidden. */
+  budgetUsedPercent: number | null;
   activeDriversCount: number;
 }
 

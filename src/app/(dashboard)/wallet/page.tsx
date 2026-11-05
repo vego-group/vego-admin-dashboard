@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   TrendingUp, ShoppingCart, Users2,
   Download, CheckCircle2, Clock, XCircle, HelpCircle,
-  ArrowUp, AlertTriangle, Calendar, Info,
+  ArrowUp, ArrowDown, Minus, AlertTriangle, Calendar, Info,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { Card } from '@/components/ui/Card';
@@ -19,7 +19,7 @@ import { brandLabel } from '@/components/wallet/SavedCardsList';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import { useFleetContext } from '@/hooks/useFleetContext';
-import { bidiIsolate, parseBackendDate } from '@/lib/format';
+import { bidiIsolate, formatNumber, parseBackendDate } from '@/lib/format';
 import { apiTransactionType, driversApi, walletApi, walletFilterErrorFrom } from '@/lib/api';
 import { failureLines, isForbiddenError } from '@/lib/api-errors';
 import { fractionDigitsOf, fromMinorUnits, toMinorUnits } from '@/lib/money';
@@ -266,6 +266,28 @@ function exportCsv(
 
 // ── Stat card ─────────────────────────────────────────────────────────────
 
+/**
+ * The trend chip, by its sign (FA-417): up green "+12%", down rose "−12%",
+ * flat grey "0%". It was always green, up and "+", so a fall read "+-12%".
+ */
+function TrendChip({ trend }: { trend: number }) {
+  const { locale } = useI18n();
+  const up   = trend > 0;
+  const down = trend < 0;
+  const TrendIcon = up ? ArrowUp : down ? ArrowDown : Minus;
+  return (
+    <div className={cn(
+      'mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold',
+      up ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
+        : down ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400'
+        : 'bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-300',
+    )}>
+      <TrendIcon className="h-3 w-3" />
+      <span dir="ltr">{up ? '+' : down ? '−' : ''}{formatNumber(Math.abs(trend), locale)}%</span>
+    </div>
+  );
+}
+
 function StatCard({
   label, value, unit, subtitle, trend, iconBg, Icon, loading,
 }: {
@@ -273,7 +295,8 @@ function StatCard({
   value: string;
   unit?: string;
   subtitle?: React.ReactNode;
-  trend?: number;
+  /** Hidden when null or undefined — no trend is not a 0% trend. */
+  trend?: number | null;
   iconBg: string;
   Icon: React.ElementType;
   loading?: boolean;
@@ -300,12 +323,7 @@ function StatCard({
                   <span className="text-sm font-medium text-slate-500 dark:text-slate-400">{unit}</span>
                 )}
               </div>
-              {trend !== undefined && (
-                <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">
-                  <ArrowUp className="h-3 w-3" />
-                  +{trend}%
-                </div>
-              )}
+              {trend != null && <TrendChip trend={trend} />}
               {subtitle && (
                 <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">{subtitle}</p>
               )}
@@ -486,7 +504,9 @@ export default function WalletPage() {
           value={stats?.totalSpent != null ? formatMoney(stats.totalSpent, locale) : '—'}
           iconBg="bg-gradient-to-br from-rose-400 to-rose-600"
           Icon={ShoppingCart}
-          subtitle={stats ? t('wallet.ofBudget', { percent: stats.budgetUsedPercent }) : undefined}
+          subtitle={stats?.budgetUsedPercent != null
+            ? t('wallet.ofBudget', { percent: formatNumber(stats.budgetUsedPercent, locale) })
+            : undefined}
           loading={dataLoading}
         />
         <StatCard
