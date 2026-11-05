@@ -104,6 +104,7 @@ const en = {
   },
   alarms: {
     title: 'Alarms',
+    loadFailed: "Alarms couldn't be loaded.",
     subtitle: 'Review and resolve device and {{vehicle}} alarms',
     unresolved: 'Unresolved',
     criticalOpen: 'Critical (open)',
@@ -605,6 +606,10 @@ const en = {
   notifications: {
     title: 'Notifications',
     subtitle: 'Stay updated with your fleet activities',
+    partialListOfTotal:
+      'Showing the {{shown}} most recent of {{total}} notifications. The type counts and tabs cover these {{shown}} only.',
+    partialList:
+      'Showing the {{shown}} most recent notifications; there may be older ones. The type counts and tabs cover these {{shown}} only.',
     total: 'Total',
     success: 'Success',
     warnings: 'Warnings',

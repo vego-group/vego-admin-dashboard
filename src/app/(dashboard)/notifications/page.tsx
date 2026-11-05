@@ -82,7 +82,7 @@ type FilterTab = 'all' | 'unread' | 'alert' | 'warning' | 'success';
 
 export default function NotificationsPage() {
   const { t } = useI18n();
-  const { notifications, unreadCount, loading, forbidden, fetchNotifications, markAsRead, markAllAsRead, remove, clearAll } =
+  const { notifications, total, truncated, unreadCount, loading, forbidden, fetchNotifications, markAsRead, markAllAsRead, remove, clearAll } =
     useNotificationStore();
   const [filter, setFilter] = useState<FilterTab>('all');
   // "Clear All" deletes every notification on the server — including any past
@@ -93,7 +93,9 @@ export default function NotificationsPage() {
 
   const stats = useMemo(
     () => ({
-      total:   notifications.length,
+      // The server's total when it sent one; the per-type counts can only
+      // cover the notifications loaded, which the note below says (FA-306).
+      total:   total ?? notifications.length,
       success: notifications.filter((n) => n.type === 'success').length,
       warning: notifications.filter((n) => n.type === 'warning').length,
       alert:   notifications.filter((n) => n.type === 'alert').length,
@@ -171,6 +173,16 @@ export default function NotificationsPage() {
           iconCls="bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400"
         />
       </div>
+
+      {/* Never cut short without saying so (FA-306). */}
+      {truncated && !loading && (
+        <p className="mt-3 flex items-start gap-1.5 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {total !== undefined
+            ? t('notifications.partialListOfTotal', { shown: notifications.length, total })
+            : t('notifications.partialList', { shown: notifications.length })}
+        </p>
+      )}
 
       {/* ── Filter + actions row ──────────────────── */}
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">

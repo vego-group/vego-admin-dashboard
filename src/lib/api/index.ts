@@ -3368,11 +3368,15 @@ export const walletApi = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const notificationsApi = {
-  async list(perPage = 50): Promise<Notification[]> {
-    const raw = await apiClient.get<unknown>(
-      `/fleet-admin/notifications?status=all&per_page=${perPage}`,
-    );
-    return extractList<ApiNotification>(raw).map(mapNotification);
+  /**
+   * The most recent notifications: one page, with the server's counts, so the
+   * page can say when there are more than it shows (FA-306).
+   */
+  async list(perPage = 50): Promise<ListPage<Notification>> {
+    const path = '/fleet-admin/notifications';
+    const raw = await apiClient.get<unknown>(`${path}?status=all&per_page=${perPage}`);
+    const page = readListPage<ApiNotification>(raw, { page: 1, perPage }, path);
+    return { ...page, rows: page.rows.map(mapNotification) };
   },
 
   async getUnreadCount(): Promise<number> {
@@ -3443,12 +3447,14 @@ function mapDevice(d: RawDevice): IoTDevice {
 }
 
 export const iotDevicesApi = {
-  /** List devices. Optional status filter: 'online' | 'offline'. */
-  async list(status?: DeviceStatus, perPage = 50): Promise<IoTDevice[]> {
-    const qs = new URLSearchParams({ per_page: String(perPage) });
-    if (status) qs.set('status', status);
-    const raw = await apiClient.get<unknown>(`/fleet-admin/iot-devices?${qs.toString()}`);
-    return extractList<RawDevice>(raw).map(mapDevice);
+  /**
+   * Every device of the fleet (optionally only 'online' | 'offline'). There is
+   * one per vehicle, so the whole list is fetched, page by page, and the page's
+   * counts and search cover all of it. It used to be the first 50 (FA-306).
+   */
+  async list(status?: DeviceStatus): Promise<IoTDevice[]> {
+    const path = status ? `/fleet-admin/iot-devices?status=${status}` : '/fleet-admin/iot-devices';
+    return (await fetchAllRows<RawDevice>(path)).map(mapDevice);
   },
 
   async get(id: string): Promise<IoTDevice | null> {
@@ -3496,12 +3502,20 @@ function mapAlarm(a: RawAlarm): Alarm {
 }
 
 export const alarmsApi = {
-  /** List alarms. Optional status filter: 'unresolved' | 'resolved'. */
-  async list(status?: AlarmStatus, perPage = 50): Promise<Alarm[]> {
-    const qs = new URLSearchParams({ per_page: String(perPage) });
+  /**
+   * One page of alarms, filtered by `status` on the server ('unresolved' |
+   * 'resolved'), with the server's counts (FA-306). Alarms accumulate without
+   * bound, so the page steps through them instead of fetching the first 50.
+   */
+  async list(
+    { status, page = 1, perPage = 20 }: { status?: AlarmStatus; page?: number; perPage?: number } = {},
+  ): Promise<ListPage<Alarm>> {
+    const path = '/fleet-admin/alarms';
+    const qs = new URLSearchParams({ per_page: String(perPage), page: String(page) });
     if (status) qs.set('status', status);
-    const raw = await apiClient.get<unknown>(`/fleet-admin/alarms?${qs.toString()}`);
-    return extractList<RawAlarm>(raw).map(mapAlarm);
+    const raw = await apiClient.get<unknown>(`${path}?${qs.toString()}`);
+    const result = readListPage<RawAlarm>(raw, { page, perPage }, path);
+    return { ...result, rows: result.rows.map(mapAlarm) };
   },
 
   /** Mark an alarm resolved. Returns true on success. */

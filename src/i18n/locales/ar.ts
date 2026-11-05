@@ -124,6 +124,7 @@ const ar: Translations = {
   },
   alarms: {
     title: 'الإنذارات',
+    loadFailed: 'تعذّر تحميل الإنذارات.',
     subtitle: 'راجع وحُلّ إنذارات الأجهزة و{{alVehicle}}',
     unresolved: 'غير محلولة',
     criticalOpen: 'حرجة (مفتوحة)',
@@ -610,6 +611,10 @@ const ar: Translations = {
   notifications: {
     title: 'الإشعارات',
     subtitle: 'ابقَ على اطلاع بأنشطة أسطولك',
+    partialListOfTotal:
+      'عرض أحدث {{shown}} من أصل {{total}} إشعار. أعداد الأنواع والتبويبات تشمل هذه الـ{{shown}} فقط.',
+    partialList:
+      'عرض أحدث {{shown}} إشعار، وقد توجد إشعارات أقدم. أعداد الأنواع والتبويبات تشمل هذه الـ{{shown}} فقط.',
     total: 'الإجمالي',
     success: 'ناجح',
     warnings: 'تحذيرات',

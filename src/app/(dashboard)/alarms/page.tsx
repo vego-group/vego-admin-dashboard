@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlarmClock, AlertOctagon, AlertTriangle, Info, CheckCircle2, Check, Bike, Loader2 } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { MetricCard } from '@/components/dashboard/MetricCard';
@@ -10,16 +10,26 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { NoAccessState } from '@/components/ui/NoAccessState';
+import { Pagination } from '@/components/ui/Pagination';
+import { LoadError } from '@/components/ui/LoadError';
+import { ListPageNote, pageCount } from '@/components/ui/ListPageNote';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
-import { alarmsApi } from '@/lib/api';
-import { isForbiddenError } from '@/lib/api-errors';
-import { formatRelativeTime } from '@/lib/format';
+import { alarmsApi, type ListPage } from '@/lib/api';
+import { failureLines, isForbiddenError } from '@/lib/api-errors';
+import { formatNumber, formatRelativeTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import type { Alarm, AlarmSeverity, AlarmStatus } from '@/types';
 import { logger } from '@/lib/logger';
 
 type TabValue = 'all' | AlarmStatus;
+
+const PAGE_SIZE = 20;
+/** Unresolved alarms read to count the critical ones; past this the KPI says "N+". */
+const KPI_SAMPLE = 50;
+
+/** A KPI value: a number, "N+" when only a lower bound is known, or "—". */
+type Kpi = number | string;
 
 const SEVERITY_CFG: Record<AlarmSeverity, {
   Icon: React.ComponentType<{ className?: string }>;
@@ -35,55 +45,78 @@ const SEVERITY_CFG: Record<AlarmSeverity, {
 export default function AlarmsPage() {
   const { t, locale } = useI18n();
   const { tv } = useVehicleTerm();
-  const [alarms, setAlarms] = useState<Alarm[]>([]);
+  const [list, setList] = useState<ListPage<Alarm> | null>(null);
   const [loading, setLoading] = useState(true);
-  const [apiError, setApiError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string[] | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [tab, setTab] = useState<TabValue>('unresolved');
+  const [page, setPage] = useState(1);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [kpis, setKpis] = useState<{ unresolved: Kpi; critical: Kpi; resolved: Kpi } | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
 
+  // The list: one page of the selected tab, filtered and paged by the server
+  // (FA-306). It used to be the first 50 alarms, filtered in the browser.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setLoadError(null);
       try {
-        const data = await alarmsApi.list();
-        if (!cancelled) setAlarms(data);
+        const result = await alarmsApi.list({ status: tab === 'all' ? undefined : tab, page, perPage: PAGE_SIZE });
+        if (cancelled) return;
+        if (result.rows.length === 0 && page > 1) { setPage(page - 1); return; }
+        setList(result);
       } catch (err) {
         logger.error('[Alarms] Failed to load alarms:', err);
         if (cancelled) return;
         if (isForbiddenError(err)) setForbidden(true);
-        else setApiError(err instanceof Error ? err.message : 'Failed to load alarms');
+        else setLoadError(failureLines(err, t));
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [tab, page, reloadKey, t]);
 
-  const counts = useMemo(
-    () => ({
-      unresolved: alarms.filter((a) => a.status === 'unresolved').length,
-      critical:   alarms.filter((a) => a.status === 'unresolved' && a.severity === 'critical').length,
-      resolved:   alarms.filter((a) => a.status === 'resolved').length,
-    }),
-    [alarms]
-  );
+  // The KPIs, from the server's totals rather than from whatever page is on
+  // screen. Critical alarms have no server filter, so they are counted in the
+  // first KPI_SAMPLE unresolved ones: exact when that is all of them, "N+" if not.
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.allSettled([
+      alarmsApi.list({ status: 'unresolved', perPage: KPI_SAMPLE }),
+      alarmsApi.list({ status: 'resolved', perPage: 1 }),
+    ]).then(([open, closed]) => {
+      if (cancelled) return;
+      const atLeast = (n: number) => `${formatNumber(n, locale)}+`;
+      let unresolved: Kpi = '—';
+      let critical: Kpi = '—';
+      if (open.status === 'fulfilled') {
+        const { rows, total } = open.value;
+        const complete = total !== undefined ? rows.length >= total : rows.length < KPI_SAMPLE;
+        const crit = rows.filter((a) => a.severity === 'critical').length;
+        unresolved = total ?? (complete ? rows.length : atLeast(rows.length));
+        critical = complete ? crit : atLeast(crit);
+      }
+      const resolved: Kpi = closed.status === 'fulfilled' && closed.value.total !== undefined
+        ? closed.value.total
+        : '—';
+      setKpis({ unresolved, critical, resolved });
+    });
+    return () => { cancelled = true; };
+  }, [reloadKey, locale]);
 
-  const filtered = useMemo(() => {
-    if (tab === 'all') return alarms;
-    return alarms.filter((a) => a.status === tab);
-  }, [alarms, tab]);
+  const rows = list?.rows ?? [];
+  const totalPages = list ? pageCount(list) : 1;
 
   const handleResolve = async (alarm: Alarm) => {
     if (resolvingId) return;
     setResolvingId(alarm.id);
     const ok = await alarmsApi.resolve(alarm.id);
-    if (ok) {
-      setAlarms((prev) =>
-        prev.map((a) => (a.id === alarm.id ? { ...a, status: 'resolved', resolvedAt: new Date().toISOString() } : a))
-      );
-    }
+    // Re-read the page and the KPIs: the alarm leaves the Unresolved tab and
+    // the counts move, and the server is the one that knows by how much.
+    if (ok) setReloadKey((k) => k + 1);
     setResolvingId(null);
   };
 
@@ -97,25 +130,18 @@ export default function AlarmsPage() {
 
   return (
     <DashboardShell title={t('alarms.title')} subtitle={tv('alarms.subtitle')}>
-      {apiError && (
-        <div className="mb-3 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
-          <span>{apiError}</span>
-          <button type="button" onClick={() => setApiError(null)} className="ms-3 shrink-0 text-rose-400 hover:text-rose-600" aria-label="Dismiss">✕</button>
-        </div>
-      )}
-
       {/* KPI cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <MetricCard label={t('alarms.unresolved')}       value={counts.unresolved} icon={<AlarmClock className="h-5 w-5" />}    iconColor="orange" />
-        <MetricCard label={t('alarms.criticalOpen')}     value={counts.critical}   icon={<AlertOctagon className="h-5 w-5" />}  iconColor="orange" />
-        <MetricCard label={t('alarms.resolved')}         value={counts.resolved}   icon={<CheckCircle2 className="h-5 w-5" />}  iconColor="green" />
+        <MetricCard label={t('alarms.unresolved')}       value={kpis?.unresolved ?? '—'} icon={<AlarmClock className="h-5 w-5" />}    iconColor="orange" />
+        <MetricCard label={t('alarms.criticalOpen')}     value={kpis?.critical ?? '—'}   icon={<AlertOctagon className="h-5 w-5" />}  iconColor="orange" />
+        <MetricCard label={t('alarms.resolved')}         value={kpis?.resolved ?? '—'}   icon={<CheckCircle2 className="h-5 w-5" />}  iconColor="green" />
       </div>
 
       {/* Filter */}
       <Card className="mt-5 p-4">
         <SegmentedControl
           value={tab}
-          onChange={(v) => setTab(v)}
+          onChange={(v) => { setTab(v); setPage(1); }}
           options={[
             { value: 'unresolved', label: t('alarms.unresolved') },
             { value: 'resolved',   label: t('alarms.resolved') },
@@ -124,17 +150,27 @@ export default function AlarmsPage() {
         />
       </Card>
 
+      {loadError && (
+        <LoadError
+          className="mt-5"
+          title={t('alarms.loadFailed')}
+          lines={loadError}
+          onRetry={() => setReloadKey((k) => k + 1)}
+          retrying={loading}
+        />
+      )}
+
       {/* List */}
       <div className="mt-5">
-        {loading ? (
+        {loading && !list ? (
           <Card className="p-5"><Skeleton className="h-[360px] w-full" /></Card>
-        ) : filtered.length === 0 ? (
+        ) : loadError && !list ? null : rows.length === 0 ? (
           <Card>
             <EmptyState icon={<CheckCircle2 className="h-6 w-6" />} title={t('alarms.allClearTitle')} description={t('alarms.allClearDescription')} />
           </Card>
         ) : (
-          <Card className="divide-y divide-slate-100 overflow-hidden dark:divide-slate-800">
-            {filtered.map((a) => {
+          <Card className={cn('divide-y divide-slate-100 overflow-hidden dark:divide-slate-800', loading && 'opacity-60')} aria-busy={loading}>
+            {rows.map((a) => {
               const cfg = SEVERITY_CFG[a.severity];
               const { Icon } = cfg;
               const isResolved = a.status === 'resolved';
@@ -181,6 +217,11 @@ export default function AlarmsPage() {
           </Card>
         )}
       </div>
+
+      {list && rows.length > 0 && <ListPageNote list={list} />}
+      {totalPages > 1 && (
+        <Pagination currentPage={page} totalPages={totalPages} onChange={setPage} disabled={loading} />
+      )}
     </DashboardShell>
   );
 }
