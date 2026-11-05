@@ -406,6 +406,7 @@ const en = {
     cardFormLoadFailed: 'The card form could not be loaded. Check your connection and try again. Nothing has been charged.',
     paymentAmountMismatch: 'The payment server prepared {{prepared}}, not the {{shown}} shown here, so the card form was not opened. Nothing has been charged. Close this form and start the top-up again.',
     initiateNoAnswer: "The payment server didn't answer, so no card form was opened. Nothing has been charged. Please try again.",
+    initiateIncomplete: "The payment server's answer was incomplete, so no card form was opened. Nothing has been charged. Please try again.",
     // The fleet profile has no country yet (FA-424): Pay waits for it.
     topUpCountryUnknown: "Couldn't load your fleet's country",
     topUpCountryUnknownHint: 'Card payments depend on it, so Pay stays off until it loads. Nothing has been charged.',

@@ -2706,6 +2706,31 @@ export function topUpAmountForWire(
     : amount.minorUnits / 10 ** amount.decimals;
 }
 
+/**
+ * `initiate` answered, but not with a payment this dashboard can start: a field
+ * the gateway form needs is missing or unusable (FA-112). Thrown before any
+ * gateway form opens, so **nothing has been charged**. `detail` names the
+ * fields, for the log; the UI says it in its own words.
+ */
+export class PaymentSetupError extends Error {
+  constructor(public readonly detail: string) {
+    super(detail);
+    this.name = 'PaymentSetupError';
+  }
+}
+
+/** A positive whole number of minor units, as a number or a digit string, else null. */
+function positiveMinorUnits(raw: unknown): number | null {
+  const value = typeof raw === 'string' && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : raw;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+/** Non-empty text from a string or a number, else ''. */
+function requiredText(raw: unknown): string {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw);
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
 /** What `initiateTopUp` hands the Moyasar form (Saudi Arabia). */
 export interface MoyasarPaymentData {
   amount:         number;              // already in halalas
@@ -3112,7 +3137,7 @@ export const walletApi = {
       data?: {
         wallet_transaction_uuid?: string;
         payment_data?: {
-          amount?:          number;
+          amount?:          number | string;
           currency?:        string;
           description?:     string;
           publishable_key?: string;
@@ -3144,21 +3169,35 @@ export const walletApi = {
     // A payment must never proceed on a guessed currency. Defaulting to SAR here
     // would hand the gateway "SAR" for a JOD charge — an actual mischarge, not a
     // rendering bug — so fail before any payment is attempted.
-    if (!pd.currency) {
-      throw new Error(
-        'Top-up initiation returned no currency (data.payment_data.currency is missing). ' +
-        'Refusing to start a payment without one.',
+    //
+    // Likewise the amount, the publishable key and the wallet transaction the
+    // payment settles (FA-112): a missing amount used to become 0, the others
+    // '', and the Moyasar form was opened on them anyway.
+    const amount     = positiveMinorUnits(pd.amount);
+    const currency   = requiredText(pd.currency);
+    const key        = requiredText(pd.publishable_key);
+    const walletUuid = requiredText(d.wallet_transaction_uuid);
+    const missing = [
+      !currency   && 'data.payment_data.currency',
+      amount == null && 'data.payment_data.amount (positive minor units)',
+      !key        && 'data.payment_data.publishable_key',
+      !walletUuid && 'data.wallet_transaction_uuid',
+    ].filter(Boolean);
+    if (missing.length > 0 || amount == null) {
+      throw new PaymentSetupError(
+        `Top-up initiation returned no usable ${missing.join(', ')}. ` +
+        'Refusing to start a payment without it.',
       );
     }
 
     return {
       gateway: 'moyasar',
-      walletTransactionUuid: d.wallet_transaction_uuid ?? '',
+      walletTransactionUuid: walletUuid,
       paymentData: {
-        amount:         pd.amount         ?? 0,
-        currency:       pd.currency,
+        amount,
+        currency,
         description:    pd.description    ?? 'Driver wallet top-up',
-        publishableKey: pd.publishable_key ?? '',
+        publishableKey: key,
         callbackUrl:    pd.callback_url   ?? '',
         metadata:       (pd.metadata as Record<string, string>) ?? {},
       },

@@ -19,7 +19,8 @@ import { amountStep, decimalsForCurrency, fractionDigitsOf, fromMinorUnits, toMi
 import { loadMoyasar } from '@/lib/moyasar';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import {
-  hyperPayRefusalFrom, isIdempotencyConflict, topUpBelowMinimumFrom, walletApi, type MoyasarPaymentData,
+  hyperPayRefusalFrom, isIdempotencyConflict, PaymentSetupError, topUpBelowMinimumFrom, walletApi,
+  type MoyasarPaymentData,
 } from '@/lib/api';
 import { isIndeterminateFailure } from '@/lib/api/client';
 import type {
@@ -544,6 +545,12 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
       if (!handledAsBelowMinimum(err) && !handledAsHyperPayRefusal(err)) {
         // No answer (network, timeout, 5xx): `initiate` never charges, so say so.
         if (isIndeterminateFailure(err)) setApiError(t('drivers.initiateNoAnswer'));
+        // An answer the gateway form can't be opened on (FA-112): likewise
+        // nothing was charged. Which field was missing goes to the log.
+        else if (err instanceof PaymentSetupError) {
+          logger.error('[TopUpModal] initiate answer unusable:', err.detail);
+          setApiError(t('drivers.initiateIncomplete'));
+        }
         else setApiError(err instanceof Error ? err.message : 'Failed to initialize payment. Please try again.');
       }
     } finally {
@@ -1126,11 +1133,12 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                 </div>
               )}
 
-              {initiating || !paymentData ? (
+              {/* A failed `initiate` has said so above; no spinner under it. */}
+              {initiating || (!paymentData && !apiError) ? (
                 <div className="flex items-center justify-center py-16 text-slate-400">
                   <Loader2 className="h-6 w-6 animate-spin" />
                 </div>
-              ) : paymentAmountMismatch ? (
+              ) : !paymentData ? null : paymentAmountMismatch ? (
                 <div
                   role="alert"
                   className="flex flex-col items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-8 text-center text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-400"
