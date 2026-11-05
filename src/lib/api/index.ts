@@ -545,11 +545,13 @@ function mapMotorcycle(m: ApiMotorcycle): Vehicle {
   // Riyadh — which silently relocated every vehicle that had never reported GPS.
   // For a Jordanian fleet that put the whole offline half of the fleet in another
   // country. A missing position is now missing: the maps drop the marker and the
-  // lists say so. Latitude 0 / longitude 0 are legal values, so the guard tests
-  // for `undefined`, not falsiness.
-  const lat = num(gps?.latitude)  ?? num(m.current_lat) ?? num(iot?.latitude);
-  const lng = num(gps?.longitude) ?? num(m.current_lng) ?? num(iot?.longitude);
-  const coordinates = lat !== undefined && lng !== undefined ? { lat, lng } : undefined;
+  // lists say so. A lone 0 is a legal latitude or longitude; exactly 0 / 0 is
+  // an unlocated row, not a place (FA-328, see readPosition).
+  const coordinates = readPosition(
+    [gps?.latitude, gps?.longitude],
+    [m.current_lat, m.current_lng],
+    [iot?.latitude, iot?.longitude],
+  );
 
   return {
     id:                 String(m.id),
@@ -582,6 +584,30 @@ function mapMotorcycle(m: ApiMotorcycle): Vehicle {
 }
 
 /**
+ * A map position from the first `[lat, lng]` source that carries one, or
+ * **undefined**.
+ *
+ * Each pair is read as a pair, never the latitude of one source with the
+ * longitude of the next. A pair is a position only when both halves read as
+ * numbers within range and it is not exactly 0 / 0 (FA-328). That point is in
+ * the Gulf of Guinea, and it is what an unlocated row looks like when the
+ * column defaults to `"0.00000000"`: it used to drop a pin at sea and stretch
+ * the map fit to the whole world. A 0 / 0 source falls through to the next
+ * one. A lone 0 stays: the equator and the prime meridian are real places.
+ */
+function readPosition(...sources: Array<[unknown, unknown]>): { lat: number; lng: number } | undefined {
+  for (const [rawLat, rawLng] of sources) {
+    const lat = num(rawLat);
+    const lng = num(rawLng);
+    if (lat === undefined || lng === undefined) continue;
+    if (lat === 0 && lng === 0) continue;
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
+    return { lat, lng };
+  }
+  return undefined;
+}
+
+/**
  * The position a site record carries, or **undefined**.
  *
  * Cabinets and piles used to fall back to 24.7136 / 46.6753 — central Riyadh —
@@ -589,14 +615,13 @@ function mapMotorcycle(m: ApiMotorcycle): Vehicle {
  * site with no coordinate is unlocated; it is dropped from maps and labelled in
  * lists. Both fields must resolve: a lone latitude is not a position.
  *
- * The backend sends these as strings ("24.71360000"), hence `num()`.
+ * The backend sends these as strings ("24.71360000"), hence `num()`; and
+ * "0.00000000" / "0.00000000" is unlocated, not a site at sea (FA-328).
  */
 function readSiteCoordinates(
   s: { lat?: string | number; lng?: string | number; latitude?: number; longitude?: number },
 ): { lat: number; lng: number } | undefined {
-  const lat = num(s.lat) ?? num(s.latitude);
-  const lng = num(s.lng) ?? num(s.longitude);
-  return lat !== undefined && lng !== undefined ? { lat, lng } : undefined;
+  return readPosition([s.lat, s.lng], [s.latitude, s.longitude]);
 }
 
 function mapCabinet(c: ApiCabinet): SwappingStation {
@@ -3574,6 +3599,11 @@ function mapDevice(d: RawDevice): IoTDevice {
   const isOnline =
     typeof d.is_online === 'boolean' ? d.is_online
     : (d.status ?? d.connection_status) === 'online';
+  // Read as a pair; exactly 0 / 0 is unlocated, not a fix (FA-328).
+  const position = readPosition(
+    [gps.latitude, gps.longitude],
+    [d.latitude ?? d.lat, d.longitude ?? d.lng ?? d.lon],
+  );
   return {
     id:              String(d.id ?? d.device_id ?? d.imei ?? ''),
     deviceId:        String(d.device_id ?? d.imei ?? d.serial ?? d.id ?? ''),
@@ -3582,8 +3612,8 @@ function mapDevice(d: RawDevice): IoTDevice {
     status:          (isOnline ? 'online' : 'offline') as DeviceStatus,
     batteryLevel:    num(battery.soc ?? battery.relative_soc ?? d.battery_level ?? d.battery ?? d.soc ?? moto.battery_level),
     gpsSignal:       toGpsSignal(gps.gps_signal ?? d.gps_signal ?? d.signal),
-    latitude:        num(gps.latitude ?? d.latitude ?? d.lat),
-    longitude:       num(gps.longitude ?? d.longitude ?? d.lng ?? d.lon),
+    latitude:        position?.lat,
+    longitude:       position?.lng,
     speedKmh:        num(gps.speed ?? d.speed_kmh ?? d.speed),
     lastSeenAt:      d.last_seen_at ?? d.last_seen ?? d.updated_at ?? undefined,
   };
