@@ -144,8 +144,10 @@ export type UserRole = 'admin' | 'operator';
 
 export interface Vehicle {
   id: string;
-  plateNumber: string;
-  model: 'VegoMax Pro' | 'VegoLite' | 'VEGO Pro 400' | 'VEGO Cargo 500';
+  /** As the API sends it; absent when it has none. Show `vehicleDisplayName()`. */
+  plateNumber?: string;
+  /** Brand + model as the API sends them ("VEGO Pro 400"); absent when it has none. */
+  model?: string;
   status: VehicleStatus;
   batteryLevel: number;
   location: string;

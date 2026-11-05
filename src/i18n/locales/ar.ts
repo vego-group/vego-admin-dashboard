@@ -421,6 +421,7 @@ const ar: Translations = {
     subtitle: 'مراقبة الأسطول والتحليلات في الوقت الفعلي',
     selectVehicle: 'اختر {{vehicle}}',
     selectVehicleDescription: 'اختر {{vehicle}} من القائمة لعرض التفاصيل والتحكم',
+    searchVehicles: 'ابحث برقم اللوحة أو المعرّف أو الطراز أو السائق…',
     batteryStatus: 'حالة البطارية',
     currentLevel: 'المستوى الحالي',
     estRange: 'المدى التقديري',

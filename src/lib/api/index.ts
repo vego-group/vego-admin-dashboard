@@ -532,8 +532,10 @@ function toSupportedCommands(raw: unknown): string[] | undefined {
 function mapMotorcycle(m: ApiMotorcycle): Vehicle {
   const iot = m.iot_device;
   const gps = iot?.latest_gps;
-  // Real API returns brand + model separately ("VEGO" + "Pro 400"); combine them.
-  const model = [m.brand, m.model_name ?? m.model].filter(Boolean).join(' ').trim() || 'VegoMax Pro';
+  // Real API returns brand + model separately ("VEGO" + "Pro 400"); combine
+  // them. Nothing when it sends neither: this used to say "VegoMax Pro", a
+  // name no vehicle carries (FA-205).
+  const model = [m.brand, m.model_name ?? m.model].filter(Boolean).join(' ').trim() || undefined;
   // Real API driver is `assigned_user`; older shape used `driver`.
   const driver = m.assigned_user ?? m.driver ?? undefined;
 
@@ -549,8 +551,9 @@ function mapMotorcycle(m: ApiMotorcycle): Vehicle {
 
   return {
     id:                 String(m.id),
-    plateNumber:        m.plate_number ?? `VH-${m.id}`,
-    model:              model as Vehicle['model'],
+    // The plate as sent, or nothing — never the invented "VH-{id}".
+    plateNumber:        m.plate_number?.trim() || undefined,
+    model,
     status:             toVehicleStatus(m.status),
     // Real API: battery.battery_percentage is the SOC.
     batteryLevel:       m.battery?.battery_percentage ?? m.battery?.soc_pct ?? 0,

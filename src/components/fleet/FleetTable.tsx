@@ -43,10 +43,11 @@ export function FleetTable({ vehicles, onAssignDriver }: FleetTableProps) {
                 style={{ borderColor: 'rgb(var(--border))' }}
               >
                 <td className="px-5 py-4 font-medium text-slate-700 dark:text-slate-200">
-                  <span dir="ltr">#Vehi-{v.id.replace('M', '10')}</span>
+                  {/* The real id; this was an invented "#Vehi-{id}" (FA-205). */}
+                  <span dir="ltr">#{v.id}</span>
                 </td>
-                <td className="px-5 py-4 text-slate-600 dark:text-slate-300"><span dir="ltr">{v.plateNumber}</span></td>
-                <td className="px-5 py-4 text-slate-600 dark:text-slate-300">{v.model}</td>
+                <td className="px-5 py-4 text-slate-600 dark:text-slate-300"><span dir="ltr">{v.plateNumber ?? '—'}</span></td>
+                <td className="px-5 py-4 text-slate-600 dark:text-slate-300">{v.model ?? '—'}</td>
                 <td className="px-5 py-4 text-slate-600 dark:text-slate-300">
                   {v.assignedDriverName ?? '—'}
                 </td>

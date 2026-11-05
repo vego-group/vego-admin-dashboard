@@ -7,6 +7,7 @@ import { fitToPoints, type LatLngTuple } from '@/lib/map-fit';
 import { clampPercent, html, trustedHtml, type TrustedHtml } from '@/lib/html';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useBasemap } from '@/hooks/useBasemap';
+import { vehicleDisplayName } from '@/lib/vehicle-label';
 import type { Vehicle, BatteryStation } from '@/types';
 
 export interface LiveFleetMapProps {
@@ -83,7 +84,7 @@ function vehiclePopup(v: Vehicle, t: Translate): TrustedHtml {
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px">
     <div style="display:flex;align-items:center;gap:8px;min-width:0">
       <div style="width:32px;height:32px;background:#eef2ff;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${trustedHtml(bikeIconIndigo)}</div>
-      <div style="min-width:0"><div style="font-size:13px;font-weight:600;color:rgb(var(--foreground))"><span dir="ltr">${v.plateNumber}</span></div><div style="font-size:11px;color:rgb(var(--muted-foreground))">${v.model}</div></div>
+      <div style="min-width:0"><div style="font-size:13px;font-weight:600;color:rgb(var(--foreground))"><span dir="ltr">${vehicleDisplayName(v)}</span></div><div style="font-size:11px;color:rgb(var(--muted-foreground))">${v.model ?? ''}</div></div>
     </div>
     <span style="font-size:10px;padding:2px 8px;border-radius:999px;font-weight:600;background:${sc.bg};color:${sc.color};flex-shrink:0;white-space:nowrap">${t(`status.${status}`)}</span>
   </div>

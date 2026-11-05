@@ -9,6 +9,7 @@ import { FailureNote } from '@/components/ui/FailureNote';
 import { useI18n } from '@/i18n/I18nProvider';
 import { failureLines } from '@/lib/api-errors';
 import { cn } from '@/lib/cn';
+import { vehicleDisplayName } from '@/lib/vehicle-label';
 import type { Driver, Vehicle } from '@/types';
 
 interface AssignDriverModalProps {
@@ -109,7 +110,8 @@ export function AssignDriverModal({
               {isAssigned ? t('fleet.changeDriver') : t('vehicleControl.assignDriver')}
             </h2>
             <p className="truncate text-sm text-slate-500 dark:text-slate-400">
-              <span dir="ltr">{vehicle.id}</span> · {vehicle.model}
+              <span dir="ltr">{vehicleDisplayName(vehicle)}</span>
+              {vehicle.model && <> · {vehicle.model}</>}
             </p>
           </div>
         </div>

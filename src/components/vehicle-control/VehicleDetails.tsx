@@ -19,6 +19,7 @@ import {
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { cn } from '@/lib/cn';
+import { vehicleDisplayName } from '@/lib/vehicle-label';
 import type { Vehicle } from '@/types';
 import type { MotorcycleBattery, MotorcycleStatistics } from '@/lib/api';
 
@@ -61,7 +62,10 @@ export function VehicleDetails({
             <VehicleIconTile status={vehicle.status} size="lg" />
             <div>
               <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
-                <span dir="ltr">#{vehicle.id}</span> — <span dir="ltr">{vehicle.plateNumber}</span>
+                <span dir="ltr">{vehicleDisplayName(vehicle)}</span>
+                {vehicle.plateNumber && (
+                  <span className="ms-2 text-sm font-medium text-slate-400"><span dir="ltr">#{vehicle.id}</span></span>
+                )}
               </h2>
               <p className="text-sm text-slate-500">{vehicle.model}</p>
             </div>

@@ -411,6 +411,7 @@ const en = {
     subtitle: 'Real-time fleet monitoring and analytics',
     selectVehicle: 'Select a {{Vehicle}}',
     selectVehicleDescription: 'Choose a {{vehicle}} from the list to view details and controls',
+    searchVehicles: 'Search by plate, ID, model or driver…',
     batteryStatus: 'Battery Status',
     currentLevel: 'Current Level',
     estRange: 'Est. Range',

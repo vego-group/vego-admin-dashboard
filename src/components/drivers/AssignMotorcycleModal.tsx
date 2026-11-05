@@ -10,6 +10,7 @@ import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { failureLines } from '@/lib/api-errors';
 import { cn } from '@/lib/cn';
+import { vehicleDisplayName, vehicleMatches } from '@/lib/vehicle-label';
 import type { Driver, Vehicle } from '@/types';
 
 interface AssignMotorcycleModalProps {
@@ -58,16 +59,9 @@ export function AssignMotorcycleModal({
 
   // Only motorcycles with no driver (and not the one already on this driver) can be picked.
   const candidates = useMemo(() => {
-    const q = query.trim().toLowerCase();
     return motorcycles
       .filter((m) => !m.assignedDriverId && m.id !== driver?.assignedMotorcycleId)
-      .filter(
-        (m) =>
-          !q ||
-          m.id.toLowerCase().includes(q) ||
-          m.plateNumber.toLowerCase().includes(q) ||
-          m.model.toLowerCase().includes(q)
-      );
+      .filter((m) => vehicleMatches(m, query));
   }, [motorcycles, driver?.assignedMotorcycleId, query]);
 
   if (!driver) return null;
@@ -188,7 +182,7 @@ export function AssignMotorcycleModal({
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
-                        <span dir="ltr">{m.plateNumber || m.id}</span>
+                        <span dir="ltr">{vehicleDisplayName(m)}</span>
                       </p>
                       <p className="truncate text-xs text-slate-400">{m.model}</p>
                     </div>

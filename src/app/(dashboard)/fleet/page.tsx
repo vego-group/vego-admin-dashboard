@@ -22,6 +22,7 @@ import { fleetApi, driversApi } from '@/lib/api';
 import { isForbiddenError } from '@/lib/api-errors';
 import type { Driver, Vehicle, VehicleStatus } from '@/types';
 import { ltrIsolate } from '@/lib/format';
+import { vehicleDisplayName, vehicleMatches } from '@/lib/vehicle-label';
 import { logger } from '@/lib/logger';
 
 type TabValue = 'all' | VehicleStatus;
@@ -77,6 +78,12 @@ export default function FleetPage() {
 
   // ----- Driver assignment handlers -----------------------------------------
 
+  /** The vehicle's plate (or #id) for a sentence — the bare id was shown as its plate. */
+  const plateOf = (motorcycleId: string): string => {
+    const vehicle = vehicles.find((v) => v.id === motorcycleId);
+    return vehicle ? vehicleDisplayName(vehicle) : `#${motorcycleId}`;
+  };
+
   // A refusal throws through to the picker, which shows the backend's reason.
   const handleAssignDriver = async (motorcycleId: string, driverId: string): Promise<void> => {
     await fleetApi.assignDriver(motorcycleId, driverId);
@@ -93,7 +100,7 @@ export default function FleetPage() {
       title: t('fleet.assignSuccessTitle'),
       // `plate`, not `vehicle`: `{{vehicle}}` is the country's noun for the
       // type, bound by tv(). This names one specific machine.
-      description: tv('fleet.assignSuccessDescription', { driver: driverName, plate: ltrIsolate(motorcycleId) }),
+      description: tv('fleet.assignSuccessDescription', { driver: driverName, plate: ltrIsolate(plateOf(motorcycleId)) }),
     });
   };
 
@@ -108,7 +115,7 @@ export default function FleetPage() {
     );
     setSuccessDialog({
       title: t('fleet.unassignSuccessTitle'),
-      description: tv('fleet.unassignSuccessDescription', { plate: ltrIsolate(motorcycleId) }),
+      description: tv('fleet.unassignSuccessDescription', { plate: ltrIsolate(plateOf(motorcycleId)) }),
     });
   };
 
@@ -125,15 +132,7 @@ export default function FleetPage() {
   const filtered = useMemo(() => {
     let result = vehicles;
     if (tab !== 'all') result = result.filter((v) => v.status === tab);
-    if (query) {
-      const q = query.toLowerCase();
-      result = result.filter(
-        (v) =>
-          v.id.toLowerCase().includes(q) ||
-          v.assignedDriverName?.toLowerCase().includes(q) ||
-          v.location.toLowerCase().includes(q)
-      );
-    }
+    if (query) result = result.filter((v) => vehicleMatches(v, query));
     if (sort === 'newest') {
       result = [...result].sort((a, b) => +new Date(b.lastTripAt) - +new Date(a.lastTripAt));
     } else {

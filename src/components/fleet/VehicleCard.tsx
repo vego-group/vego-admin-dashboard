@@ -8,6 +8,7 @@ import { VehicleIconTile } from '@/components/ui/VehicleIconTile';
 import { LocationLabel } from '@/components/ui/LocationLabel';
 import { useI18n } from '@/i18n/I18nProvider';
 import { formatNumber, formatRelativeTime } from '@/lib/format';
+import { vehicleDisplayName } from '@/lib/vehicle-label';
 import type { Vehicle } from '@/types';
 
 interface VehicleCardProps {
@@ -30,8 +31,13 @@ export function VehicleCard({ vehicle, onClick, onAssignDriver }: VehicleCardPro
         <div className="flex items-center gap-3">
           <VehicleIconTile status={vehicle.status} size="md" />
           <div className="min-w-0">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-50"><span dir="ltr">{vehicle.id}</span></h3>
-            <p className="text-xs text-slate-500">{vehicle.model}</p>
+            {/* Plate first, as on the machine; the bare database id was the title. */}
+            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-50"><span dir="ltr">{vehicleDisplayName(vehicle)}</span></h3>
+            <p className="text-xs text-slate-500">
+              {vehicle.model}
+              {vehicle.model && vehicle.plateNumber && ' · '}
+              {vehicle.plateNumber && <span dir="ltr">#{vehicle.id}</span>}
+            </p>
           </div>
         </div>
         <StatusPill status={vehicle.status} />
