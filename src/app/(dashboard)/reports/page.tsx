@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Repeat, DollarSign, Battery, Cpu } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { MetricCard } from '@/components/dashboard/MetricCard';
@@ -15,81 +15,54 @@ import { TopDriversLeaderboard } from '@/components/reports/TopDriversLeaderboar
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { useFleetContext } from '@/hooks/useFleetContext';
-import { reportsApi, dashboardApi, type WeeklySessionsDay } from '@/lib/api';
+import { useSection } from '@/hooks/useSection';
+import { reportsApi, dashboardApi } from '@/lib/api';
 import { isForbiddenError } from '@/lib/api-errors';
 import { sumMoney } from '@/lib/money';
-import type {
-  BatteryDistribution,
-  CostBreakdown,
-  DashboardMetrics,
-  RevenuePoint,
-} from '@/types';
-import { logger } from '@/lib/logger';
 
-type WeeklySessions = WeeklySessionsDay;
-type TopDriver     = { name: string; swaps: number; charges: number; activity: number };
+function KpiSkeleton() {
+  return (
+    <Card className="p-5">
+      <Skeleton className="h-4 w-24" />
+      <Skeleton className="mt-3 h-8 w-16" />
+      <Skeleton className="mt-3 h-3 w-32" />
+    </Card>
+  );
+}
 
 export default function ReportsPage() {
   const { t, locale } = useI18n();
   const { tv } = useVehicleTerm();
   const { formatMoney } = useFleetContext();
 
-  const [loading, setLoading]               = useState(true);
-  const [metrics, setMetrics]               = useState<DashboardMetrics | null>(null);
-  const [weeklySessions, setWeeklySessions] = useState<WeeklySessions[]>([]);
-  const [monthlyRevenue, setMonthlyRevenue] = useState<RevenuePoint[]>([]);
-  const [batteryDist, setBatteryDist]       = useState<BatteryDistribution[]>([]);
-  const [costAnalysis, setCostAnalysis]     = useState<CostBreakdown[]>([]);
-  const [topDrivers, setTopDrivers]         = useState<TopDriver[]>([]);
-  const [failedSections, setFailedSections] = useState<string[]>([]);
-  const [forbidden, setForbidden]           = useState(false);
+  // Each part loads, and fails, on its own: one missing backend route (e.g.
+  // reports/weekly-trips) degrades only its own card. The KPI cards used to
+  // wait for /fleet-admin/dashboard, and stayed skeletons for good when it
+  // failed — Sessions 7d and Revenue 7d included, which never needed it (FA-313).
+  const metrics = useSection('[Reports] metrics',              () => dashboardApi.getMetrics());
+  const weekly  = useSection('[Reports] weekly sessions',      () => reportsApi.getWeeklySessions());
+  const monthly = useSection('[Reports] monthly revenue',      () => reportsApi.getMonthlyRevenue());
+  const battery = useSection('[Reports] battery distribution', () => reportsApi.getBatteryDistribution());
+  const cost    = useSection('[Reports] cost analysis',        () => reportsApi.getCostAnalysis());
+  const top     = useSection('[Reports] top drivers',          () => reportsApi.getTopDrivers());
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      // Each report widget loads independently so one missing backend route
-      // (e.g. reports/weekly-trips) degrades only its own card, not the page.
-      const [mRes, wtRes, mrRes, bdRes, caRes, tdRes] = await Promise.allSettled([
-        dashboardApi.getMetrics(),
-        reportsApi.getWeeklySessions(),
-        reportsApi.getMonthlyRevenue(),
-        reportsApi.getBatteryDistribution(),
-        reportsApi.getCostAnalysis(),
-        reportsApi.getTopDrivers(),
-      ]);
-      if (cancelled) return;
+  const sections: [{ error: unknown; loading: boolean }, string][] = [
+    [metrics, t('reports.sectionMetrics')],
+    [weekly,  t('reports.sectionWeeklySessions')],
+    [monthly, t('reports.sectionMonthlyRevenue')],
+    [battery, t('reports.sectionBatteryDistribution')],
+    [cost,    t('reports.sectionCostAnalysis')],
+    [top,     t('reports.sectionTopDrivers')],
+  ];
+  // Every section refused with a 403 is "no access", not six empty charts. A
+  // single refused section is still just a failed section, listed below.
+  const forbidden = sections.every(([s]) => s.error !== undefined && isForbiddenError(s.error));
+  const failedSections = bannerDismissed
+    ? []
+    : sections.filter(([s]) => s.error !== undefined).map(([, label]) => label);
 
-      if (mRes.status  === 'fulfilled') setMetrics(mRes.value);
-      if (wtRes.status === 'fulfilled') setWeeklySessions(wtRes.value);
-      if (mrRes.status === 'fulfilled') setMonthlyRevenue(mrRes.value);
-      if (bdRes.status === 'fulfilled') setBatteryDist(bdRes.value);
-      if (caRes.status === 'fulfilled') setCostAnalysis(caRes.value);
-      if (tdRes.status === 'fulfilled') setTopDrivers(tdRes.value);
-
-      // Collect the label of every section whose endpoint failed, so the user
-      // sees exactly what's unavailable instead of a single raw error string.
-      const sections: [PromiseSettledResult<unknown>, string][] = [
-        [mRes,  t('reports.sectionMetrics')],
-        [wtRes, t('reports.sectionWeeklySessions')],
-        [mrRes, t('reports.sectionMonthlyRevenue')],
-        [bdRes, t('reports.sectionBatteryDistribution')],
-        [caRes, t('reports.sectionCostAnalysis')],
-        [tdRes, t('reports.sectionTopDrivers')],
-      ];
-      const failed = sections.filter(([r]) => r.status === 'rejected').map(([, label]) => label);
-      // Every section refused with a 403 is "no access", not six empty charts. A
-      // single refused section is still just a failed section, listed below.
-      if (sections.every(([r]) => r.status === 'rejected' && isForbiddenError(r.reason))) {
-        setForbidden(true);
-      } else if (failed.length > 0) {
-        logger.error('[Reports] Failed sections:', failed,
-          sections.filter(([r]) => r.status === 'rejected').map(([r]) => (r as PromiseRejectedResult).reason));
-        setFailedSections(failed);
-      }
-      setLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, [t]);
+  const weeklySessions = weekly.data ?? [];
 
   if (forbidden) {
     return (
@@ -109,7 +82,7 @@ export default function ReportsPage() {
           </span>
           <button
             type="button"
-            onClick={() => setFailedSections([])}
+            onClick={() => setBannerDismissed(true)}
             className="shrink-0 text-amber-400 hover:text-amber-600"
             aria-label="Dismiss"
           >
@@ -118,41 +91,46 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {/* Top metrics */}
+      {/* Top metrics — each card waits on, and fails with, its own source:
+          Sessions 7d and Revenue 7d on the weekly report, the other two on
+          /fleet-admin/dashboard. A failed source reads "—", not a skeleton
+          forever and not a 0 (FA-313). */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {loading || !metrics ? (
-          Array.from({ length: 4 }).map((_, i) => (
-            <Card key={i} className="p-5">
-              <Skeleton className="h-4 w-24" />
-              <Skeleton className="mt-3 h-8 w-16" />
-              <Skeleton className="mt-3 h-3 w-32" />
-            </Card>
-          ))
+        {weekly.loading && !weekly.data ? (
+          <><KpiSkeleton /><KpiSkeleton /></>
         ) : (
           <>
             <MetricCard
               label={t('reports.sessions7d')}
-              value={weeklySessions.reduce((s, w) => s + w.sessions, 0)}
+              value={weekly.data ? weekly.data.reduce((s, w) => s + w.sessions, 0) : '—'}
               icon={<Repeat className="h-5 w-5" />}
               iconColor="blue"
             />
             <MetricCard
               label={t('reports.revenue7d')}
               // Summed in integer minor units, formatted once (FA-317).
-              value={formatMoney(sumMoney(weeklySessions.map((w) => w.revenueMoney)).amount, locale)}
+              value={weekly.data
+                ? formatMoney(sumMoney(weekly.data.map((w) => w.revenueMoney)).amount, locale)
+                : '—'}
               icon={<DollarSign className="h-5 w-5" />}
               iconColor="green"
             />
+          </>
+        )}
+        {metrics.loading && !metrics.data ? (
+          <><KpiSkeleton /><KpiSkeleton /></>
+        ) : (
+          <>
             <MetricCard
               label={t('reports.averageBattery')}
-              value={metrics.averageSoc ?? '—'}
-              unit={metrics.averageSoc !== undefined ? '%' : undefined}
+              value={metrics.data?.averageSoc ?? '—'}
+              unit={metrics.data?.averageSoc !== undefined ? '%' : undefined}
               icon={<Battery className="h-5 w-5" />}
               iconColor="violet"
             />
             <MetricCard
               label={t('reports.onlineDevices')}
-              value={metrics.onlineDevices}
+              value={metrics.data?.onlineDevices ?? '—'}
               icon={<Cpu className="h-5 w-5" />}
               iconColor="orange"
             />
@@ -162,20 +140,20 @@ export default function ReportsPage() {
 
       {/* Weekly sessions + Battery Distribution */}
       <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <WeeklySessionsChart data={weeklySessions} loading={loading} />
-        <BatteryDistributionChart data={batteryDist} loading={loading} />
+        <WeeklySessionsChart data={weeklySessions} loading={weekly.loading} />
+        <BatteryDistributionChart data={battery.data ?? []} loading={battery.loading} />
       </div>
 
       {/* Monthly Revenue full-width */}
       <div className="mt-5">
-        <MonthlyRevenueChart data={monthlyRevenue} loading={loading} />
+        <MonthlyRevenueChart data={monthly.data ?? []} loading={monthly.loading} />
       </div>
 
       {/* Cost Analysis + Top Drivers */}
       <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <CostAnalysisChart data={costAnalysis} loading={loading} />
+        <CostAnalysisChart data={cost.data ?? []} loading={cost.loading} />
         <div className="lg:col-span-2">
-          <TopDriversLeaderboard data={topDrivers} loading={loading} />
+          <TopDriversLeaderboard data={top.data ?? []} loading={top.loading} />
         </div>
       </div>
 
