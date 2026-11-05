@@ -160,7 +160,6 @@ const en = {
     onlineDevices: 'Online Devices',
     todaysUsage: "Today's Usage",
     batteryHealthTrend: 'Battery Health Trend',
-    charged: 'charged',
     available: 'Available',
     inUse: 'In Use',
     total: 'Total',

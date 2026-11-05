@@ -31,9 +31,6 @@ const EMPTY_METRICS: DashboardMetrics = {
   availableBatteries: 0,
   chargingBatteries: 0,
   lowBatteryCount: 0,
-  fleetTrend: 0,
-  driversTrend: 0,
-  batteriesTrend: 0,
   totalDrivers: 0,
   unresolvedAlarms: 0,
   onlineDevices: 0,
@@ -144,7 +141,9 @@ export default function DashboardPage() {
               label={t('dashboard.availableBatteries')}
               value={metrics.availableBatteries}
               trend={metrics.batteriesTrend}
-              trendLabel={t('dashboard.charged')}
+              // Was "charged": the change is in available batteries, like its
+              // siblings' day-on-day change (FA-320).
+              trendLabel={t('common.fromYesterday')}
               icon={<BatteryCharging className="h-5 w-5" />}
               iconColor="sky"
             />

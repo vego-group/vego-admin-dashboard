@@ -2132,12 +2132,12 @@ interface ApiDashboard {
   unresolved_alarms?: number;
   online_devices?: number;
   // Real trend field names returned by the backend
-  fleet_trend?: number;
-  drivers_trend?: number;
-  batteries_trend?: number;
+  fleet_trend?: number | string | null;
+  drivers_trend?: number | string | null;
+  batteries_trend?: number | string | null;
   // Legacy names (kept as fallback in case API version changes)
-  total_motorcycles_trend?: number;
-  available_batteries_trend?: number;
+  total_motorcycles_trend?: number | string | null;
+  available_batteries_trend?: number | string | null;
 }
 
 interface ApiUsageBucket {
@@ -2185,10 +2185,11 @@ export const dashboardApi = {
       successRate:             readNumber(res.success_rate),
       averageCostPerVehicle:   avgCost?.amount,
       // Trend fields — backend uses short names (fleet_trend, batteries_trend…)
-      // Fall back to legacy long names in case the API version changes
-      fleetTrend:              res.fleet_trend     ?? res.total_motorcycles_trend         ?? 0,
-      driversTrend:            res.drivers_trend ?? 0,
-      batteriesTrend:          res.batteries_trend ?? res.available_batteries_trend       ?? 0,
+      // Fall back to legacy long names in case the API version changes. None
+      // sent (or not a number): no trend, not a 0 % one (FA-320).
+      fleetTrend:              readNumber(res.fleet_trend, res.total_motorcycles_trend),
+      driversTrend:            readNumber(res.drivers_trend),
+      batteriesTrend:          readNumber(res.batteries_trend, res.available_batteries_trend),
       // New counters from the dashboard endpoint
       totalDrivers:            res.total_drivers ?? 0,
       unresolvedAlarms:        res.unresolved_alarms ?? 0,

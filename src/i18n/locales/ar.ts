@@ -180,7 +180,6 @@ const ar: Translations = {
     onlineDevices: 'الأجهزة المتصلة',
     todaysUsage: 'استخدام اليوم',
     batteryHealthTrend: 'اتجاه صحة البطارية',
-    charged: 'مشحونة',
     available: 'متاحة',
     inUse: 'قيد الاستخدام',
     total: 'الإجمالي',

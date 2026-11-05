@@ -348,9 +348,15 @@ export interface DashboardMetrics {
   averageCostPerVehicle?: string;
   /** Absent when the backend omits or nulls it (trip-era field): shown "—" (FA-319). */
   successRate?: number;
-  fleetTrend: number;
-  driversTrend: number;
-  batteriesTrend: number;
+  /**
+   * Day-on-day changes, absent when the backend sends none: the card then shows
+   * no trend at all, not "↑ 0%" (FA-320). ⏳ Whether they are percentages or
+   * absolute counts is unconfirmed (the backend calls them "deltas"); the card
+   * keeps showing them with "%".
+   */
+  fleetTrend?: number;
+  driversTrend?: number;
+  batteriesTrend?: number;
   // Additional counters from GET /fleet-admin/dashboard
   totalDrivers: number;
   unresolvedAlarms: number;

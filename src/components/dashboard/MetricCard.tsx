@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowDown, ArrowUp } from 'lucide-react';
+import { ArrowDown, ArrowUp, Minus } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
 import { useI18n } from '@/i18n/I18nProvider';
@@ -21,7 +21,8 @@ const iconColorMap: Record<IconColor, string> = {
 interface MetricCardProps {
   label: string;
   value: string | number;
-  trend?: number; // positive = up (good for most), negative = down
+  /** positive = up (good for most), negative = down. Undefined: no trend line at all. */
+  trend?: number;
   trendLabel?: string;
   invertTrendColor?: boolean; // for "duration", down is good
   icon: React.ReactNode;
@@ -47,11 +48,15 @@ export function MetricCard({
   const { locale } = useI18n();
   const numericValue = typeof value === 'number' ? formatNumber(value, locale) : value;
 
-  let trendIsPositive: boolean | null = null;
-  if (trend !== undefined) {
-    const positive = trend >= 0;
-    trendIsPositive = invertTrendColor ? !positive : positive;
-  }
+  // The trend by its sign: up "+12%", down "−12%", flat "0%" in grey. A flat
+  // trend used to get a green up-arrow, and an absent one arrived as 0 (FA-320).
+  const hasTrend = typeof trend === 'number' && Number.isFinite(trend);
+  const up   = hasTrend && trend > 0;
+  const down = hasTrend && trend < 0;
+  const good = invertTrendColor ? down : up;
+  const bad  = invertTrendColor ? up : down;
+  const trendTone = good ? 'text-emerald-600' : bad ? 'text-rose-600' : 'text-slate-500 dark:text-slate-400';
+  const TrendIcon = up ? ArrowUp : down ? ArrowDown : Minus;
 
   return (
     <Card className={cn('relative overflow-hidden p-5', className)}>
@@ -80,16 +85,12 @@ export function MetricCard({
         </div>
       </div>
 
-      {trend !== undefined && (
+      {hasTrend && (
         <div className="mt-3 flex items-center gap-1.5 text-xs font-medium">
-          {trendIsPositive ? (
-            <ArrowUp className="h-3.5 w-3.5 text-emerald-600" />
-          ) : (
-            <ArrowDown className="h-3.5 w-3.5 text-rose-600" />
-          )}
-          <span className={cn(trendIsPositive ? 'text-emerald-600' : 'text-rose-600')}>
-            {trend > 0 ? '+' : ''}
-            {trend}
+          <TrendIcon className={cn('h-3.5 w-3.5', trendTone)} />
+          <span className={trendTone} dir="ltr">
+            {up ? '+' : down ? '−' : ''}
+            {formatNumber(Math.abs(trend), locale)}
             {invertTrendColor ? '' : '%'}
           </span>
           {trendLabel && (
