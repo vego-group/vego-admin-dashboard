@@ -52,6 +52,7 @@ import type {
   DashboardMetrics,
   DeviceStatus,
   DialCode,
+  DocumentStatus,
   Driver,
   DriverDocuments,
   DriverSession,
@@ -348,11 +349,43 @@ interface ApiRegistrationRequest {
 // Mappers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function toDocStatus(s?: string): 'not_uploaded' | 'pending' | 'verified' | 'rejected' {
-  if (s === 'approved') return 'verified';
-  if (s === 'pending')  return 'pending';
-  if (s === 'rejected') return 'rejected';
-  return 'not_uploaded';
+/**
+ * A driver document's review status, as this app shows it.
+ *
+ * The backend model stores `approved`; its API docs say `verified`. Both mean
+ * the same thing and both are read as verified (FA-202). Only `approved` used
+ * to be, so a `verified` licence showed "Not uploaded" and its driver "0/3
+ * verified".
+ *
+ * A status the payload leaves out is **never** read as verified (FA-226). A
+ * file on record with no status is waiting for review ("Pending review"); no
+ * file is nothing to review. An unknown value is logged once and read the same
+ * way. ⏳ The exact enum on list, show and upload is being confirmed (D1.4).
+ */
+const DOC_STATUS_BY_VALUE: Readonly<Record<string, DocumentStatus>> = {
+  approved:     'verified',
+  verified:     'verified',
+  pending:      'pending',
+  rejected:     'rejected',
+  not_uploaded: 'not_uploaded',
+};
+
+const warnedDocStatuses = new Set<string>();
+
+function toDocStatus(raw: string | null | undefined, hasFile = false): DocumentStatus {
+  const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (value) {
+    const known = DOC_STATUS_BY_VALUE[value];
+    if (known) return known;
+    if (!warnedDocStatuses.has(value)) {
+      warnedDocStatuses.add(value);
+      logger.warn(
+        `[driversApi] Unknown document status "${raw}"; showing it as ` +
+        `${hasFile ? 'pending review' : 'not uploaded'}.`,
+      );
+    }
+  }
+  return hasFile ? 'pending' : 'not_uploaded';
 }
 
 function toDriverStatus(s?: string): Driver['status'] {
@@ -429,16 +462,12 @@ function mapDriver(d: ApiDriver): Driver {
 
   const hasLicense   = d.has_license ?? license?.has_license ?? !!license;
   const licenseNum   = license?.number ?? license?.license_number ?? d.driving_license_number ?? undefined;
-  const licenseFile  = d.driving_license_file;
-  // Prefer the explicit status (nested object or flat list field); else infer.
-  const licenseStatus =
-    license?.status ?? d.driving_license_status
-      ? toDocStatus(license?.status ?? d.driving_license_status ?? undefined)
-      : licenseNum || licenseFile
-        ? 'verified'
-        : hasLicense
-          ? 'pending'
-          : 'not_uploaded';
+  // The explicit status (nested block, or the list's flat field) when there is
+  // one. Without it, a licence image on record is "Pending review" — never
+  // "Verified", which only a reviewer can make it (FA-226). A licence number
+  // alone is not a reviewable document.
+  const hasLicenseFile = !!(license?.file_url || license?.back_file_url || d.driving_license_file);
+  const licenseStatus  = toDocStatus(license?.status ?? d.driving_license_status, hasLicenseFile);
 
   // The document block is the truth and the flat column is the fallback, in that
   // order: a detail edited on a driver who has a licence or plate on file is
@@ -457,7 +486,7 @@ function mapDriver(d: ApiDriver): Driver {
     },
     customsCard: { status: toDocStatus(customs?.status) },
     plate: {
-      status:          toDocStatus(plate?.status ?? d.plate_status ?? undefined),
+      status:          toDocStatus(plate?.status ?? d.plate_status, !!plate?.file_url),
       number:          plate?.number ?? plate?.plate_number ?? d.plate_number ?? undefined,
       fileUrl:         plate?.file_url,
       rejectionReason: plate?.rejection_reason ?? undefined,
@@ -1616,7 +1645,7 @@ export const driversApi = {
 
     const lic = res.data?.driving_license;
     const pl  = res.data?.plate;
-    const licStatus = toDocStatus(lic?.status);
+    const licStatus = toDocStatus(lic?.status, !!(lic?.file_url || lic?.back_file_url));
     return {
       license: {
         status:          licStatus,
@@ -1628,7 +1657,7 @@ export const driversApi = {
         rejectionReason: lic?.rejection_reason ?? undefined,
       },
       plate: {
-        status:          toDocStatus(pl?.status),
+        status:          toDocStatus(pl?.status, !!pl?.file_url),
         number:          pl?.number,
         fileUrl:         pl?.file_url,
         rejectionReason: pl?.rejection_reason ?? undefined,

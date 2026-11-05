@@ -785,35 +785,38 @@ function FileUploadBox({
   );
 }
 
-const DOC_STATUS_CONFIG: Record<DocumentStatus, { label: string; icon: React.ReactNode; className: string }> = {
+// The same words as the drivers table ("Pending Review", not "Pending"), in
+// the UI language — these were hard-coded English.
+const DOC_STATUS_CONFIG: Record<DocumentStatus, { labelKey: string; icon: React.ReactNode; className: string }> = {
   not_uploaded: {
-    label: 'Not Uploaded',
+    labelKey: 'drivers.docNotUploaded',
     icon: <X className="h-3 w-3" />,
     className: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
   },
   pending: {
-    label: 'Pending',
+    labelKey: 'drivers.docPending',
     icon: <Clock className="h-3 w-3" />,
     className: 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400',
   },
   verified: {
-    label: 'Verified',
+    labelKey: 'drivers.docVerified',
     icon: <Check className="h-3 w-3" />,
     className: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400',
   },
   rejected: {
-    label: 'Rejected',
+    labelKey: 'drivers.docRejected',
     icon: <AlertTriangle className="h-3 w-3" />,
     className: 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400',
   },
 };
 
 function DocStatusBadge({ status }: { status: DocumentStatus }) {
+  const { t } = useI18n();
   const cfg = DOC_STATUS_CONFIG[status];
   return (
     <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium', cfg.className)}>
       {cfg.icon}
-      {cfg.label}
+      {t(cfg.labelKey)}
     </span>
   );
 }
