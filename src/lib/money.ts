@@ -186,6 +186,23 @@ export function readMoney(
   };
 }
 
+/**
+ * The exact sum of several amounts (FA-317): integer minor units added at the
+ * finest precision among them, never floats. The currency is the first one
+ * stated; the amounts are assumed to share it (one fleet, one currency). An
+ * empty list is zero.
+ */
+export function sumMoney(items: readonly Money[]): Money {
+  const decimals   = items.reduce((d, m) => Math.max(d, m.decimals), 0);
+  const minorUnits = items.reduce((s, m) => s + m.minorUnits * 10 ** (decimals - m.decimals), 0);
+  return {
+    amount: fromMinorUnits(minorUnits, decimals),
+    minorUnits,
+    currency: items.find((m) => m.currency)?.currency ?? null,
+    decimals,
+  };
+}
+
 /** Decimal value of a {@link Money}. Prefer `minorUnits` for any arithmetic. */
 export function moneyToNumber(money: Money): number {
   return money.minorUnits / 10 ** money.decimals;

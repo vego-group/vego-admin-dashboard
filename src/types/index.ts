@@ -370,7 +370,10 @@ export interface RevenuePoint {
 
 export interface CostBreakdown {
   category: string;
+  /** For the chart's geometry only — sum and format {@link CostBreakdown.money}. */
   value: number;
+  /** The exact amount (FA-317). */
+  money: Money;
   color: string;
 }
 

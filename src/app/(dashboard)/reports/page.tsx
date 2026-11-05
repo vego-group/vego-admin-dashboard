@@ -15,8 +15,9 @@ import { TopDriversLeaderboard } from '@/components/reports/TopDriversLeaderboar
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { useFleetContext } from '@/hooks/useFleetContext';
-import { reportsApi, dashboardApi } from '@/lib/api';
+import { reportsApi, dashboardApi, type WeeklySessionsDay } from '@/lib/api';
 import { isForbiddenError } from '@/lib/api-errors';
+import { sumMoney } from '@/lib/money';
 import type {
   BatteryDistribution,
   CostBreakdown,
@@ -25,7 +26,7 @@ import type {
 } from '@/types';
 import { logger } from '@/lib/logger';
 
-type WeeklySessions = { day: string; sessions: number; revenue: number };
+type WeeklySessions = WeeklySessionsDay;
 type TopDriver     = { name: string; swaps: number; charges: number; activity: number };
 
 export default function ReportsPage() {
@@ -137,7 +138,8 @@ export default function ReportsPage() {
             />
             <MetricCard
               label={t('reports.revenue7d')}
-              value={formatMoney(weeklySessions.reduce((s, w) => s + w.revenue, 0), locale)}
+              // Summed in integer minor units, formatted once (FA-317).
+              value={formatMoney(sumMoney(weeklySessions.map((w) => w.revenueMoney)).amount, locale)}
               icon={<DollarSign className="h-5 w-5" />}
               iconColor="green"
             />

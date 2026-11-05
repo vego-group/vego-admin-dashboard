@@ -2251,14 +2251,29 @@ interface ApiTopDriver {
 
 const COST_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
 
+/**
+ * One day of weekly sessions. `revenue` is for the chart's geometry only; sum
+ * and format `revenueMoney`, which is exact (FA-317).
+ */
+export interface WeeklySessionsDay {
+  day: string;
+  sessions: number;
+  revenue: number;
+  revenueMoney: Money;
+}
+
 export const reportsApi = {
-  async getWeeklySessions(): Promise<{ day: string; sessions: number; revenue: number }[]> {
+  async getWeeklySessions(): Promise<WeeklySessionsDay[]> {
     const raw = await apiClient.get<unknown>('/fleet-admin/reports/weekly-trips');
-    return extractList<ApiWeeklySessions>(raw).map((r) => ({
-      day:      r.label ?? r.day ?? '',
-      sessions: r.trips_count ?? r.trips ?? 0,
-      revenue: moneyToNumber(readMoney({ amount: r.revenue, currency: r.currency, decimals: r.decimals })),
-    }));
+    return extractList<ApiWeeklySessions>(raw).map((r) => {
+      const revenueMoney = readMoney({ amount: r.revenue, currency: r.currency, decimals: r.decimals });
+      return {
+        day:      r.label ?? r.day ?? '',
+        sessions: r.trips_count ?? r.trips ?? 0,
+        revenue:  moneyToNumber(revenueMoney),
+        revenueMoney,
+      };
+    });
   },
 
   async getMonthlyRevenue(): Promise<RevenuePoint[]> {
@@ -2286,11 +2301,15 @@ export const reportsApi = {
 
   async getCostAnalysis(): Promise<CostBreakdown[]> {
     const raw = await apiClient.get<unknown>('/fleet-admin/reports/cost-analysis');
-    return extractList<ApiCostItem>(raw).map((c, i) => ({
-      category: c.label ?? c.category ?? `Category ${i + 1}`,
-      value:    moneyToNumber(readMoney({ amount: c.amount ?? c.value, currency: c.currency, decimals: c.decimals })),
-      color:    c.color ?? COST_COLORS[i % COST_COLORS.length],
-    }));
+    return extractList<ApiCostItem>(raw).map((c, i) => {
+      const money = readMoney({ amount: c.amount ?? c.value, currency: c.currency, decimals: c.decimals });
+      return {
+        category: c.label ?? c.category ?? `Category ${i + 1}`,
+        value:    moneyToNumber(money),
+        money,
+        color:    c.color ?? COST_COLORS[i % COST_COLORS.length],
+      };
+    });
   },
 
   // Backend ranks by `activity` (swaps + charges); there is no per-driver revenue.
