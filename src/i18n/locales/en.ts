@@ -593,6 +593,10 @@ const en = {
     unread: 'Unread',
     markAllRead: 'Mark All Read',
     clearAll: 'Clear All',
+    clearAllConfirmTitle: 'Delete all notifications?',
+    clearAllConfirmDescription:
+      'This permanently deletes every notification for your account, including any not shown on this page. It can’t be undone.',
+    clearAllConfirmAction: 'Delete all',
     markRead: 'Mark Read',
     noNotifications: 'No notifications',
     typeAlert: 'Alert',

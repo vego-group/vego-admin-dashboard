@@ -595,6 +595,10 @@ const ar: Translations = {
     unread: 'غير مقروء',
     markAllRead: 'تحديد الكل كمقروء',
     clearAll: 'مسح الكل',
+    clearAllConfirmTitle: 'حذف كل الإشعارات؟',
+    clearAllConfirmDescription:
+      'سيؤدي هذا إلى حذف جميع إشعارات حسابك نهائيًا، بما فيها غير الظاهرة في هذه الصفحة. لا يمكن التراجع عن ذلك.',
+    clearAllConfirmAction: 'حذف الكل',
     markRead: 'تحديد كمقروء',
     noNotifications: 'لا توجد إشعارات',
     typeAlert: 'تنبيه',

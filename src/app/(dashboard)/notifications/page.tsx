@@ -17,6 +17,7 @@ import {
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
 import { NoAccessState } from '@/components/ui/NoAccessState';
 import { useNotificationStore } from '@/store/notifications';
 import { useI18n } from '@/i18n/I18nProvider';
@@ -84,6 +85,9 @@ export default function NotificationsPage() {
   const { notifications, unreadCount, loading, forbidden, fetchNotifications, markAsRead, markAllAsRead, remove, clearAll } =
     useNotificationStore();
   const [filter, setFilter] = useState<FilterTab>('all');
+  // "Clear All" deletes every notification on the server — including any past
+  // the first page this list shows — with no undo, so it asks first (FA-304).
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
 
   useEffect(() => { void fetchNotifications(); }, [fetchNotifications]);
 
@@ -210,7 +214,7 @@ export default function NotificationsPage() {
             {t('notifications.markAllRead')}
           </button>
           <button
-            onClick={clearAll}
+            onClick={() => setConfirmClearAll(true)}
             disabled={notifications.length === 0}
             className="flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium text-rose-600 transition-colors hover:bg-rose-50 disabled:opacity-40 dark:text-rose-400 dark:hover:bg-rose-500/10"
             style={{ borderColor: 'rgb(var(--border))' }}
@@ -251,6 +255,18 @@ export default function NotificationsPage() {
           ))
         )}
       </Card>
+
+      <ConfirmDeleteDialog
+        open={confirmClearAll}
+        onClose={() => setConfirmClearAll(false)}
+        onConfirm={() => {
+          setConfirmClearAll(false);
+          void clearAll();
+        }}
+        title={t('notifications.clearAllConfirmTitle')}
+        description={t('notifications.clearAllConfirmDescription')}
+        confirmLabel={t('notifications.clearAllConfirmAction')}
+      />
     </DashboardShell>
   );
 }
