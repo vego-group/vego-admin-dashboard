@@ -2549,6 +2549,40 @@ export function topUpBelowMinimumFrom(
 
 // ── HyperPay (Jordan) ────────────────────────────────────────────────────────
 
+// ── Top-up amounts on the wire (FA-404) ──────────────────────────────────────
+
+/**
+ * How `initiate` and `charge-saved` receive the amount. This is the one switch.
+ *
+ * - `'number'` (today): a JSON number, e.g. `7.5` — what the backend is known
+ *   to accept. It is computed from integer minor units, so it is the exact
+ *   decimal the admin typed, but a float-parsing backend could still mis-read
+ *   a third JOD decimal.
+ * - `'string'`: a fixed-precision decimal string at the form's precision
+ *   (`"10.00"` SAR, `"7.500"` JOD), built digit by digit from minor units.
+ *
+ * Switch to `'string'` only once the backend confirms both endpoints accept it
+ * (question C3), and Ahmed says so. For Jordan, also confirm that `"7.500"`
+ * (three digits, but a two-decimal value) is not refused as `amount_precision`.
+ */
+export const TOP_UP_AMOUNT_WIRE_FORMAT: 'number' | 'string' = 'number';
+
+/** A top-up amount, exactly: integer minor units at `decimals`. */
+export interface TopUpAmount {
+  minorUnits: number;
+  decimals:   number;
+}
+
+/** The `amount` field as sent, per {@link TOP_UP_AMOUNT_WIRE_FORMAT}. */
+export function topUpAmountForWire(
+  amount: TopUpAmount,
+  format: 'number' | 'string' = TOP_UP_AMOUNT_WIRE_FORMAT,
+): number | string {
+  return format === 'string'
+    ? fromMinorUnits(amount.minorUnits, amount.decimals)
+    : amount.minorUnits / 10 ** amount.decimals;
+}
+
 /** What `initiateTopUp` hands the Moyasar form (Saudi Arabia). */
 export interface MoyasarPaymentData {
   amount:         number;              // already in halalas
@@ -2938,13 +2972,13 @@ export const walletApi = {
    */
   async initiateTopUp(params: {
     driverId:  string;
-    amount:    number;
+    amount:    TopUpAmount;
     saveCard?: boolean;   // ask the backend/gateway to tokenize this card for reuse
     cardChoice?: CardChoice;
   }): Promise<InitiatedTopUp> {
     const body: Record<string, unknown> = {
       driver_id: Number(params.driverId),
-      amount:    params.amount,
+      amount:    topUpAmountForWire(params.amount),
     };
     if (params.cardChoice) body.card_choice = params.cardChoice;
     if (params.cardChoice !== 'saved') body.save_card = params.saveCard ?? false;
@@ -3178,7 +3212,7 @@ export const walletApi = {
    */
   async chargeSavedCard(params: {
     driverId: string;
-    amount:   number;
+    amount:   TopUpAmount;
     cardId:   string;
     idempotencyKey: string;
   }): Promise<{
@@ -3200,7 +3234,7 @@ export const walletApi = {
       };
     }>('/fleet-admin/wallet/top-up/charge-saved', {
       driver_id: Number(params.driverId),
-      amount:    params.amount,
+      amount:    topUpAmountForWire(params.amount),
       card_id:   params.cardId,
     }, { timeoutMs: PAYMENT_TIMEOUT_MS, headers: { 'Idempotency-Key': params.idempotencyKey } });
 

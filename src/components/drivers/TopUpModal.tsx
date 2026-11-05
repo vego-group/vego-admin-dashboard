@@ -502,7 +502,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     try {
       const result = await walletApi.initiateTopUp({
         driverId: driver.id,
-        amount:   numAmount,
+        amount:   { minorUnits: amountMinorUnits, decimals: scaleDecimals },
         // Moyasar asks "save this card?" inside its own form, so the Saudi
         // request always allows it. The HyperPay widget asks nothing — the
         // admin's checkbox on this form is the consent, and only a new card
@@ -575,7 +575,10 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     setCharging(true);
     try {
       const res = await walletApi.chargeSavedCard({
-        driverId: driver.id, amount: numAmount, cardId: selectedCardId, idempotencyKey,
+        driverId: driver.id,
+        amount:   { minorUnits: amountMinorUnits, decimals: scaleDecimals },
+        cardId:   selectedCardId,
+        idempotencyKey,
       });
 
       // 3DS authentication required — hand off to Moyasar, which returns to /payment-callback.
