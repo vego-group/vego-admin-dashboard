@@ -1259,6 +1259,78 @@ function extractList<T>(raw: unknown): T[] {
 }
 
 /**
+ * One page of a paginated list, with the server's counts **when it sent them**
+ * (FA-302, FA-306, FA-224).
+ *
+ * `lastPage` and `total` are absent when the response carried no paginator
+ * counts. Callers must then say the list may be incomplete whenever a full page
+ * came back, never present it as everything there is.
+ */
+export interface ListPage<T> {
+  rows: T[];
+  /** The page these rows are, 1-based. */
+  page: number;
+  perPage: number;
+  lastPage?: number;
+  /** Rows matching the filters across all pages. */
+  total?: number;
+}
+
+const warnedListEnvelopes = new Set<string>();
+
+/**
+ * Read one page of rows and its paginator counts, whichever Laravel shape the
+ * endpoint uses. ⏳ D1.3: the envelope of sessions, alarms, IoT devices and
+ * notifications is not confirmed, so all three shapes are accepted:
+ *
+ *     { data: [...], meta: { current_page, last_page, per_page, total } }   resource collection
+ *     { data: { data: [...], current_page, last_page, per_page, total } }   wrapped paginator
+ *     { data: [...], current_page, last_page, per_page, total }             bare paginator
+ *
+ * Anything else (a bare array, a `data` array with no counts) keeps its rows,
+ * comes back without `lastPage`/`total`, and is logged once per endpoint.
+ */
+function readListPage<T>(
+  raw: unknown,
+  requested: { page: number; perPage: number },
+  endpoint: string,
+): ListPage<T> {
+  const rows = extractList<T>(raw);
+  const asRecord = (v: unknown): Record<string, unknown> | undefined =>
+    v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined;
+  const top = asRecord(raw);
+  const counts = [asRecord(top?.['meta']), asRecord(top?.['data']), top]
+    .find((c) => c !== undefined && 'current_page' in c && ('last_page' in c || 'total' in c));
+
+  if (!counts) {
+    if (!warnedListEnvelopes.has(endpoint)) {
+      warnedListEnvelopes.add(endpoint);
+      logger.warn(
+        `[API] ${endpoint} sent no paginator counts (current_page/last_page/total); ` +
+        'the list is shown as "may be incomplete" whenever a full page comes back.',
+      );
+    }
+    return { rows, page: requested.page, perPage: requested.perPage };
+  }
+
+  const int = (v: unknown): number | undefined => {
+    const n = typeof v === 'string' ? Number(v) : v;
+    return typeof n === 'number' && Number.isInteger(n) && n >= 0 ? n : undefined;
+  };
+  const perPage  = int(counts['per_page']) || requested.perPage;
+  const total    = int(counts['total']);
+  const lastPage = int(counts['last_page'])
+    ?? (total !== undefined ? Math.max(1, Math.ceil(total / perPage)) : undefined);
+  return {
+    rows,
+    page: int(counts['current_page']) || requested.page,
+    perPage,
+    lastPage: lastPage !== undefined ? Math.max(1, lastPage) : undefined,
+    total,
+  };
+}
+
+/**
  * What `GET …/motorcycles/{id}/battery` reported. **Every field is absent when
  * the payload does not carry it**: these used to default to 0, and the details
  * card then preferred that 0 over the list's real SOC and showed 0 % / 0 km
@@ -3483,31 +3555,44 @@ function mapSession(kind: SessionKind, s: RawSession): DriverSession {
   };
 }
 
-interface SessionFilters {
+/**
+ * The documented session filters, all applied server-side (FA-302). `from` and
+ * `to` are calendar dates, `YYYY-MM-DD`. ⏳ D1.3: whether `to` is inclusive,
+ * and the sort order (shown as newest first), are not confirmed.
+ */
+export interface SessionFilters {
   status?: SessionStatus;
   driverId?: string;
   from?: string;
   to?: string;
+  page?: number;
   perPage?: number;
 }
 
-function sessionQuery(f?: SessionFilters): string {
-  const qs = new URLSearchParams({ per_page: String(f?.perPage ?? 50) });
-  if (f?.status)   qs.set('status', f.status);
-  if (f?.driverId) qs.set('driver_id', f.driverId);
-  if (f?.from)     qs.set('from', f.from);
-  if (f?.to)       qs.set('to', f.to);
-  return qs.toString();
+const SESSIONS_PER_PAGE = 20;
+
+function sessionQuery(f: SessionFilters = {}): { qs: string; page: number; perPage: number } {
+  const page    = Math.max(1, Math.floor(f.page ?? 1));
+  const perPage = Math.min(100, Math.max(1, f.perPage ?? SESSIONS_PER_PAGE));
+  const qs = new URLSearchParams({ per_page: String(perPage), page: String(page) });
+  if (f.status)   qs.set('status', f.status);
+  if (f.driverId) qs.set('driver_id', f.driverId);
+  if (f.from)     qs.set('from', f.from);
+  if (f.to)       qs.set('to', f.to);
+  return { qs: qs.toString(), page, perPage };
+}
+
+async function listSessions(kind: SessionKind, filters?: SessionFilters): Promise<ListPage<DriverSession>> {
+  const path = kind === 'swap' ? '/fleet-admin/sessions/swaps' : '/fleet-admin/sessions/charging';
+  const { qs, page, perPage } = sessionQuery(filters);
+  const raw = await apiClient.get<unknown>(`${path}?${qs}`);
+  const result = readListPage<RawSession>(raw, { page, perPage }, path);
+  return { ...result, rows: result.rows.map((s) => mapSession(kind, s)) };
 }
 
 export const sessionsApi = {
-  async swaps(filters?: SessionFilters): Promise<DriverSession[]> {
-    const raw = await apiClient.get<unknown>(`/fleet-admin/sessions/swaps?${sessionQuery(filters)}`);
-    return extractList<RawSession>(raw).map((s) => mapSession('swap', s));
-  },
-
-  async charging(filters?: SessionFilters): Promise<DriverSession[]> {
-    const raw = await apiClient.get<unknown>(`/fleet-admin/sessions/charging?${sessionQuery(filters)}`);
-    return extractList<RawSession>(raw).map((s) => mapSession('charging', s));
-  },
+  /** One page of swap sessions, filtered and paged by the server (FA-302). */
+  swaps: (filters?: SessionFilters) => listSessions('swap', filters),
+  /** One page of charging sessions, filtered and paged by the server (FA-302). */
+  charging: (filters?: SessionFilters) => listSessions('charging', filters),
 };

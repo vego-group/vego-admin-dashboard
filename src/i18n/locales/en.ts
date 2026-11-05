@@ -42,6 +42,12 @@ const en = {
     noAccessTitle: "You don't have access to this data",
     noAccessDescription: 'The server refused this request for your account. Contact your MyVego administrator if you need access.',
     retry: 'Retry',
+    pagination: 'Pagination',
+    previousPage: 'Previous page',
+    nextPage: 'Next page',
+    // Which rows of a server-paged list are on screen (FA-302, FA-306).
+    showingRange: 'Showing {{from}}–{{to}} of {{total}}',
+    showingRangeNoTotal: "Showing {{from}}–{{to}}. The server didn't report a total, so there may be more: use Next to check.",
     // Why a request failed, when the backend wrote no message of its own
     // (`failureLines` in @/lib/api-errors).
     requestFailedNetwork: "Couldn't reach the server. Check your connection and try again.",
@@ -114,8 +120,14 @@ const en = {
     subtitle: 'Battery swap and charging activity across drivers',
     swaps: 'Battery Swaps',
     charging: 'Charging',
-    searchPlaceholder: 'Search by driver or station…',
     empty: 'No sessions found for this filter.',
+    allStatuses: 'All statuses',
+    allDrivers: 'All drivers',
+    from: 'From',
+    to: 'To',
+    clearFilters: 'Clear filters',
+    dateRangeInvalid: 'The "From" date is after the "To" date.',
+    loadFailed: "Sessions couldn't be loaded.",
     driver: 'Driver',
     station: 'Station',
     status: 'Status',
