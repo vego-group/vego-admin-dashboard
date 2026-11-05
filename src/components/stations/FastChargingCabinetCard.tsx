@@ -5,13 +5,15 @@ import { Card } from '@/components/ui/Card';
 import { LocationLabel } from '@/components/ui/LocationLabel';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
+import { sharePercent } from '@/lib/format';
 import type { FastChargingCabinet } from '@/types';
 
-function CirclePercent({ value, error }: { value: number; error: boolean }) {
+/** The utilisation ring; "—" and an empty ring when the share is unknown. */
+function CirclePercent({ value, error }: { value: number | undefined; error: boolean }) {
   const r = 18;
   const c = 2 * Math.PI * r;
-  const offset = c - (value / 100) * c;
-  const color = error ? '#ef4444' : value >= 60 ? '#f59e0b' : value >= 30 ? '#3b82f6' : '#10b981';
+  const offset = c - ((value ?? 0) / 100) * c;
+  const color = value === undefined ? 'transparent' : error ? '#ef4444' : value >= 60 ? '#f59e0b' : value >= 30 ? '#3b82f6' : '#10b981';
   return (
     <div className="relative flex h-12 w-12 shrink-0 items-center justify-center">
       <svg className="absolute -rotate-90" width="48" height="48">
@@ -20,7 +22,7 @@ function CirclePercent({ value, error }: { value: number; error: boolean }) {
         <circle cx="24" cy="24" r={r} fill="none" strokeWidth="4"
           stroke={color} strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round" />
       </svg>
-      <span className="z-10 text-[10px] font-bold text-slate-700 dark:text-slate-200">{value}%</span>
+      <span className="z-10 text-[10px] font-bold text-slate-700 dark:text-slate-200">{value === undefined ? '—' : `${value}%`}</span>
     </div>
   );
 }
@@ -30,9 +32,8 @@ interface Props { cabinet: FastChargingCabinet; onClick?: () => void; }
 export function FastChargingCabinetCard({ cabinet, onClick }: Props) {
   const { t } = useI18n();
   const hasError = cabinet.status === 'error';
-  const utilization = cabinet.totalPorts > 0
-    ? Math.round((cabinet.chargingPorts / cabinet.totalPorts) * 100)
-    : 0;
+  // No ports reported: "—", not a 0 % that reads as an idle cabinet (FA-308).
+  const utilization = sharePercent(cabinet.chargingPorts, cabinet.totalPorts);
 
   return (
     <Card className={cn('relative cursor-pointer p-5 transition-all hover:shadow-card-hover',

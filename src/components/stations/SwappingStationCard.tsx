@@ -4,13 +4,15 @@ import { Clock, RefreshCw } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { LocationLabel } from '@/components/ui/LocationLabel';
 import { useI18n } from '@/i18n/I18nProvider';
+import { sharePercent } from '@/lib/format';
 import type { SwappingStation } from '@/types';
 
-function CirclePercent({ value }: { value: number }) {
+/** The availability ring; "—" and an empty ring when the share is unknown. */
+function CirclePercent({ value }: { value: number | undefined }) {
   const r = 18;
   const c = 2 * Math.PI * r;
-  const offset = c - (value / 100) * c;
-  const color = value >= 60 ? '#10b981' : value >= 35 ? '#f59e0b' : '#ef4444';
+  const offset = c - ((value ?? 0) / 100) * c;
+  const color = value === undefined ? 'transparent' : value >= 60 ? '#10b981' : value >= 35 ? '#f59e0b' : '#ef4444';
   return (
     <div className="relative flex h-12 w-12 shrink-0 items-center justify-center">
       <svg className="absolute -rotate-90" width="48" height="48">
@@ -19,7 +21,7 @@ function CirclePercent({ value }: { value: number }) {
         <circle cx="24" cy="24" r={r} fill="none" strokeWidth="4"
           stroke={color} strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round" />
       </svg>
-      <span className="z-10 text-[10px] font-bold text-slate-700 dark:text-slate-200">{value}%</span>
+      <span className="z-10 text-[10px] font-bold text-slate-700 dark:text-slate-200">{value === undefined ? '—' : `${value}%`}</span>
     </div>
   );
 }
@@ -28,11 +30,13 @@ interface Props { station: SwappingStation; onClick?: () => void; }
 
 export function SwappingStationCard({ station, onClick }: Props) {
   const { t } = useI18n();
-  const availability = Math.round((station.readyBatteries / station.totalCapacity) * 100);
-  const total = station.totalCapacity || 1;
-  const readyPct  = (station.readyBatteries    / total) * 100;
-  const chargPct  = (station.chargingBatteries / total) * 100;
-  const emptyPct  = (station.emptySlots        / total) * 100;
+  // No capacity, no share: "—" and an empty bar, never NaN% (FA-308). The bar
+  // used to divide by `capacity || 1`, which drew 300 % wide segments.
+  const total = station.totalCapacity;
+  const availability = sharePercent(station.readyBatteries, total);
+  const readyPct  = sharePercent(station.readyBatteries,    total) ?? 0;
+  const chargPct  = sharePercent(station.chargingBatteries, total) ?? 0;
+  const emptyPct  = sharePercent(station.emptySlots,        total) ?? 0;
 
   return (
     <Card className="cursor-pointer p-5 transition-all hover:shadow-card-hover" onClick={onClick}>

@@ -17,6 +17,7 @@ import { useI18n } from '@/i18n/I18nProvider';
 import { fastChargingApi } from '@/lib/api';
 import { isForbiddenError } from '@/lib/api-errors';
 import { cn } from '@/lib/cn';
+import { sharePercent } from '@/lib/format';
 import type { FastChargingCabinet, BatteryStation, FastChargingStatus } from '@/types';
 import { logger } from '@/lib/logger';
 
@@ -221,7 +222,8 @@ export default function FastChargingPage() {
                     </thead>
                     <tbody>
                       {cabinets.map((c) => {
-                        const loadPct = c.totalPorts > 0 ? Math.round((c.chargingPorts / c.totalPorts) * 100) : 0;
+                        // No ports reported: "—" and an empty bar (FA-308).
+                        const loadPct = sharePercent(c.chargingPorts, c.totalPorts);
                         return (
                           <tr key={c.id} className="border-b transition-colors hover:bg-slate-50/60 dark:hover:bg-slate-800/40"
                             style={{ borderColor: 'rgb(var(--border))' }}>
@@ -243,12 +245,13 @@ export default function FastChargingPage() {
                                 <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                                   <div
                                     className={cn('h-full rounded-full transition-all',
-                                      loadPct >= 80 ? 'bg-rose-500' : loadPct >= 50 ? 'bg-amber-400' : 'bg-emerald-500'
+                                      loadPct === undefined ? 'bg-transparent'
+                                      : loadPct >= 80 ? 'bg-rose-500' : loadPct >= 50 ? 'bg-amber-400' : 'bg-emerald-500'
                                     )}
-                                    style={{ width: `${loadPct}%` }}
+                                    style={{ width: `${loadPct ?? 0}%` }}
                                   />
                                 </div>
-                                <span className="tabular-nums text-slate-500">{loadPct}%</span>
+                                <span className="tabular-nums text-slate-500">{loadPct === undefined ? '—' : `${loadPct}%`}</span>
                               </div>
                             </td>
                           </tr>

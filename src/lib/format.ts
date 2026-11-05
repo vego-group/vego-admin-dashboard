@@ -171,6 +171,18 @@ export function formatBatteryLevel(value: number | null | undefined): string {
     : '—';
 }
 
+/**
+ * `part` as a whole-number share of `whole` (0–100), or **undefined** when the
+ * share cannot be known: a capacity of 0, an absent capacity (which the mappers
+ * read as 0) or a non-numeric count. `ready / 0` used to print "NaN%" or
+ * "Infinity%" on the swapping cards (FA-308); the callers show "—" instead.
+ */
+export function sharePercent(part: number | null | undefined, whole: number | null | undefined): number | undefined {
+  if (typeof part !== 'number' || typeof whole !== 'number') return undefined;
+  if (!Number.isFinite(part) || !Number.isFinite(whole) || whole <= 0) return undefined;
+  return Math.round(Math.min(100, Math.max(0, (part / whole) * 100)));
+}
+
 export function formatPercent(value: number, locale: Locale = 'en'): string {
   return new Intl.NumberFormat(localeMap[locale], {
     style: 'percent',

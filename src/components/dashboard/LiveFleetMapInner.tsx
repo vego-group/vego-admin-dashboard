@@ -9,7 +9,7 @@ import { useI18n } from '@/i18n/I18nProvider';
 import { useBasemap } from '@/hooks/useBasemap';
 import { useCountryViewport } from '@/hooks/useCountryViewport';
 import { vehicleDisplayName } from '@/lib/vehicle-label';
-import { formatBatteryLevel } from '@/lib/format';
+import { formatBatteryLevel, sharePercent } from '@/lib/format';
 import type { Vehicle, BatteryStation } from '@/types';
 
 export interface LiveFleetMapProps {
@@ -43,8 +43,9 @@ function pinHtml(size: number, grad: string, ring: string, svg: string): Trusted
 // is rgb(var(--card)), which is dark in dark mode.
 
 function stationPopup(s: BatteryStation, t: Translate): TrustedHtml {
-  const avail = Math.round(clampPercent((s.available / s.totalCapacity) * 100));
-  const barColor = avail >= 60 ? '#10b981' : avail >= 30 ? '#f59e0b' : '#ef4444';
+  // No capacity, no share: "—" and an empty bar (FA-308).
+  const avail = sharePercent(s.available, s.totalCapacity);
+  const barColor = avail === undefined ? 'transparent' : avail >= 60 ? '#10b981' : avail >= 30 ? '#f59e0b' : '#ef4444';
   const batIconBlue = BAT_SVG.replace(/stroke="white"/g, 'stroke="#0284c7"').replace('width="15" height="15"', 'width="16" height="16"');
   return html`<div style="font-family:system-ui,sans-serif;width:256px;padding:16px">
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
@@ -57,8 +58,8 @@ function stationPopup(s: BatteryStation, t: Translate): TrustedHtml {
     <div style="background:#f1f5f9;border-radius:8px;padding:8px;text-align:center"><div style="font-size:16px;font-weight:700;color:#475569">${s.totalCapacity}</div><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">${t('dashboard.total')}</div></div>
   </div>
   <div style="margin-bottom:10px">
-    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:rgb(var(--muted-foreground))">${t('dashboard.availability')}</span><span style="font-weight:600;color:rgb(var(--foreground))">${avail}%</span></div>
-    <div style="height:6px;background:rgb(var(--muted));border-radius:999px;overflow:hidden"><div style="height:100%;background:${barColor};width:${avail}%;border-radius:999px"></div></div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:rgb(var(--muted-foreground))">${t('dashboard.availability')}</span><span style="font-weight:600;color:rgb(var(--foreground))">${avail === undefined ? '—' : `${avail}%`}</span></div>
+    <div style="height:6px;background:rgb(var(--muted));border-radius:999px;overflow:hidden"><div style="height:100%;background:${barColor};width:${avail ?? 0}%;border-radius:999px"></div></div>
   </div>
   <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:rgb(var(--muted-foreground))"><span>&#9201; ${t('mapPopup.minWait', { minutes: s.avgWaitTimeMinutes })}</span><span>${t('mapPopup.swapsToday', { count: s.todaySwaps })}</span></div>
 </div>`;

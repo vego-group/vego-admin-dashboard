@@ -4,7 +4,8 @@ import 'leaflet/dist/leaflet.css';
 import { useEffect, useRef, useState } from 'react';
 import type { Map as LeafletMap, Marker as LeafletMarker } from 'leaflet';
 import { fitToPoints, type LatLngTuple } from '@/lib/map-fit';
-import { clampPercent, html, trustedHtml, type TrustedHtml } from '@/lib/html';
+import { html, trustedHtml, type TrustedHtml } from '@/lib/html';
+import { sharePercent } from '@/lib/format';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useBasemap } from '@/hooks/useBasemap';
 import { useCountryViewport } from '@/hooks/useCountryViewport';
@@ -30,8 +31,9 @@ function pinHtml(size: number, grad: string, ring: string): TrustedHtml {
  * reads the same in both themes.
  */
 function stationPopup(s: SwappingStation, t: Translate): TrustedHtml {
-  const avail = s.totalCapacity > 0 ? Math.round(clampPercent((s.readyBatteries / s.totalCapacity) * 100)) : 0;
-  const barColor = avail >= 60 ? '#10b981' : avail >= 35 ? '#f59e0b' : '#ef4444';
+  // No capacity, no share: "—" and an empty bar, not a red 0 % (FA-308).
+  const avail = sharePercent(s.readyBatteries, s.totalCapacity);
+  const barColor = avail === undefined ? '#94a3b8' : avail >= 60 ? '#10b981' : avail >= 35 ? '#f59e0b' : '#ef4444';
   return html`<div style="font-family:system-ui,sans-serif;width:250px;border-radius:12px;overflow:hidden">
   <div style="background:#1e293b;padding:12px 16px">
     <div style="font-size:13px;font-weight:700;color:#f8fafc;margin-bottom:2px">${s.name}</div>
@@ -59,10 +61,10 @@ function stationPopup(s: SwappingStation, t: Translate): TrustedHtml {
     <div style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
         <span style="color:#64748b">${t('dashboard.availability')}</span>
-        <span style="font-weight:700;color:${barColor}">${avail}%</span>
+        <span style="font-weight:700;color:${barColor}">${avail === undefined ? '—' : `${avail}%`}</span>
       </div>
       <div style="height:6px;background:#f1f5f9;border-radius:999px;overflow:hidden">
-        <div style="height:100%;background:${barColor};width:${avail}%;border-radius:999px"></div>
+        <div style="height:100%;background:${barColor};width:${avail ?? 0}%;border-radius:999px"></div>
       </div>
     </div>
     <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#64748b;margin-bottom:12px">
@@ -132,9 +134,12 @@ export default function SwappingStationMapInner({ stations, height = 420 }: Swap
       // list labels it "location unknown" instead of pinning it to a guess.
       for (const s of stations) {
         if (!s.coordinates) continue;
-        const avail = s.totalCapacity > 0 ? (s.readyBatteries / s.totalCapacity) * 100 : 0;
+        // Unknown availability is grey, not the red of an empty cabinet.
+        const avail = sharePercent(s.readyBatteries, s.totalCapacity);
         const [grad, ring] =
-          avail >= 60
+          avail === undefined
+            ? ['#94a3b8,#64748b', 'rgba(148,163,184,0.25)']
+            : avail >= 60
             ? ['#10b981,#059669', 'rgba(16,185,129,0.25)']
             : avail >= 35
             ? ['#f59e0b,#d97706', 'rgba(245,158,11,0.25)']
