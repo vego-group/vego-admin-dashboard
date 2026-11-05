@@ -310,9 +310,9 @@ export function ZoneFormDrawer({
             </div>
           </div>
 
-          {/* Who this zone actually binds. An operator drawing a polygon on a
-              public road reasonably assumes it covers everyone riding there; it
-              covers their own drivers. */}
+          {/* What a zone does and doesn't do. Zones are advisory: nothing pushes
+              them to a vehicle (FA-303). They cover this fleet's drivers only,
+              not everyone riding on those roads. */}
           <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50/70 p-3 text-xs text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
             <Users className="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
             <p>{tv('zones.enforcementScopeNote')}</p>

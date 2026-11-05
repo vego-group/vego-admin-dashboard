@@ -526,24 +526,26 @@ const en = {
     speedNormalLabel: 'Normal Speed',
     speedSlowLabel: 'Slow',
     speedLimitRequired: 'Set a speed limit between {{min}} and {{max}} km/h',
-    speedHint: 'All fleet {{vehicles}} in this zone will be automatically limited to this maximum speed',
+    // Zones are advisory (FA-303): nothing pushes a zone to a vehicle, so no
+    // string here may say a vehicle is slowed, limited or stopped by one.
+    speedHint:
+      'The advised maximum speed shown to your drivers in this zone. It is not applied to {{vehicles}} automatically.',
     statusLabel: 'Status',
-    statusActiveDescription: 'Zone rules are switched on',
-    statusInactiveDescription: 'Zone rules are paused',
+    statusActiveDescription: 'Switched on: shown to your drivers',
+    statusInactiveDescription: 'Switched off. You can turn it back on at any time.',
 
-    // ── Who a zone binds (CR-7.4) ───────────────────────────────────────────
-    // `enforced` is not `active`: active is "the rules are switched on",
-    // enforced is "the backend binds riders to them". And a fleet's zones bind
-    // that fleet's drivers only — an operator reading an unlabelled map assumes
-    // it covers every rider on those roads, which it does not.
+    // ── Who a zone covers (CR-7.4) ──────────────────────────────────────────
+    // `enforced` is not `active`: active is "the zone is switched on",
+    // enforced is a backend flag. The chip appears only when the backend sends
+    // it, and even then it claims nothing about the vehicle itself.
     enforcedLabel: 'Enforced',
     notEnforcedLabel: 'Advisory',
     enforcedFleetNote:
-      'Enforced on your fleet’s drivers: their {{vehicles}} are limited automatically inside this zone.',
+      'Marked as enforced by VEGO for your fleet’s drivers inside this zone.',
     notEnforcedFleetNote:
-      'Not enforced — this zone is shown on the map but does not limit any {{vehicle}}.',
+      'Advisory: shown to your drivers. It does not limit any {{vehicle}}.',
     enforcementScopeNote:
-      'Your zones bind your own drivers. Individual owners riding their own {{vehicles}} on these roads are not affected by them.',
+      'Zones are shown to your fleet’s drivers as guidance only. Nothing slows down or stops a {{vehicle}} automatically, and riders outside your fleet are not covered.',
     saveZone: 'Save Zone',
     cancel: 'Cancel',
     notice: 'Notice',
@@ -554,13 +556,13 @@ const en = {
     types: {
       normal: 'Normal',
       normalLong: 'Normal Zone',
-      normalDescription: 'The {{vehicle}} operates normally with no restrictions',
+      normalDescription: 'No speed advice and no riding restriction',
       slow: 'Slow Zone',
       slowLong: 'Slow Zone',
-      slowDescription: 'Speed capped — the {{vehicle}} is limited to the set speed',
+      slowDescription: 'Drivers are asked to stay below the set speed. It is not applied automatically.',
       restricted: 'Restricted',
       restrictedLong: 'Restricted Zone',
-      restrictedDescription: 'The {{vehicle}} is shut down — riding is not allowed inside',
+      restrictedDescription: 'Drivers are told not to ride inside. {{Vehicles}} are not stopped automatically.',
     },
 
     // Validation
