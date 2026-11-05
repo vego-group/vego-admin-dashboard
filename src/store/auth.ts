@@ -106,6 +106,35 @@ function takeStoredSignOutReason(): SignOutReason | null {
   }
 }
 
+// ── State that belongs to the signed-in account ─────────────────────────────
+//
+// Other stores hold data fetched for the account that is signed in: the fleet
+// profile (country, currency, decimals, vehicle term) and the notifications.
+// None of it may survive into the next account in the same tab, or a Saudi
+// fleet signing in after a Jordanian one would see JOD amounts with three
+// decimals (FA-001). So each of those stores registers its reset here, and the
+// session boundary runs them all: `signOut()` always, and a successful sign-in
+// as well, in case a session ended without passing through `signOut()`.
+//
+// Registered rather than imported, because those stores import this one.
+
+const accountResets = new Set<() => void>();
+
+/** Register a reset to run whenever the signed-in account ends or changes. */
+export function onAccountChange(reset: () => void): void {
+  accountResets.add(reset);
+}
+
+function resetAccountState(): void {
+  accountResets.forEach((reset) => {
+    try {
+      reset();
+    } catch (err) {
+      logger.warn('[auth] A store failed to reset at the session boundary:', err);
+    }
+  });
+}
+
 interface AuthState {
   user: User | null;
   token: string | null;
@@ -307,6 +336,8 @@ export const useAuthStore = create<AuthState>()(
             role: 'admin',
           };
 
+          // Nothing fetched for an earlier account may reach this one.
+          resetAccountState();
           set({
             token: res.token,
             user,
@@ -329,13 +360,16 @@ export const useAuthStore = create<AuthState>()(
       },
 
       // The country choice survives sign-out on purpose: it is a preference, not
-      // a credential, and re-login should not ask for it again.
+      // a credential, and re-login should not ask for it again. Everything that
+      // was fetched for this account does not (FA-001): the session ends first,
+      // so nothing reloads it for the old token, and then the stores reset.
       signOut: (reason) => {
         set({
           user: null, token: null, isAuthenticated: false, error: null, pendingPhone: null,
           signOutReason: reason ?? null,
         });
         storeSignOutReason(reason ?? null);
+        resetAccountState();
       },
 
       takeSignOutReason: () => {

@@ -24,7 +24,7 @@ import { fleetAdminApi } from '@/lib/api';
 import { isForbiddenError } from '@/lib/api-errors';
 import { formatCurrency, PENDING_AMOUNT } from '@/lib/format';
 import { logger } from '@/lib/logger';
-import { useAuthStore } from '@/store/auth';
+import { onAccountChange, useAuthStore } from '@/store/auth';
 import type { CurrencyCode, FleetProfile, IsoCountryCode, Locale } from '@/types';
 
 /**
@@ -46,6 +46,12 @@ interface FleetStore {
   reset: () => void;
 }
 
+/**
+ * Bumped by every reset. A profile request that was sent before the reset
+ * belongs to the account that has just gone, and its answer is dropped.
+ */
+let generation = 0;
+
 const useFleetStore = create<FleetStore>((set, get) => ({
   fleet: null,
   isLoading: false,
@@ -55,12 +61,17 @@ const useFleetStore = create<FleetStore>((set, get) => ({
   load: async (force = false) => {
     const { isLoading, loaded } = get();
     if (isLoading || (loaded && !force)) return;
+    // The endpoint is token-scoped: there is nothing to ask for before sign-in.
+    if (!useAuthStore.getState().isAuthenticated) return;
 
+    const requestedIn = generation;
     set({ isLoading: true, error: null });
     try {
       const fleet = await fleetAdminApi.getMe();
+      if (requestedIn !== generation) return;
       set({ fleet, isLoading: false, loaded: true, error: null });
     } catch (err) {
+      if (requestedIn !== generation) return;
       const message = err instanceof Error ? err.message : 'Could not load the fleet profile';
       if (isForbiddenError(err)) {
         // Signed in, but not as a fleet admin: the staff OTP login is shared, so
@@ -80,8 +91,18 @@ const useFleetStore = create<FleetStore>((set, get) => ({
     }
   },
 
-  reset: () => set({ fleet: null, isLoading: false, error: null, loaded: false }),
+  reset: () => {
+    generation += 1;
+    set({ fleet: null, isLoading: false, error: null, loaded: false });
+  },
 }));
+
+// The profile is the signed-in account's: it is cleared at the session
+// boundary, inside the auth store (FA-001). This used to happen in the hook's
+// effect below, which never ran after a sign-out — the shell unmounts every
+// page that uses the hook before the effect can see `isAuthenticated: false` —
+// so the next account in the tab inherited this one's currency and decimals.
+onAccountChange(() => useFleetStore.getState().reset());
 
 export interface FleetContext {
   /** Full profile, or null until `/fleet-admin/me` resolves. */
@@ -112,19 +133,14 @@ export function useFleetContext(): FleetContext {
   const error     = useFleetStore((s) => s.error);
   const loaded    = useFleetStore((s) => s.loaded);
   const load      = useFleetStore((s) => s.load);
-  const reset     = useFleetStore((s) => s.reset);
 
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
   useEffect(() => {
-    // The endpoint is token-scoped — there is nothing to ask for before sign-in,
-    // and a stale fleet must not survive into the next session.
-    if (!isAuthenticated) {
-      if (loaded) reset();
-      return;
-    }
-    if (!loaded) void load();
-  }, [isAuthenticated, loaded, load, reset]);
+    // Loading only. Clearing a signed-out account's profile is the auth store's
+    // job — see `onAccountChange` above.
+    if (isAuthenticated && !loaded) void load();
+  }, [isAuthenticated, loaded, load]);
 
   // `loaded` without a fleet means we asked and still do not know. Anything else
   // short of a fleet is still in flight.

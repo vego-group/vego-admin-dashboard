@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { notificationsApi } from '@/lib/api';
 import { isForbiddenError } from '@/lib/api-errors';
+import { onAccountChange } from '@/store/auth';
 import type { Notification } from '@/types';
 
 interface NotificationStore {
@@ -17,18 +18,32 @@ interface NotificationStore {
   markAllAsRead: () => Promise<void>;
   remove: (id: string) => Promise<void>;
   clearAll: () => Promise<void>;
+  /** Forget everything fetched for the signed-in account. */
+  reset: () => void;
 }
 
-export const useNotificationStore = create<NotificationStore>((set, get) => ({
-  notifications: [],
+const initialState = {
+  notifications: [] as Notification[],
   unreadCount: 0,
   loading: false,
   forbidden: false,
+};
+
+/**
+ * Bumped by every reset. An answer to a request sent before the reset belongs
+ * to the account that has just signed out, and is dropped.
+ */
+let generation = 0;
+
+export const useNotificationStore = create<NotificationStore>((set, get) => ({
+  ...initialState,
 
   fetchNotifications: async () => {
+    const requestedIn = generation;
     set({ loading: true, forbidden: false });
     try {
       const notifications = await notificationsApi.list();
+      if (requestedIn !== generation) return;
       set({
         notifications,
         unreadCount: notifications.filter((n) => !n.read).length,
@@ -36,13 +51,16 @@ export const useNotificationStore = create<NotificationStore>((set, get) => ({
         forbidden: false,
       });
     } catch (err) {
+      if (requestedIn !== generation) return;
       set({ loading: false, forbidden: isForbiddenError(err) });
     }
   },
 
   fetchUnreadCount: async () => {
+    const requestedIn = generation;
     try {
       const count = await notificationsApi.getUnreadCount();
+      if (requestedIn !== generation) return;
       set({ unreadCount: count });
     } catch {
       // Non-fatal — badge just won't update
@@ -100,4 +118,14 @@ export const useNotificationStore = create<NotificationStore>((set, get) => ({
       await get().fetchNotifications();
     }
   },
+
+  reset: () => {
+    generation += 1;
+    set({ ...initialState });
+  },
 }));
+
+// The list and the unread badge are the signed-in account's. The auth store
+// clears them at the session boundary, so the next account in the same tab
+// never sees this one's notifications or count (FA-001).
+onAccountChange(() => useNotificationStore.getState().reset());
