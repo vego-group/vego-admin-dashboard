@@ -77,9 +77,9 @@ export default function FleetPage() {
 
   // ----- Driver assignment handlers -----------------------------------------
 
-  const handleAssignDriver = async (motorcycleId: string, driverId: string): Promise<boolean> => {
-    const ok = await fleetApi.assignDriver(motorcycleId, driverId);
-    if (!ok) return false;
+  // A refusal throws through to the picker, which shows the backend's reason.
+  const handleAssignDriver = async (motorcycleId: string, driverId: string): Promise<void> => {
+    await fleetApi.assignDriver(motorcycleId, driverId);
     const driver = drivers.find((d) => d.id === driverId);
     const driverName = driver?.name ?? driverId;
     setVehicles((prev) =>
@@ -95,12 +95,10 @@ export default function FleetPage() {
       // type, bound by tv(). This names one specific machine.
       description: tv('fleet.assignSuccessDescription', { driver: driverName, plate: ltrIsolate(motorcycleId) }),
     });
-    return true;
   };
 
-  const handleUnassignDriver = async (motorcycleId: string): Promise<boolean> => {
-    const ok = await fleetApi.unassignDriver(motorcycleId);
-    if (!ok) return false;
+  const handleUnassignDriver = async (motorcycleId: string): Promise<void> => {
+    await fleetApi.unassignDriver(motorcycleId);
     setVehicles((prev) =>
       prev.map((v) =>
         v.id === motorcycleId
@@ -112,7 +110,6 @@ export default function FleetPage() {
       title: t('fleet.unassignSuccessTitle'),
       description: tv('fleet.unassignSuccessDescription', { plate: ltrIsolate(motorcycleId) }),
     });
-    return true;
   };
 
   const counts = useMemo(

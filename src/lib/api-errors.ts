@@ -17,7 +17,7 @@
  * Everything else stays global: a 500 is not a phone-number problem.
  */
 
-import { ApiError } from '@/lib/api/client';
+import { ApiError, isTimeoutError } from '@/lib/api/client';
 
 /** The form fields these errors can land on. */
 export type FormFieldName = 'country' | 'phone' | 'name';
@@ -113,4 +113,51 @@ export function isFieldLevelError(err: unknown): boolean {
  */
 export function isForbiddenError(err: unknown): boolean {
   return err instanceof ApiError && err.status === 403;
+}
+
+// ── Saying why a request failed ──────────────────────────────────────────────
+
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+/**
+ * The backend's own words for a failed request, or **null** when it wrote none.
+ *
+ * Laravel names each refused field in `errors`, and its top-level `message`
+ * only summarises them ("… (and 1 more error)"), so the field messages win.
+ * Null for a request that got no answer at all (status 0: no connection, or
+ * the client's deadline) and for the client's placeholder `HTTP 500` text:
+ * neither is a sentence anyone wrote, and neither is in the UI language.
+ */
+export function serverMessages(err: unknown): string[] | null {
+  if (!(err instanceof ApiError) || err.status === 0) return null;
+  const fieldMessages = Array.from(new Set(
+    Object.values(err.errors ?? {})
+      .flat()
+      .filter((m): m is string => typeof m === 'string' && m.trim() !== ''),
+  ));
+  if (fieldMessages.length > 0) return fieldMessages;
+  if (err.message && !/^HTTP \d{3}$/.test(err.message)) return [err.message];
+  return null;
+}
+
+/** The backend's first sentence about a failed request, or **null**. */
+export function serverMessage(err: unknown): string | null {
+  return serverMessages(err)?.[0] ?? null;
+}
+
+/**
+ * What to tell the operator about a failed request: the backend's own messages
+ * when it wrote some, otherwise why there are none — no connection, no answer
+ * in time, or a bare status code — in the UI language.
+ */
+export function failureLines(err: unknown, t: Translate): string[] {
+  const fromServer = serverMessages(err);
+  if (fromServer) return fromServer;
+  if (isTimeoutError(err)) return [t('common.requestTimedOut')];
+  if (err instanceof ApiError) {
+    return [err.status === 0
+      ? t('common.requestFailedNetwork')
+      : t('common.requestFailedStatus', { status: err.status })];
+  }
+  return [t('common.error')];
 }

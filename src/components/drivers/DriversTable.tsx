@@ -1,14 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { Pencil, IdCard, FileText, Hash, Wallet, Loader2, ShieldX, ShieldCheck, Bike } from 'lucide-react';
+import { Pencil, IdCard, FileText, Hash, Wallet, Loader2, ShieldX, ShieldCheck, Bike, AlertTriangle, X } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
+import { failureLines } from '@/lib/api-errors';
 import { cn } from '@/lib/cn';
-import { ltrIsolate } from '@/lib/format';
+import { bidiIsolate, ltrIsolate } from '@/lib/format';
 import type { Driver, DocumentStatus } from '@/types';
 import { useFleetContext } from '@/hooks/useFleetContext';
 
@@ -16,7 +17,9 @@ interface DriversTableProps {
   drivers: Driver[];
   onEdit?: (driver: Driver) => void;
   onTopUp?: (driver: Driver) => void;
+  /** Throws when the backend refuses; the table then says why (FA-210). */
   onToggleStatus?: (driver: Driver) => Promise<void>;
+  /** Throws when the backend refuses; the table then says why (FA-210). */
   onBlockToggle?: (driver: Driver) => Promise<void>;
   onAssignMotorcycle?: (driver: Driver) => void;
 }
@@ -86,17 +89,54 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
   const [confirmAction, setConfirmAction] = useState<
     { driver: Driver; kind: 'block' | 'deactivate' } | null
   >(null);
+  /**
+   * The last status change the backend refused, and why. A confirmed action
+   * shows it inside its dialog, which stays open; an immediate one (activate,
+   * unblock) shows it above the table. It used to vanish: the call returned
+   * null and the dialog closed as if the driver had been blocked (FA-210).
+   */
+  const [actionError, setActionError] = useState<
+    { driverId: string; title: string; lines: string[] } | null
+  >(null);
 
-  const runToggle = async (driver: Driver) => {
-    if (!onToggleStatus || togglingId) return;
-    setTogglingId(driver.id);
-    try { await onToggleStatus(driver); } finally { setTogglingId(null); }
+  const failedTitle = (driver: Driver, kind: 'toggle' | 'block'): string => {
+    const name = bidiIsolate(driver.name);
+    if (kind === 'toggle') {
+      return t(driver.status === 'active' ? 'drivers.deactivateFailed' : 'drivers.activateFailed', { name });
+    }
+    return t(driver.status === 'blocked' ? 'drivers.unblockFailed' : 'drivers.blockFailed', { name });
   };
 
-  const runBlockToggle = async (driver: Driver) => {
-    if (!onBlockToggle || blockingId) return;
+  /** Returns whether the change went through. */
+  const runToggle = async (driver: Driver): Promise<boolean> => {
+    if (!onToggleStatus || togglingId) return false;
+    setTogglingId(driver.id);
+    setActionError(null);
+    try {
+      await onToggleStatus(driver);
+      return true;
+    } catch (err) {
+      setActionError({ driverId: driver.id, title: failedTitle(driver, 'toggle'), lines: failureLines(err, t) });
+      return false;
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  /** Returns whether the change went through. */
+  const runBlockToggle = async (driver: Driver): Promise<boolean> => {
+    if (!onBlockToggle || blockingId) return false;
     setBlockingId(driver.id);
-    try { await onBlockToggle(driver); } finally { setBlockingId(null); }
+    setActionError(null);
+    try {
+      await onBlockToggle(driver);
+      return true;
+    } catch (err) {
+      setActionError({ driverId: driver.id, title: failedTitle(driver, 'block'), lines: failureLines(err, t) });
+      return false;
+    } finally {
+      setBlockingId(null);
+    }
   };
 
   const handleToggle = (driver: Driver) => {
@@ -122,13 +162,19 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
   const handleConfirm = async () => {
     if (!confirmAction) return;
     const { driver, kind } = confirmAction;
-    if (kind === 'deactivate') {
-      await runToggle(driver);
-    } else {
-      await runBlockToggle(driver);
-    }
-    setConfirmAction(null);
+    const done = kind === 'deactivate' ? await runToggle(driver) : await runBlockToggle(driver);
+    // A refusal keeps the dialog open, with the reason in it.
+    if (done) setConfirmAction(null);
   };
+
+  const closeConfirm = () => {
+    if (confirmIsBusy) return;
+    setConfirmAction(null);
+    setActionError(null);
+  };
+
+  const confirmError =
+    confirmAction && actionError?.driverId === confirmAction.driver.id ? actionError.lines : null;
 
   const confirmIsBusy = confirmAction
     ? confirmAction.kind === 'deactivate'
@@ -138,6 +184,27 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
 
   return (
     <>
+    {actionError && !confirmAction && (
+      <div
+        role="alert"
+        className="mb-4 flex items-start gap-2.5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-400"
+      >
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <div className="min-w-0 flex-1 space-y-1">
+          <p className="font-semibold">{actionError.title}</p>
+          {actionError.lines.map((line) => <p key={line} className="break-words">{line}</p>)}
+        </div>
+        <button
+          type="button"
+          onClick={() => setActionError(null)}
+          className="shrink-0 rounded p-0.5 hover:bg-rose-100 dark:hover:bg-rose-500/10"
+          aria-label={t('common.close')}
+          title={t('common.close')}
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    )}
     <Card className="overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -341,9 +408,10 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
 
     <ConfirmDeleteDialog
       open={!!confirmAction}
-      onClose={() => { if (!confirmIsBusy) setConfirmAction(null); }}
+      onClose={closeConfirm}
       onConfirm={handleConfirm}
       isLoading={confirmIsBusy}
+      error={confirmError}
       title={
         confirmAction?.kind === 'block'
           ? t('drivers.blockConfirmTitle')

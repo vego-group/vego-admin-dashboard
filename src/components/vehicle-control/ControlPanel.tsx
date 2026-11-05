@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
+import { FailureNote } from '@/components/ui/FailureNote';
 import { AlertTriangle, Lock, Power, ShieldCheck, Unlock, UserPlus, UserMinus, Loader2, WifiOff } from 'lucide-react';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
+import { failureLines } from '@/lib/api-errors';
 import { cn } from '@/lib/cn';
 import { ltrIsolate } from '@/lib/format';
 import { VEHICLE_SPEED_LIMIT_MAX, clampSpeedLimit } from '@/lib/vehicle-speed';
@@ -16,8 +18,10 @@ import type { VehicleCommand, VehicleCommandOutcome } from '@/lib/api';
 interface ControlPanelProps {
   vehicle: Vehicle;
   drivers?: Driver[];
-  onAssignDriver?: (motorcycleId: string, driverId: string) => Promise<boolean>;
-  onUnassignDriver?: (motorcycleId: string) => Promise<boolean>;
+  /** Throws when the backend refuses. */
+  onAssignDriver?: (motorcycleId: string, driverId: string) => Promise<void>;
+  /** Throws when the backend refuses. */
+  onUnassignDriver?: (motorcycleId: string) => Promise<void>;
   /** Sends a real control command and reports exactly what happened to it. */
   onCommand?: (motorcycleId: string, action: VehicleCommand, speedLimit?: number) => Promise<VehicleCommandOutcome>;
 }
@@ -113,25 +117,34 @@ export function ControlPanel({
   // Driver assignment
   const [selectedDriverId, setSelectedDriverId] = useState('');
   const [assigning,  setAssigning]  = useState(false);
-  const [assignError, setAssignError] = useState<string | null>(null);
+  /** Why the backend refused, under a line saying what failed. */
+  const [assignError, setAssignError] = useState<{ title: string; lines: string[] } | null>(null);
 
   const handleAssign = async () => {
     if (!selectedDriverId || !onAssignDriver) return;
     setAssigning(true);
     setAssignError(null);
-    const ok = await onAssignDriver(vehicle.id, selectedDriverId);
-    setAssigning(false);
-    if (!ok) setAssignError(t('vehicleControl.assignFailed'));
-    else setSelectedDriverId('');
+    try {
+      await onAssignDriver(vehicle.id, selectedDriverId);
+      setSelectedDriverId('');
+    } catch (err) {
+      setAssignError({ title: t('vehicleControl.assignFailed'), lines: failureLines(err, t) });
+    } finally {
+      setAssigning(false);
+    }
   };
 
   const handleUnassign = async () => {
     if (!onUnassignDriver) return;
     setAssigning(true);
     setAssignError(null);
-    const ok = await onUnassignDriver(vehicle.id);
-    setAssigning(false);
-    if (!ok) setAssignError(t('vehicleControl.unassignFailed'));
+    try {
+      await onUnassignDriver(vehicle.id);
+    } catch (err) {
+      setAssignError({ title: t('vehicleControl.unassignFailed'), lines: failureLines(err, t) });
+    } finally {
+      setAssigning(false);
+    }
   };
 
   // Only show active drivers who are not already assigned to this motorcycle
@@ -412,9 +425,7 @@ export function ControlPanel({
         )}
 
         {/* Error */}
-        {assignError && (
-          <p className="mt-2 text-xs text-rose-600">{assignError}</p>
-        )}
+        {assignError && <FailureNote title={assignError.title} lines={assignError.lines} />}
       </Card>
 
       {/* System Status */}

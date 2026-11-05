@@ -42,6 +42,11 @@ const en = {
     noAccessTitle: "You don't have access to this data",
     noAccessDescription: 'The server refused this request for your account. Contact your MyVego administrator if you need access.',
     retry: 'Retry',
+    // Why a request failed, when the backend wrote no message of its own
+    // (`failureLines` in @/lib/api-errors).
+    requestFailedNetwork: "Couldn't reach the server. Check your connection and try again.",
+    requestTimedOut: "The server didn't answer in time. Refresh the page to check whether the change was saved.",
+    requestFailedStatus: 'The server returned an error (HTTP {{status}}). Please try again.',
     today: 'Today',
     yesterday: 'Yesterday',
     fromYesterday: 'from yesterday',
@@ -287,9 +292,14 @@ const en = {
     // `{{count}}` is "0/3" — verified out of the three documents.
     docsVerifiedCount: '{{count}} verified',
     docUploadFailedTitle: 'The driver was saved, but the documents were not uploaded.',
-    docUploadFailedStatus: 'The server answered HTTP {{status}}.',
-    docUploadFailedNetwork: 'The server could not be reached.',
     docUploadRetryHint: 'Fix the files and save again to retry the upload.',
+    // A refused save or status change, followed by the backend's reason.
+    createFailed: "The driver wasn't added.",
+    updateFailed: "Your changes weren't saved.",
+    activateFailed: "Couldn't activate {{name}}.",
+    deactivateFailed: "Couldn't set {{name}} to inactive.",
+    blockFailed: "Couldn't block {{name}}.",
+    unblockFailed: "Couldn't unblock {{name}}.",
     // Pending requests tab
     pendingRequests: 'Pending Requests',
     registrationRequests: 'Registration Requests',
@@ -362,8 +372,8 @@ const en = {
     searchMotorcycles: 'Search by plate, ID, or model…',
     noAvailableMotorcycles: 'No unassigned {{vehicles}} available.',
     noMotorcycleAssigned: 'No {{vehicle}}',
-    assignMotorcycleFailed: 'Failed to assign the {{vehicle}}. Please try again.',
-    unassignMotorcycleFailed: 'Failed to unassign the {{vehicle}}. Please try again.',
+    assignMotorcycleFailed: "Couldn't assign the {{vehicle}}.",
+    unassignMotorcycleFailed: "Couldn't unassign the {{vehicle}}.",
     motorcycleAssignedTitle: '{{Vehicle}} assigned',
     motorcycleAssignedDescription: '{{motorcycle}} is now assigned to {{driver}}.',
     motorcycleUnassignedTitle: '{{Vehicle}} unassigned',
@@ -479,8 +489,8 @@ const en = {
     selectDriver: 'Select a driver…',
     assignDriver: 'Assign Driver',
     unassignDriver: 'Unassign Driver',
-    assignFailed: 'Failed to assign driver. Please try again.',
-    unassignFailed: 'Failed to unassign driver. Please try again.',
+    assignFailed: "Couldn't assign the driver.",
+    unassignFailed: "Couldn't unassign the driver.",
     commandFailed: 'The command did not reach the {{vehicle}}. Nothing has changed — please try again.',
 
     // ── Who owns these controls (CR-7.1) ────────────────────────────────────

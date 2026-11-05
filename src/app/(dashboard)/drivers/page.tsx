@@ -193,6 +193,9 @@ export default function DriversPage() {
   const handleEditSubmit = async (values: DriverFormValues, driverId?: string) => {
     if (!driverId) return;
 
+    // A refused save throws, and the form stays open with the backend's reason
+    // and the operator's edits (FA-201).
+    //
     // On edit, `''` is a deliberate clear and must reach the request body — the
     // `|| undefined` that create uses would turn it back into "not supplied" and
     // the old value would survive. `driversApi.update` guards on `!== undefined`.
@@ -219,30 +222,28 @@ export default function DriversPage() {
       },
     });
 
-    if (updated) {
-      const applyUpdate = (docs: Awaited<ReturnType<typeof uploadDocsIfAny>>) =>
-        setDrivers((prev) => prev.map((d) => {
-          if (d.id !== updated.id) return d;
-          return {
-            ...updated,
-            status:        d.status,
-            walletBalance: d.walletBalance,
-            trips:         d.trips,
-            totalCost:     d.totalCost,
-            charges:       d.charges,
-            swaps:         d.swaps,
-            documents:     docs ? { ...updated.documents, license: docs.license, plate: docs.plate } : updated.documents,
-          };
-        }));
-      try {
-        applyUpdate(await uploadDocsIfAny(driverId, values));
-      } catch (err) {
-        // The details were saved even though the documents were not.
-        applyUpdate(null);
-        throw err;
-      }
-      setSuccessDialog({ kind: 'updated' });
+    const applyUpdate = (docs: Awaited<ReturnType<typeof uploadDocsIfAny>>) =>
+      setDrivers((prev) => prev.map((d) => {
+        if (d.id !== updated.id) return d;
+        return {
+          ...updated,
+          status:        d.status,
+          walletBalance: d.walletBalance,
+          trips:         d.trips,
+          totalCost:     d.totalCost,
+          charges:       d.charges,
+          swaps:         d.swaps,
+          documents:     docs ? { ...updated.documents, license: docs.license, plate: docs.plate } : updated.documents,
+        };
+      }));
+    try {
+      applyUpdate(await uploadDocsIfAny(driverId, values));
+    } catch (err) {
+      // The details were saved even though the documents were not.
+      applyUpdate(null);
+      throw err;
     }
+    setSuccessDialog({ kind: 'updated' });
   };
 
   const handleTopUpSuccess = (updated: Driver) => {
@@ -264,15 +265,28 @@ export default function DriversPage() {
     return parts.join(' ');
   };
 
+  /**
+   * Put a status change on the row. When the server accepted it without saying
+   * what the status became, read the driver back rather than guess. Returns the
+   * status shown, or null when it is still unknown.
+   */
+  const applyStatus = async (driverId: string, reported: DriverStatus | null): Promise<DriverStatus | null> => {
+    const status = reported ?? (await driversApi.get(driverId))?.status ?? null;
+    if (status) {
+      setDrivers((prev) => prev.map((d) => (d.id === driverId ? { ...d, status } : d)));
+    }
+    return status;
+  };
+
+  // The status handlers below let a refusal throw: DriversTable keeps the
+  // confirmation open, or shows a banner, with the backend's reason (FA-210).
+
   /** Toggle active ↔ inactive via /toggle-status */
   const handleToggleStatus = async (driver: Driver) => {
     const result = await driversApi.toggleStatus(driver.id);
-    if (!result) return;
-    setDrivers((prev) =>
-      prev.map((d) => (d.id === driver.id ? { ...d, status: result.status } : d))
-    );
+    const status = await applyStatus(driver.id, result.status);
     // Only surface feedback in the destructive direction (→ inactive); reactivation is silent.
-    if (result.status === 'inactive') {
+    if (status === 'inactive') {
       setSuccessDialog({
         kind: 'statusChanged',
         title: t('drivers.deactivatedSuccessTitle'),
@@ -285,20 +299,13 @@ export default function DriversPage() {
   const handleBlockToggle = async (driver: Driver) => {
     // Unblock — safe direction, no session feedback.
     if (driver.status === 'blocked') {
-      const newStatus = await driversApi.unblock(driver.id);
-      if (newStatus) {
-        setDrivers((prev) =>
-          prev.map((d) => (d.id === driver.id ? { ...d, status: newStatus as Driver['status'] } : d))
-        );
-      }
+      const result = await driversApi.unblock(driver.id);
+      await applyStatus(driver.id, result.status);
       return;
     }
     // Block — surface which in-progress sessions were cancelled.
     const result = await driversApi.block(driver.id);
-    if (!result) return;
-    setDrivers((prev) =>
-      prev.map((d) => (d.id === driver.id ? { ...d, status: result.status } : d))
-    );
+    await applyStatus(driver.id, result.status);
     setSuccessDialog({
       kind: 'statusChanged',
       title: t('drivers.blockedSuccessTitle'),
@@ -306,10 +313,12 @@ export default function DriversPage() {
     });
   };
 
-  /** Assign / change the motorcycle for a driver (calls the motorcycle endpoint). */
-  const handleAssignMotorcycle = async (motorcycleId: string, driverId: string): Promise<boolean> => {
-    const ok = await fleetApi.assignDriver(motorcycleId, driverId);
-    if (!ok) return false;
+  /**
+   * Assign / change the motorcycle for a driver (calls the motorcycle endpoint).
+   * A refusal throws, and the picker shows the backend's reason.
+   */
+  const handleAssignMotorcycle = async (motorcycleId: string, driverId: string): Promise<void> => {
+    await fleetApi.assignDriver(motorcycleId, driverId);
     const moto = motorcycles.find((m) => m.id === motorcycleId);
     const driver = drivers.find((d) => d.id === driverId);
     const plate = moto?.plateNumber ?? `#${motorcycleId}`;
@@ -335,13 +344,11 @@ export default function DriversPage() {
       title: tv('drivers.motorcycleAssignedTitle'),
       description: t('drivers.motorcycleAssignedDescription', { motorcycle: ltrIsolate(plate), driver: driver?.name ?? driverId }),
     });
-    return true;
   };
 
-  /** Clear a driver's motorcycle assignment. */
-  const handleUnassignMotorcycle = async (motorcycleId: string, driverId: string): Promise<boolean> => {
-    const ok = await fleetApi.unassignDriver(motorcycleId);
-    if (!ok) return false;
+  /** Clear a driver's motorcycle assignment. A refusal throws, as for assign. */
+  const handleUnassignMotorcycle = async (motorcycleId: string, driverId: string): Promise<void> => {
+    await fleetApi.unassignDriver(motorcycleId);
     const driver = drivers.find((d) => d.id === driverId);
     setDrivers((prev) =>
       prev.map((d) =>
@@ -358,7 +365,6 @@ export default function DriversPage() {
       title: tv('drivers.motorcycleUnassignedTitle'),
       description: tv('drivers.motorcycleUnassignedDescription', { driver: driver?.name ?? driverId }),
     });
-    return true;
   };
 
   // ----- Render -------------------------------------------------------------

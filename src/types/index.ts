@@ -129,9 +129,12 @@ export interface CancelledSessions {
   charging_sessions: number[];
 }
 
-/** Result of a block / toggle-status status change. */
+/**
+ * Result of a toggle-status / block / unblock call. `status` is **null** when
+ * the server accepted the change without saying what the status became.
+ */
 export interface DriverStatusChangeResult {
-  status: DriverStatus;
+  status: DriverStatus | null;
   cancelled_sessions?: CancelledSessions;
 }
 export type Theme = 'light' | 'dark' | 'system';

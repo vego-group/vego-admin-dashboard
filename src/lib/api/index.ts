@@ -10,7 +10,6 @@
  */
 
 import { ApiError, apiClient, PAYMENT_TIMEOUT_MS } from '@/lib/api/client';
-import { isFieldLevelError } from '@/lib/api-errors';
 import {
   SEEDED_COUNTRIES,
   matchesPhoneRegex,
@@ -388,6 +387,14 @@ function normalizeCancelledSessions(
   return {
     swap_sessions: raw.swap_sessions ?? [],
     charging_sessions: raw.charging_sessions ?? [],
+  };
+}
+
+/** A 2xx status-change answer, read without inventing the status it omitted. */
+function toStatusChangeResult(res: StatusChangeResponse | undefined): DriverStatusChangeResult {
+  return {
+    status: res?.data?.status ? toDriverStatus(res.data.status) : null,
+    cancelled_sessions: normalizeCancelledSessions(res?.data?.cancelled_sessions),
   };
 }
 
@@ -1369,27 +1376,21 @@ export const fleetApi = {
     }
   },
 
-  /** Assign a driver — body: { user_id } */
-  async assignDriver(motorcycleId: string, driverId: string): Promise<boolean> {
-    try {
-      await apiClient.post(
-        `/fleet-admin/motorcycles/${motorcycleId}/assign-driver`,
-        { user_id: Number(driverId) },
-      );
-      return true;
-    } catch {
-      return false;
-    }
+  /**
+   * Assign a driver — body: { user_id }. A refusal **throws** the ApiError, so
+   * the picker can show the backend's reason (driver already riding, vehicle
+   * not in this fleet…) instead of a generic "failed" (FA-201, FA-243).
+   */
+  async assignDriver(motorcycleId: string, driverId: string): Promise<void> {
+    await apiClient.post(
+      `/fleet-admin/motorcycles/${motorcycleId}/assign-driver`,
+      { user_id: Number(driverId) },
+    );
   },
 
-  /** Unassign the current driver */
-  async unassignDriver(motorcycleId: string): Promise<boolean> {
-    try {
-      await apiClient.delete(`/fleet-admin/motorcycles/${motorcycleId}/assign-driver`);
-      return true;
-    } catch {
-      return false;
-    }
+  /** Unassign the current driver. Throws the ApiError on a refusal. */
+  async unassignDriver(motorcycleId: string): Promise<void> {
+    await apiClient.delete(`/fleet-admin/motorcycles/${motorcycleId}/assign-driver`);
   },
 
   /**
@@ -1539,49 +1540,47 @@ export const driversApi = {
     return mapDriver(raw);
   },
 
-  async update(id: string, updates: DriverUpdateInput): Promise<Driver | null> {
-    try {
-      // PUT /fleet-admin/drivers/:id — send every field the caller supplied.
-      //
-      // The guards are `!== undefined`, not truthiness. Truthiness meant `''` was
-      // indistinguishable from "not supplied", so an operator could never clear
-      // an email, address or city: the field was dropped and the old value
-      // survived, with the form showing the clear as if it had saved. `undefined`
-      // is "leave alone"; `''` is "clear this", and it is sent as `''`.
-      //
-      // Confirmed: `''` and `null` both clear, for every nullable field here, so
-      // the `''` we already send is right. The two exceptions are `name` and
-      // `phone` — a blank one is a 422 naming the field rather than a silent wipe
-      // (a driver with no phone cannot log in). The form blocks both before they
-      // get here; if one slips through, the 422 is rethrown onto its field below.
-      const body: Record<string, string | undefined> = {};
-      if (updates.name     !== undefined) body['name']         = updates.name;
-      if (updates.phone    !== undefined) body['phone']        = updates.phone;
-      if (updates.dialCode !== undefined) body['country_code'] = updates.dialCode;
-      if (updates.email    !== undefined) body['email']        = updates.email;
-      if (updates.address  !== undefined) body['address']      = updates.address;
-      if (updates.city     !== undefined) body['city']         = updates.city;
+  /**
+   * Save a driver's details. Every failure **throws** the ApiError (FA-201):
+   * this used to return null on anything but a field error, and the form then
+   * closed as if it had saved, discarding the operator's edits. The form now
+   * stays open with the backend's reason.
+   */
+  async update(id: string, updates: DriverUpdateInput): Promise<Driver> {
+    // PUT /fleet-admin/drivers/:id — send every field the caller supplied.
+    //
+    // The guards are `!== undefined`, not truthiness. Truthiness meant `''` was
+    // indistinguishable from "not supplied", so an operator could never clear
+    // an email, address or city: the field was dropped and the old value
+    // survived, with the form showing the clear as if it had saved. `undefined`
+    // is "leave alone"; `''` is "clear this", and it is sent as `''`.
+    //
+    // Confirmed: `''` and `null` both clear, for every nullable field here, so
+    // the `''` we already send is right. The two exceptions are `name` and
+    // `phone` — a blank one is a 422 naming the field rather than a silent wipe
+    // (a driver with no phone cannot log in). The form blocks both before they
+    // get here; if one slips through, the form shows the 422 on its field.
+    const body: Record<string, string | undefined> = {};
+    if (updates.name     !== undefined) body['name']         = updates.name;
+    if (updates.phone    !== undefined) body['phone']        = updates.phone;
+    if (updates.dialCode !== undefined) body['country_code'] = updates.dialCode;
+    if (updates.email    !== undefined) body['email']        = updates.email;
+    if (updates.address  !== undefined) body['address']      = updates.address;
+    if (updates.city     !== undefined) body['city']         = updates.city;
 
-      // Licence expiry and plate number were accepted by `create` and silently
-      // dropped by `update`. Editing either one alone was a no-op unless the
-      // operator also happened to attach a file, because only the multipart
-      // documents endpoint carried them.
-      const license = updates.documents?.license;
-      const plate   = updates.documents?.plate;
-      if (license?.number     !== undefined) body['driving_license_number'] = license.number;
-      if (license?.expiryDate !== undefined) body['driving_license_expiry'] = license.expiryDate;
-      if (plate?.number       !== undefined) body['plate_number']           = plate.number;
+    // Licence expiry and plate number were accepted by `create` and silently
+    // dropped by `update`. Editing either one alone was a no-op unless the
+    // operator also happened to attach a file, because only the multipart
+    // documents endpoint carried them.
+    const license = updates.documents?.license;
+    const plate   = updates.documents?.plate;
+    if (license?.number     !== undefined) body['driving_license_number'] = license.number;
+    if (license?.expiryDate !== undefined) body['driving_license_expiry'] = license.expiryDate;
+    if (plate?.number       !== undefined) body['plate_number']           = plate.number;
 
-      const res = await apiClient.put<{ data: ApiDriver } | ApiDriver>(`/fleet-admin/drivers/${id}`, body);
-      const raw = (res as { data?: ApiDriver }).data ?? (res as ApiDriver);
-      return mapDriver(raw);
-    } catch (err) {
-      // A rejected country or phone is the operator's to fix, and the form can
-      // only show it next to the field if it survives this catch. Everything else
-      // keeps the historical null-on-failure contract.
-      if (isFieldLevelError(err)) throw err;
-      return null;
-    }
+    const res = await apiClient.put<{ data: ApiDriver } | ApiDriver>(`/fleet-admin/drivers/${id}`, body);
+    const raw = (res as { data?: ApiDriver }).data ?? (res as ApiDriver);
+    return mapDriver(raw);
   },
 
   /**
@@ -1639,52 +1638,34 @@ export const driversApi = {
 
   /**
    * Toggle active ↔ inactive. Returns the new status plus any sessions the
-   * backend cancelled (present only when the result is `inactive`), or null on error.
+   * backend cancelled (present only when the result is `inactive`).
+   *
+   * A refusal **throws** the ApiError (FA-210): it used to return null, and
+   * the confirmation closed as if the driver had been deactivated. `status`
+   * is null when the server accepted the change without saying the result;
+   * the caller re-reads the driver rather than guess.
    */
-  async toggleStatus(id: string): Promise<DriverStatusChangeResult | null> {
-    try {
-      const res = await apiClient.patch<StatusChangeResponse>(
-        `/fleet-admin/drivers/${id}/toggle-status`,
-      );
-      if (!res.data?.status) return null;
-      return {
-        status: toDriverStatus(res.data.status),
-        cancelled_sessions: normalizeCancelledSessions(res.data.cancelled_sessions),
-      };
-    } catch {
-      return null;
-    }
+  async toggleStatus(id: string): Promise<DriverStatusChangeResult> {
+    const res = await apiClient.patch<StatusChangeResponse>(
+      `/fleet-admin/drivers/${id}/toggle-status`,
+    );
+    return toStatusChangeResult(res);
   },
 
-  /**
-   * Block a driver. Returns the new status ('blocked') plus any sessions the
-   * backend cancelled, or null on error.
-   */
-  async block(id: string): Promise<DriverStatusChangeResult | null> {
-    try {
-      const res = await apiClient.patch<StatusChangeResponse>(
-        `/fleet-admin/drivers/${id}/block`,
-      );
-      if (!res.data?.status) return null;
-      return {
-        status: toDriverStatus(res.data.status),
-        cancelled_sessions: normalizeCancelledSessions(res.data.cancelled_sessions),
-      };
-    } catch {
-      return null;
-    }
+  /** Block a driver. Same contract as {@link toggleStatus}. */
+  async block(id: string): Promise<DriverStatusChangeResult> {
+    const res = await apiClient.patch<StatusChangeResponse>(
+      `/fleet-admin/drivers/${id}/block`,
+    );
+    return toStatusChangeResult(res);
   },
 
-  /** Unblock a driver. Returns the new status ('active') or null on error. */
-  async unblock(id: string): Promise<string | null> {
-    try {
-      const res = await apiClient.patch<{ data?: { id: number | string; status: string } }>(
-        `/fleet-admin/drivers/${id}/unblock`,
-      );
-      return res.data?.status ?? null;
-    } catch {
-      return null;
-    }
+  /** Unblock a driver. Same contract as {@link toggleStatus}. */
+  async unblock(id: string): Promise<DriverStatusChangeResult> {
+    const res = await apiClient.patch<StatusChangeResponse>(
+      `/fleet-admin/drivers/${id}/unblock`,
+    );
+    return toStatusChangeResult(res);
   },
 };
 

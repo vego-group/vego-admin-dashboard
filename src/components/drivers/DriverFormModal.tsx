@@ -10,8 +10,7 @@ import { useCountries } from '@/hooks/useCountries';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { driversApi } from '@/lib/api';
-import { ApiError } from '@/lib/api/client';
-import { fieldErrorFrom } from '@/lib/api-errors';
+import { failureLines, fieldErrorFrom } from '@/lib/api-errors';
 import { flagEmoji, matchesPhoneRegex, toNationalNumber } from '@/lib/country';
 import { cn } from '@/lib/cn';
 import type { Country, Driver, DocumentStatus, DriverDocuments } from '@/types';
@@ -30,20 +29,6 @@ export class DocumentUploadError extends Error {
     super(uploadError instanceof Error ? uploadError.message : 'Document upload failed');
     this.name = 'DocumentUploadError';
   }
-}
-
-/** What the API said about a refused upload, as lines to show under the documents. */
-function uploadErrorLines(err: unknown, t: (key: string, params?: Record<string, string | number>) => string): string[] {
-  if (err instanceof ApiError) {
-    if (err.status === 0) return [t('drivers.docUploadFailedNetwork')];
-    // Laravel names every refused file ("must be an image", "may not be greater
-    // than 5120 kilobytes"); its top-level message only summarises them.
-    const fieldMessages = Array.from(new Set(Object.values(err.errors ?? {}).flat().filter(Boolean)));
-    if (fieldMessages.length > 0) return fieldMessages;
-    if (err.message && !/^HTTP \d{3}$/.test(err.message)) return [err.message];
-    return [t('drivers.docUploadFailedStatus', { status: err.status })];
-  }
-  return [err instanceof Error && err.message ? err.message : t('common.error')];
 }
 
 // ── Form value shape ──────────────────────────────────────────────────────────
@@ -124,7 +109,9 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
   const [errors, setErrors] = useState<Partial<Record<keyof DriverFormValues, string>>>({});
   const [countryError, setCountryError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  /** Why the save was refused, in the backend's words. The form stays open. */
+  const [submitError, setSubmitError] = useState<string[] | null>(null);
+  const submitErrorRef = useRef<HTMLDivElement>(null);
   // The documents the API refused after the driver itself was saved, and that
   // driver's id: saving again then updates it and retries the upload.
   const [docUploadError, setDocUploadError] = useState<string[] | null>(null);
@@ -173,6 +160,12 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
   useEffect(() => {
     if (docUploadError) docUploadErrorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [docUploadError]);
+
+  // The save banner sits at the top of the form; the button that raised it is
+  // at the bottom.
+  useEffect(() => {
+    if (submitError) submitErrorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [submitError]);
 
   // On edit, fetch the driver's document detail (image URLs + rejection reasons)
   // which the list endpoint doesn't include.
@@ -271,7 +264,9 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
       // and let a second save retry against the driver that now exists.
       if (err instanceof DocumentUploadError) {
         setSavedDriverId(err.driverId);
-        setDocUploadError(uploadErrorLines(err.uploadError, t));
+        // Laravel names every refused file ("must be an image", "may not be
+        // greater than 5120 kilobytes"); failureLines shows each one.
+        setDocUploadError(failureLines(err.uploadError, t));
         return;
       }
       // country_not_supported / phone_invalid_for_country and a refused blank
@@ -286,7 +281,9 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
         else if (fieldError.field === 'name') setErrors((prev) => ({ ...prev, fullName: message }));
         else                                  setErrors((prev) => ({ ...prev, phone: message }));
       } else {
-        setSubmitError(err instanceof Error ? err.message : 'An unexpected error occurred. Please try again.');
+        // Anything else — a 500, a timeout, an email already taken — stays on
+        // the open form with the operator's edits intact (FA-201).
+        setSubmitError(failureLines(err, t));
       }
     } finally {
       setSubmitting(false);
@@ -327,9 +324,16 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
 
           {/* API error banner */}
           {submitError && (
-            <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-400">
+            <div
+              ref={submitErrorRef}
+              role="alert"
+              className="mb-4 flex items-start gap-2.5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-400"
+            >
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{submitError}</span>
+              <div className="min-w-0 space-y-1">
+                <p className="font-semibold">{isEdit ? t('drivers.updateFailed') : t('drivers.createFailed')}</p>
+                {submitError.map((line) => <p key={line} className="break-words">{line}</p>)}
+              </div>
             </div>
           )}
 

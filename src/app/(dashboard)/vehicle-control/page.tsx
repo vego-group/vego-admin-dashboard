@@ -97,50 +97,34 @@ export default function VehicleControlPage() {
   }, [selectedId]);
 
   // ── Driver assignment ─────────────────────────────────────────────────────
+  // A refusal throws through to the control panel, which shows the backend's
+  // reason (FA-201, FA-243).
   const handleAssignDriver = useCallback(
-    async (motorcycleId: string, driverId: string): Promise<boolean> => {
-      try {
-        const ok = await fleetApi.assignDriver(motorcycleId, driverId);
-        if (ok) {
-          // API returns boolean — patch state from the local drivers list
-          const driver = activeDrivers.find((d) => d.id === driverId);
-          setVehicles((prev) =>
-            prev.map((v) =>
-              v.id === motorcycleId
-                ? { ...v, assignedDriverId: driverId, assignedDriverName: driver?.name ?? driverId }
-                : v
-            )
-          );
-          return true;
-        }
-        return false;
-      } catch (err) {
-        logger.error('[VehicleControl] assignDriver failed:', err);
-        return false;
-      }
+    async (motorcycleId: string, driverId: string): Promise<void> => {
+      await fleetApi.assignDriver(motorcycleId, driverId);
+      // The API answers no driver object — patch state from the local list.
+      const driver = activeDrivers.find((d) => d.id === driverId);
+      setVehicles((prev) =>
+        prev.map((v) =>
+          v.id === motorcycleId
+            ? { ...v, assignedDriverId: driverId, assignedDriverName: driver?.name ?? driverId }
+            : v
+        )
+      );
     },
     [activeDrivers]
   );
 
   const handleUnassignDriver = useCallback(
-    async (motorcycleId: string): Promise<boolean> => {
-      try {
-        const ok = await fleetApi.unassignDriver(motorcycleId);
-        if (ok) {
-          setVehicles((prev) =>
-            prev.map((v) =>
-              v.id === motorcycleId
-                ? { ...v, assignedDriverId: undefined, assignedDriverName: undefined }
-                : v
-            )
-          );
-          return true;
-        }
-        return false;
-      } catch (err) {
-        logger.error('[VehicleControl] unassignDriver failed:', err);
-        return false;
-      }
+    async (motorcycleId: string): Promise<void> => {
+      await fleetApi.unassignDriver(motorcycleId);
+      setVehicles((prev) =>
+        prev.map((v) =>
+          v.id === motorcycleId
+            ? { ...v, assignedDriverId: undefined, assignedDriverName: undefined }
+            : v
+        )
+      );
     },
     []
   );

@@ -5,8 +5,10 @@ import { Search, Bike, UserMinus, Check, Loader2, Battery } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { FailureNote } from '@/components/ui/FailureNote';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
+import { failureLines } from '@/lib/api-errors';
 import { cn } from '@/lib/cn';
 import type { Driver, Vehicle } from '@/types';
 
@@ -15,10 +17,10 @@ interface AssignMotorcycleModalProps {
   onClose: () => void;
   driver: Driver | null;
   motorcycles: Vehicle[];
-  /** Returns true on success. Assigns `motorcycleId` to this driver. */
-  onAssign: (motorcycleId: string, driverId: string) => Promise<boolean>;
-  /** Returns true on success. Clears the driver's current motorcycle. */
-  onUnassign: (motorcycleId: string, driverId: string) => Promise<boolean>;
+  /** Assigns `motorcycleId` to this driver. Throws when the backend refuses. */
+  onAssign: (motorcycleId: string, driverId: string) => Promise<void>;
+  /** Clears the driver's current motorcycle. Throws when the backend refuses. */
+  onUnassign: (motorcycleId: string, driverId: string) => Promise<void>;
 }
 
 /**
@@ -42,7 +44,8 @@ export function AssignMotorcycleModal({
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const [busy, setBusy] = useState<'assign' | 'unassign' | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /** Why the backend refused, under a line saying what failed. */
+  const [error, setError] = useState<{ title: string; lines: string[] } | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -72,24 +75,34 @@ export function AssignMotorcycleModal({
   const currentId = driver.assignedMotorcycleId;
   const isAssigned = !!currentId;
 
+  // A refusal keeps the picker open with the backend's reason, which used to
+  // be dropped for a generic "failed" (FA-201, FA-243).
   const handleAssign = async () => {
     if (!selectedId || busy) return;
     setBusy('assign');
     setError(null);
-    const ok = await onAssign(selectedId, driver.id);
-    setBusy(null);
-    if (ok) onClose();
-    else setError(tv('drivers.assignMotorcycleFailed'));
+    try {
+      await onAssign(selectedId, driver.id);
+      onClose();
+    } catch (err) {
+      setError({ title: tv('drivers.assignMotorcycleFailed'), lines: failureLines(err, t) });
+    } finally {
+      setBusy(null);
+    }
   };
 
   const handleUnassign = async () => {
     if (!currentId || busy) return;
     setBusy('unassign');
     setError(null);
-    const ok = await onUnassign(currentId, driver.id);
-    setBusy(null);
-    if (ok) onClose();
-    else setError(tv('drivers.unassignMotorcycleFailed'));
+    try {
+      await onUnassign(currentId, driver.id);
+      onClose();
+    } catch (err) {
+      setError({ title: tv('drivers.unassignMotorcycleFailed'), lines: failureLines(err, t) });
+    } finally {
+      setBusy(null);
+    }
   };
 
   return (
@@ -191,7 +204,7 @@ export function AssignMotorcycleModal({
           </div>
         </div>
 
-        {error && <p className="mt-3 text-xs text-rose-600">{error}</p>}
+        {error && <FailureNote title={error.title} lines={error.lines} />}
 
         {/* Footer */}
         <div className="mt-6 flex items-center justify-end gap-3">
