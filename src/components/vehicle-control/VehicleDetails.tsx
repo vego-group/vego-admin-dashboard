@@ -74,7 +74,7 @@ export function VehicleDetails({
             <VehicleIconTile status={vehicle.status} size="lg" />
             <div>
               <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
-                <span dir="ltr">{vehicleDisplayName(vehicle)}</span>
+                <span dir="ltr" className="whitespace-nowrap">{vehicleDisplayName(vehicle)}</span>
                 {vehicle.plateNumber && (
                   <span className="ms-2 text-sm font-medium text-slate-400"><span dir="ltr">#{vehicle.id}</span></span>
                 )}
@@ -279,7 +279,8 @@ function StatCard({
         {icon}
       </div>
       <div className="min-w-0">
-        <p className="truncate text-[10px] uppercase tracking-wide text-slate-500">{label}</p>
+        {/* Wraps rather than truncating: "Charges" / "Total distance" were cut off. */}
+        <p className="break-words text-[10px] uppercase leading-tight tracking-wide text-slate-500">{label}</p>
         <p className="text-lg font-bold tabular-nums text-slate-900 dark:text-slate-50">{value}</p>
       </div>
     </div>
@@ -297,7 +298,8 @@ function StatChip({
     <span className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium text-slate-600 dark:text-slate-300"
       style={{ borderColor: 'rgb(var(--border))' }}>
       <span className="text-slate-400">{icon}</span>
-      {label}: <span className="font-semibold">{value}</span>
+      {/* "97%", "72.4 V", "31 °C" are LTR: in Arabic they read "%97", "V 72.4". */}
+      {label}: <span className="font-semibold" dir="ltr">{value}</span>
     </span>
   );
 }

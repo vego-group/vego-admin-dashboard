@@ -65,7 +65,7 @@ export function VehicleListPanel({ vehicles, selectedId, onSelect }: VehicleList
                         invented labels (FA-205). */}
                     <div className="min-w-0">
                       <p className="truncate text-xs font-bold text-slate-900 dark:text-slate-50">
-                        <span dir="ltr">{vehicleDisplayName(v)}</span>
+                        <span dir="ltr" className="whitespace-nowrap">{vehicleDisplayName(v)}</span>
                       </p>
                       <p className="truncate text-[10px] text-slate-500">
                         {v.model}
