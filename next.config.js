@@ -15,11 +15,9 @@ const HYPERPAY_HOSTS = ['https://eu-test.oppwa.com', 'https://eu-prod.oppwa.com'
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  images: {
-    remotePatterns: [
-      { protocol: 'https', hostname: 'mobility-live.com' },
-    ],
-  },
+  // No `images.remotePatterns`: next/image only serves local files (the logo),
+  // so the image optimiser accepts no remote URL. Remote avatars are plain <img>
+  // tags (allowed by `img-src` below); driver documents open as links.
   async headers() {
     return [
       {
