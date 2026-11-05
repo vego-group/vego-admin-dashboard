@@ -2201,8 +2201,11 @@ interface ApiWeeklySessions {
   label?: string;
   trips_count?: number;
   trips?: number;
-  /** Fixed-precision string in the fleet's currency. */
-  revenue?: string | number;
+  /**
+   * Fixed-precision string in the fleet's currency, with `currency`/`decimals`
+   * beside it — or the money object itself (FA-318).
+   */
+  revenue?: string | number | ApiMoneyFields | null;
   currency?: string | null;
   decimals?: number | null;
 }
@@ -2211,8 +2214,8 @@ interface ApiMonthlyRevenue {
   month?: string;
   date?: string;
   label?: string;
-  /** Fixed-precision string in the fleet's currency. */
-  revenue?: string | number;
+  /** Fixed-precision string in the fleet's currency, or a money object (FA-318). */
+  revenue?: string | number | ApiMoneyFields | null;
   currency?: string | null;
   decimals?: number | null;
   trips_count?: number;
@@ -2230,9 +2233,9 @@ interface ApiBatteryBucket {
 interface ApiCostItem {
   category?: string;
   label?: string;
-  /** Fixed-precision string in the fleet's currency. */
-  amount?: string | number;
-  value?: string | number;
+  /** Fixed-precision string in the fleet's currency, or a money object (FA-318). */
+  amount?: string | number | ApiMoneyFields | null;
+  value?: string | number | ApiMoneyFields | null;
   currency?: string | null;
   decimals?: number | null;
   color?: string;
@@ -2252,6 +2255,20 @@ interface ApiTopDriver {
 const COST_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
 
 /**
+ * A Reports amount in either shape (FA-318): a bare fixed-precision scalar with
+ * the row's `currency`/`decimals` beside it, or the money object
+ * `{ amount, currency, minor_units, decimals }`, as the dashboard's average
+ * cost already accepts. Read as an object it used to come out as 0. The row's
+ * fields only fill what the object leaves out.
+ */
+function readReportMoney(
+  value: string | number | ApiMoneyFields | null | undefined,
+  row: { currency?: string | null; decimals?: number | null },
+): Money {
+  return readEnvelopeMoney(value, row.currency ?? null, row.decimals ?? null);
+}
+
+/**
  * One day of weekly sessions. `revenue` is for the chart's geometry only; sum
  * and format `revenueMoney`, which is exact (FA-317).
  */
@@ -2266,7 +2283,7 @@ export const reportsApi = {
   async getWeeklySessions(): Promise<WeeklySessionsDay[]> {
     const raw = await apiClient.get<unknown>('/fleet-admin/reports/weekly-trips');
     return extractList<ApiWeeklySessions>(raw).map((r) => {
-      const revenueMoney = readMoney({ amount: r.revenue, currency: r.currency, decimals: r.decimals });
+      const revenueMoney = readReportMoney(r.revenue, r);
       return {
         day:      r.label ?? r.day ?? '',
         sessions: r.trips_count ?? r.trips ?? 0,
@@ -2284,7 +2301,7 @@ export const reportsApi = {
     const raw = await apiClient.get<unknown>(`/fleet-admin/reports/monthly-revenue?from=${from}&to=${to}`);
     return extractList<ApiMonthlyRevenue>(raw).map((r) => ({
       date:    r.label ?? r.month ?? r.date ?? '',
-      revenue: moneyToNumber(readMoney({ amount: r.revenue, currency: r.currency, decimals: r.decimals })),
+      revenue: moneyToNumber(readReportMoney(r.revenue, r)),
       // Sessions, under the backend's old "trips" name (FA-333).
       sessions: r.trips_count ?? r.trips ?? 0,
     }));
@@ -2302,7 +2319,7 @@ export const reportsApi = {
   async getCostAnalysis(): Promise<CostBreakdown[]> {
     const raw = await apiClient.get<unknown>('/fleet-admin/reports/cost-analysis');
     return extractList<ApiCostItem>(raw).map((c, i) => {
-      const money = readMoney({ amount: c.amount ?? c.value, currency: c.currency, decimals: c.decimals });
+      const money = readReportMoney(c.amount ?? c.value, c);
       return {
         category: c.label ?? c.category ?? `Category ${i + 1}`,
         value:    moneyToNumber(money),
