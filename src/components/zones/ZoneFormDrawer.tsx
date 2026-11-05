@@ -9,10 +9,9 @@ import { Switch } from '@/components/ui/Switch';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import {
-  ZONE_SPEED_LIMIT_MAX, ZONE_SPEED_LIMIT_MIN, ZONE_TYPES, ZONE_TYPE_LIST, isValidZoneSpeedLimit,
+  ZONE_SPEED_LIMIT_MAX, ZONE_SPEED_LIMIT_MIN, ZONE_SPEED_SLIDER_MAX, ZONE_TYPES, ZONE_TYPE_LIST, isValidZoneSpeedLimit,
 } from '@/lib/zone-types';
 import { isArabicOnly, isEnglishOnly } from '@/lib/text-script';
-import { VEHICLE_SPEED_LIMIT_MAX } from '@/lib/vehicle-speed';
 import { cn } from '@/lib/cn';
 import type { Zone, ZonePoint, ZoneType } from '@/types';
 
@@ -36,11 +35,10 @@ interface ZoneFormDrawerProps {
 }
 
 /**
- * A zone speed limit and a vehicle speed limit are the same quantity, so they
- * are drawn against the same ceiling — previously this slider went to 100 while
- * the vehicle control slider went to 45. See @/lib/vehicle-speed.
+ * The slider's usual ceiling. Zones keep their own range (1–200, advisory);
+ * the vehicle control's 10–80 km/h is the vehicle command's, not theirs.
  */
-const MAX_SPEED = VEHICLE_SPEED_LIMIT_MAX;
+const MAX_SPEED = ZONE_SPEED_SLIDER_MAX;
 
 /** The form's speed limit for a zone: its own on a slow zone, `null` on any other. */
 function initialSpeedLimit(zone: Zone): number | null {
@@ -161,7 +159,7 @@ export function ZoneFormDrawer({
       ? t('zones.speedSlowLabel')
       : t('zones.speedNormalLabel');
 
-  // A stored limit above the shared scale widens the slider rather than being
+  // A stored limit above the usual ceiling widens the slider rather than being
   // clamped — and silently saved — on the first edit.
   const sliderMax = Math.min(
     ZONE_SPEED_LIMIT_MAX,

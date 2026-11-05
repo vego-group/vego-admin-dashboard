@@ -10,7 +10,7 @@ import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { failureLines } from '@/lib/api-errors';
 import { cn } from '@/lib/cn';
 import { ltrIsolate } from '@/lib/format';
-import { VEHICLE_SPEED_LIMIT_MAX, clampSpeedLimit } from '@/lib/vehicle-speed';
+import { VEHICLE_SPEED_LIMIT_MAX, VEHICLE_SPEED_LIMIT_MIN, clampSpeedLimit } from '@/lib/vehicle-speed';
 import type { Vehicle } from '@/types';
 import type { Driver } from '@/types';
 import type { VehicleCommand, VehicleCommandOutcome } from '@/lib/api';
@@ -39,8 +39,15 @@ export function ControlPanel({
   // Control state — mirrors the backend, updated from each command's response.
   const [isLocked,   setIsLocked]   = useState(vehicle.isLocked);
   const [isRunning,  setIsRunning]  = useState(vehicle.isEngineRunning);
-  /** null = the backend has never reported a limit for this vehicle. */
+  /** The limit the backend reported or confirmed. null = never reported. */
   const [speedLimit, setSpeedLimit] = useState<number | null>(vehicle.speedLimitKmh ?? null);
+  /**
+   * Where the slider is while the operator moves it, before the vehicle has
+   * accepted it. null = showing the confirmed limit. A refused command drops
+   * the draft, so the slider and label return to the confirmed value instead
+   * of showing a limit the vehicle never took (FA-204).
+   */
+  const [speedDraft, setSpeedDraft] = useState<number | null>(null);
   const [pending,      setPending]      = useState<VehicleCommand | null>(null);
   const [commandError, setCommandError] = useState<string | null>(null);
 
@@ -62,6 +69,7 @@ export function ControlPanel({
     setIsLocked(vehicle.isLocked);
     setIsRunning(vehicle.isEngineRunning);
     setSpeedLimit(vehicle.speedLimitKmh ?? null);
+    setSpeedDraft(null);
     setPending(null);
     setCommandError(null);
     setUnsupported(new Set());
@@ -93,12 +101,16 @@ export function ControlPanel({
 
     const outcome = await onCommand(vehicle.id, action, nextSpeed);
     setPending(null);
+    // Accepted or not, the slider goes back to what the backend says.
+    if (action === 'set_speed_limit') setSpeedDraft(null);
 
     if (!outcome.ok) {
       if (outcome.reason === 'unsupported') {
         // Never offer it again — it is not going to start working.
         setUnsupported((prev) => new Set(prev).add(action));
         setCommandError(tv('vehicleControl.commandUnsupported'));
+      } else if (outcome.reason === 'unconfirmed') {
+        setCommandError(tv('vehicleControl.commandUnconfirmed'));
       } else {
         setCommandError(outcome.message ?? tv('vehicleControl.commandFailed'));
       }
@@ -159,11 +171,25 @@ export function ControlPanel({
   const engineCommand: VehicleCommand = isRunning ? 'stop' : 'start';
   const lockCommand:   VehicleCommand = isLocked  ? 'unlock' : 'lock';
   const speedSupported = isSupported('set_speed_limit');
-  const sliderValue    = clampSpeedLimit(speedLimit ?? 0);
+  /** What the label shows: the value being dragged, else the confirmed one. */
+  const shownSpeed     = speedDraft ?? speedLimit;
+  const sliderValue    = clampSpeedLimit(shownSpeed ?? VEHICLE_SPEED_LIMIT_MIN);
   const unsupportedTitle = tv('vehicleControl.commandUnsupportedTooltip');
 
+  /**
+   * Send the slider's value — only when it moved to something new. Tabbing
+   * onto the slider, or releasing it where it started, sends nothing (FA-236).
+   */
+  const commitSpeed = () => {
+    if (speedDraft === null || speedDraft === speedLimit) {
+      setSpeedDraft(null);
+      return;
+    }
+    void runCommand('set_speed_limit', speedDraft);
+  };
+
   const speedTicks = useMemo(
-    () => [0, VEHICLE_SPEED_LIMIT_MAX / 2, VEHICLE_SPEED_LIMIT_MAX],
+    () => [VEHICLE_SPEED_LIMIT_MIN, (VEHICLE_SPEED_LIMIT_MIN + VEHICLE_SPEED_LIMIT_MAX) / 2, VEHICLE_SPEED_LIMIT_MAX],
     [],
   );
 
@@ -254,27 +280,30 @@ export function ControlPanel({
             </p>
             {/* An unreported limit says so. It used to read "80 km/h" — a number
                 no fleet had set, on a slider that could not reach it. */}
-            {speedLimit === null ? (
+            {shownSpeed === null ? (
               <span className="text-xs font-medium text-slate-400">
                 {tv('vehicleControl.speedLimitUnknown')}
               </span>
             ) : (
               <span className="text-sm font-bold tabular-nums text-slate-900 dark:text-slate-100">
-                {speedLimit} {t('common.kmh')}
+                {shownSpeed} {t('common.kmh')}
               </span>
             )}
           </div>
+          {/* 10–80 km/h: what the vehicle command accepts (FA-204). */}
           <input
             type="range"
-            min={0}
+            min={VEHICLE_SPEED_LIMIT_MIN}
             max={VEHICLE_SPEED_LIMIT_MAX}
+            step={1}
             value={sliderValue}
             disabled={!!pending || !speedSupported}
             title={!speedSupported ? unsupportedTitle : undefined}
-            onChange={(e) => setSpeedLimit(Number(e.target.value))}
-            // Commit to the backend only when the user releases the slider.
-            onPointerUp={() => speedLimit !== null && runCommand('set_speed_limit', speedLimit)}
-            onKeyUp={() => speedLimit !== null && runCommand('set_speed_limit', speedLimit)}
+            aria-label={t('vehicleControl.speedLimit')}
+            onChange={(e) => setSpeedDraft(Number(e.target.value))}
+            // Commit to the backend only when the operator lets go, and only a change.
+            onPointerUp={commitSpeed}
+            onKeyUp={commitSpeed}
             className="mt-2 w-full accent-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
           />
           <div className="mt-1 flex justify-between text-[10px] text-slate-400">
@@ -306,7 +335,7 @@ export function ControlPanel({
               style={{
                 // Same scale as every other speed here, so a vehicle doing
                 // 60 km/h no longer renders as a full bar.
-                width: `${(clampSpeedLimit(vehicle.currentSpeedKmh) / VEHICLE_SPEED_LIMIT_MAX) * 100}%`,
+                width: `${Math.min(100, Math.max(0, (vehicle.currentSpeedKmh / VEHICLE_SPEED_LIMIT_MAX) * 100)) || 0}%`,
               }}
             />
           </div>

@@ -169,9 +169,8 @@ export interface Vehicle {
    *
    * There is deliberately no default. This used to read `speed_limit_kmh ?? 80`,
    * which invented a ceiling the fleet never set and then showed it back to the
-   * operator as fact, on a slider that only went to 45. The one scale every
-   * speed limit in this app is expressed on is `VEHICLE_SPEED_LIMIT_MAX` in
-   * @/lib/vehicle-speed.
+   * operator as fact, on a slider that only went to 45. What a fleet can set
+   * is 10–80 km/h — see @/lib/vehicle-speed.
    */
   speedLimitKmh?: number;
   isLocked: boolean;

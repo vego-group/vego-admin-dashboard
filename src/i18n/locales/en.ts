@@ -459,6 +459,7 @@ const en = {
     assignFailed: "Couldn't assign the driver.",
     unassignFailed: "Couldn't unassign the driver.",
     commandFailed: 'The command did not reach the {{vehicle}}. Nothing has changed — please try again.',
+    commandUnconfirmed: 'The {{vehicle}} didn’t confirm the command in time. It may still have been applied — check the {{vehicle}} before trying again.',
 
     // ── Who owns these controls (CR-7.1) ────────────────────────────────────
     // Individual owners *do* get engine, lock and speed control in the mobile

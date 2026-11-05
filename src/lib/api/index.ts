@@ -9,7 +9,8 @@
  * Auth prefix:  /fleet-admin/*
  */
 
-import { ApiError, apiClient, PAYMENT_TIMEOUT_MS } from '@/lib/api/client';
+import { ApiError, apiClient, isTimeoutError, PAYMENT_TIMEOUT_MS } from '@/lib/api/client';
+import { serverMessage } from '@/lib/api-errors';
 import {
   SEEDED_COUNTRIES,
   matchesPhoneRegex,
@@ -1303,7 +1304,7 @@ export interface VehicleControlState {
  */
 export type VehicleCommandOutcome =
   | { ok: true;  state: VehicleControlState }
-  | { ok: false; reason: 'unsupported' | 'failed'; message: string | null };
+  | { ok: false; reason: 'unsupported' | 'failed' | 'unconfirmed'; message: string | null };
 
 /**
  * Does this failure mean the device cannot do this, rather than that the attempt
@@ -1450,6 +1451,7 @@ export const fleetApi = {
       };
     } catch (err) {
       const unsupported = isUnsupportedCommand(err);
+      const timedOut    = isTimeoutError(err);
       logger.warn(
         `[fleetApi] Command "${action}" on motorcycle ${motorcycleId} ` +
         `${unsupported ? 'is not supported by this device' : 'failed'}:`,
@@ -1457,10 +1459,14 @@ export const fleetApi = {
       );
       return {
         ok: false,
-        reason: unsupported ? 'unsupported' : 'failed',
-        // The backend's own sentence when it wrote one — it knows more about why
-        // than any message this layer could compose.
-        message: err instanceof ApiError && err.message ? err.message : null,
+        // No answer in time: the command may have reached the vehicle, so the
+        // panel must not say "nothing has changed".
+        reason: unsupported ? 'unsupported' : timedOut ? 'unconfirmed' : 'failed',
+        // The backend's own sentence when it wrote one ("must be between 10 and
+        // 80") — it knows more about why than any message this layer could
+        // compose. Null for no answer and for a bare "HTTP 500", which the
+        // panel words itself, in the UI language.
+        message: serverMessage(err),
       };
     }
   },
