@@ -3192,46 +3192,9 @@ export const walletApi = {
     };
   },
 
-  async topUp(
-    driverId: string,
-    amount: number,
-    _paymentMethod: string,
-    note?: string,
-  ): Promise<Driver> {
-    const res = await apiClient.post<{
-      data?: { driver_id?: number | string } & ApiMoneyFields;
-    }>('/fleet-admin/wallet/top-up', { driver_id: Number(driverId), amount, note });
-    // Response: { success, data: { driver_id, name, amount, balance, currency,
-    //                              minor_units, decimals, note } }
-    // No full driver object — extract the new balance and return a stub for merging
-    const data = (res.data && typeof res.data === 'object') ? res.data : {};
-    // `balance` is the post-top-up total; fall back to the amount we just sent.
-    // `minor_units` on this payload describes the top-up amount, not the balance,
-    // so it is deliberately not forwarded here.
-    const newBalance = data.balance != null
-      ? parseAmount(
-          data.balance,
-          data.decimals ?? decimalsForCurrency(data.currency) ?? fractionDigitsOf(data.balance),
-        )
-      : amount;
-    return {
-      id:           String(data.driver_id ?? driverId),
-      name:         '',
-      phone:        '',
-      vehicleModel: '',
-      status:       'active',
-      trips:        0,
-      totalCost:    0,
-      charges:      0,
-      swaps:        0,
-      walletBalance: newBalance,
-      documents: {
-        license:     { status: 'not_uploaded', hasLicense: false },
-        customsCard: { status: 'not_uploaded' },
-        plate:       { status: 'not_uploaded' },
-      },
-    };
-  },
+  // There is deliberately no direct credit. Every top-up is paid through a
+  // gateway (initiate → card → verify, or charge-saved); the old unpaid
+  // `POST /fleet-admin/wallet/top-up` is gone from the backend too (FA-408).
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
