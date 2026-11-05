@@ -380,6 +380,8 @@ const en = {
     topUpSuccessDescription: "{{name}}'s wallet has been topped up with {{amount}}.",
     topUpAmountRequired: 'Please enter a valid amount',
     topUpAmountInvalid: 'Amount must be greater than 0',
+    // More decimals than the currency has (FA-423): refused, never rounded.
+    topUpAmountTooPrecise: 'This amount has too many decimal places. Use at most {{decimals}}.',
     // Minimum top-up — the amount comes from the backend, never from this app.
     minTopUpHint: 'Minimum top-up: {{amount}}',
     minTopUpAbsoluteFloor: 'The minimum top-up is {{amount}}.',

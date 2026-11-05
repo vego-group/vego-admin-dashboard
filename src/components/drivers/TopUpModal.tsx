@@ -15,7 +15,9 @@ import { formatCurrency } from '@/lib/format';
 import { hyperPayAmountIssue, storeHyperPayCheckout } from '@/lib/hyperpay';
 import { newIdempotencyKey } from '@/lib/idempotency';
 import { logger } from '@/lib/logger';
-import { amountStep, decimalsForCurrency, fractionDigitsOf, fromMinorUnits, toMinorUnits } from '@/lib/money';
+import {
+  amountStep, decimalsForCurrency, exceedsDecimals, fractionDigitsOf, fromMinorUnits, toMinorUnits,
+} from '@/lib/money';
 import { loadMoyasar } from '@/lib/moyasar';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import {
@@ -259,6 +261,9 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   // That keeps both operands exact without inventing a currency.
   const scaleDecimals = knownDecimals
     ?? Math.max(fractionDigitsOf(amount), fractionDigitsOf(currentBalance));
+  // More decimals than the currency has ("10.555" SAR) is refused, never
+  // rounded or cut to fit (FA-423). Only checkable once the precision is known.
+  const tooPrecise       = knownDecimals != null && exceedsDecimals(amount, knownDecimals);
   const scale            = 10 ** scaleDecimals;
   const amountMinorUnits = toMinorUnits(amount, scaleDecimals);
   const numAmount        = amountMinorUnits / scale;
@@ -398,7 +403,8 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const hyperPayIssue = expectHyperPay && amountMinorUnits > 0
     ? hyperPayAmountIssue(amount.trim())
     : null;
-  const amountInvalid = belowMinimum || hyperPayIssue !== null;
+  const amountInvalid = tooPrecise || belowMinimum || hyperPayIssue !== null;
+  const tooPreciseMessage = t('drivers.topUpAmountTooPrecise', { decimals: knownDecimals ?? 0 });
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
@@ -406,6 +412,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     const trimmed = amount.trim();
     const wellFormed = /^\d*(?:[.,]\d*)?$/.test(trimmed) && /\d/.test(trimmed);
     if (!trimmed || !wellFormed)  { setAmountError(t('drivers.topUpAmountRequired')); return false; }
+    if (tooPrecise)               { setAmountError(tooPreciseMessage); return false; }
     if (amountMinorUnits <= 0)    { setAmountError(t('drivers.topUpAmountInvalid'));  return false; }
     if (belowMinimum && minTopUp) { setAmountError(minimumMessage(minTopUp, minReason)); return false; }
     if (expectHyperPay) {
@@ -789,6 +796,8 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                   the entered amount falls under it. HyperPay's rules likewise. */}
               {amountError ? (
                 <p className="mt-1 text-xs text-rose-600">{amountError}</p>
+              ) : tooPrecise ? (
+                <p className="mt-1 text-xs text-rose-600">{tooPreciseMessage}</p>
               ) : belowMinimum && minTopUp ? (
                 <p className="mt-1 text-xs text-rose-600">{minimumMessage(minTopUp, minReason)}</p>
               ) : hyperPayIssue ? (

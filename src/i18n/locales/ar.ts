@@ -396,6 +396,7 @@ const ar: Translations = {
     topUpSuccessDescription: 'تم شحن محفظة {{name}} بمبلغ {{amount}} بنجاح.',
     topUpAmountRequired: 'الرجاء إدخال مبلغ صحيح',
     topUpAmountInvalid: 'يجب أن يكون المبلغ أكبر من صفر',
+    topUpAmountTooPrecise: 'عدد المنازل العشرية في هذا المبلغ أكثر من المسموح. الحد الأقصى: {{decimals}}.',
     // الحد الأدنى للشحن — المبلغ يأتي من الخادم ولا يُحسب هنا إطلاقاً.
     minTopUpHint: 'الحد الأدنى للشحن: {{amount}}',
     minTopUpAbsoluteFloor: 'الحد الأدنى للشحن هو {{amount}}.',
