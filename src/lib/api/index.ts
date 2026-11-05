@@ -1294,6 +1294,7 @@ function readListPage<T>(
   raw: unknown,
   requested: { page: number; perPage: number },
   endpoint: string,
+  { warnWithoutCounts = true }: { warnWithoutCounts?: boolean } = {},
 ): ListPage<T> {
   const rows = extractList<T>(raw);
   const asRecord = (v: unknown): Record<string, unknown> | undefined =>
@@ -1303,7 +1304,7 @@ function readListPage<T>(
     .find((c) => c !== undefined && 'current_page' in c && ('last_page' in c || 'total' in c));
 
   if (!counts) {
-    if (!warnedListEnvelopes.has(endpoint)) {
+    if (warnWithoutCounts && !warnedListEnvelopes.has(endpoint)) {
       warnedListEnvelopes.add(endpoint);
       logger.warn(
         `[API] ${endpoint} sent no paginator counts (current_page/last_page/total); ` +
@@ -1328,6 +1329,47 @@ function readListPage<T>(
     lastPage: lastPage !== undefined ? Math.max(1, lastPage) : undefined,
     total,
   };
+}
+
+/** Rows per request, and the page cap, when a whole list is walked (FA-224). */
+const WHOLE_LIST_PER_PAGE = 100;
+const WHOLE_LIST_MAX_PAGES = 50;
+
+/**
+ * Every row of a list the UI needs whole: pickers, KPIs, maps and the
+ * client-side tabs and search of drivers, vehicles, cabinets, piles and zones
+ * (FA-224).
+ *
+ * These were fetched with no paging params and only `data` was read, so a
+ * paginated answer (Laravel's default is 15 rows) would have shown page 1
+ * everywhere without a word. Now each page asks for 100 rows and `last_page` is
+ * followed. A response without paginator counts is taken as the whole list, as
+ * before. ⏳ D1.3: if an endpoint refuses `per_page`/`page` (422), the plain
+ * request is sent instead, so this can never break a list that works today.
+ */
+async function fetchAllRows<T>(path: string): Promise<T[]> {
+  const sep = path.includes('?') ? '&' : '?';
+  const rows: T[] = [];
+  for (let page = 1; page <= WHOLE_LIST_MAX_PAGES; page++) {
+    let raw: unknown;
+    try {
+      raw = await apiClient.get<unknown>(`${path}${sep}per_page=${WHOLE_LIST_PER_PAGE}&page=${page}`);
+    } catch (err) {
+      if (page === 1 && err instanceof ApiError && err.status === 422) {
+        logger.warn(`[API] ${path} refused per_page/page (422); fetching it without them.`);
+        return extractList<T>(await apiClient.get<unknown>(path));
+      }
+      throw err;
+    }
+    const result = readListPage<T>(raw, { page, perPage: WHOLE_LIST_PER_PAGE }, path, { warnWithoutCounts: false });
+    rows.push(...result.rows);
+    if (result.lastPage === undefined || page >= result.lastPage || result.rows.length === 0) return rows;
+  }
+  logger.warn(
+    `[API] ${path}: stopped after ${WHOLE_LIST_MAX_PAGES} pages (${rows.length} rows); ` +
+    'the rest of the list is not shown.',
+  );
+  return rows;
 }
 
 /**
@@ -1478,8 +1520,7 @@ function intendedState(action: VehicleCommand, speedLimit?: number): VehicleCont
 
 export const fleetApi = {
   async list(): Promise<Vehicle[]> {
-    const raw = await apiClient.get<unknown>('/fleet-admin/motorcycles');
-    return extractList<ApiMotorcycle>(raw).map(mapMotorcycle);
+    return (await fetchAllRows<ApiMotorcycle>('/fleet-admin/motorcycles')).map(mapMotorcycle);
   },
 
   async getById(id: string): Promise<Vehicle | null> {
@@ -1625,9 +1666,8 @@ export const fleetApi = {
 
 export const stationsApi = {
   async list(): Promise<BatteryStation[]> {
-    const raw = await apiClient.get<unknown>('/fleet-admin/cabinets');
     // One cabinet mapper, then a projection — see toBatteryStation.
-    return extractList<ApiCabinet>(raw).map(mapCabinet).map(toBatteryStation);
+    return (await fetchAllRows<ApiCabinet>('/fleet-admin/cabinets')).map(mapCabinet).map(toBatteryStation);
   },
 };
 
@@ -1678,8 +1718,7 @@ export interface DriverDocumentUploadInput {
 
 export const driversApi = {
   async list(): Promise<Driver[]> {
-    const raw = await apiClient.get<unknown>('/fleet-admin/drivers');
-    return extractList<ApiDriver>(raw).map(mapDriver);
+    return (await fetchAllRows<ApiDriver>('/fleet-admin/drivers')).map(mapDriver);
   },
 
   /** Full driver detail — includes document file_url / rejection_reason the list omits. */
@@ -1869,12 +1908,6 @@ interface ApiZone {
   created_at?: string;
 }
 
-interface ApiZoneListResponse {
-  success: boolean;
-  data: ApiZone[];
-  meta: { current_page: number; last_page: number; per_page: number; total: number };
-}
-
 interface ApiZoneSingleResponse {
   success: boolean;
   data: ApiZone;
@@ -1987,8 +2020,9 @@ export type ZoneUpdateInput = Partial<Omit<ZoneCreateInput, 'polygon'>> & {
 
 export const zonesApi = {
   async list(): Promise<Zone[]> {
-    const res = await apiClient.get<ApiZoneListResponse>('/fleet-admin/zones?limit=100');
-    return (res.data ?? []).map(mapApiZone);
+    // Every zone: the map, the list and the overlap check all need the whole
+    // set. `?limit=100` was not a Laravel paging param (FA-327).
+    return (await fetchAllRows<ApiZone>('/fleet-admin/zones')).map(mapApiZone);
   },
 
   async create(input: ZoneCreateInput): Promise<Zone> {
@@ -2288,8 +2322,7 @@ export interface SwapActivity {
 
 export const swappingApi = {
   async list(): Promise<SwappingStation[]> {
-    const raw = await apiClient.get<unknown>('/fleet-admin/cabinets');
-    return extractList<ApiCabinet>(raw).map(mapCabinet);
+    return (await fetchAllRows<ApiCabinet>('/fleet-admin/cabinets')).map(mapCabinet);
   },
 
   async recentActivity(limit = 10): Promise<SwapActivity[]> {
@@ -2314,8 +2347,7 @@ export const swappingApi = {
 
 export const fastChargingApi = {
   async list(): Promise<FastChargingCabinet[]> {
-    const raw = await apiClient.get<unknown>('/fleet-admin/piles');
-    return extractList<ApiPile>(raw).map(mapPile);
+    return (await fetchAllRows<ApiPile>('/fleet-admin/piles')).map(mapPile);
   },
 };
 
