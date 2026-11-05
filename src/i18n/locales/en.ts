@@ -412,6 +412,7 @@ const en = {
     removeCardConfirm: 'Remove this saved card?',
     saveCardHint: 'You can choose to save this card on the next step for faster future top-ups.',
     chargeFailed: 'The payment could not be completed. Please try again or use another card.',
+    cardFormLoadFailed: 'The card form could not be loaded. Check your connection and try again. Nothing has been charged.',
     // These four were hardcoded English in TopUpModal — invisible to the
     // language switch, and the two naming Moyasar were wrong outright for a
     // Jordanian fleet, where Moyasar is not the gateway. The gateway is now a

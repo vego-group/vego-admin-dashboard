@@ -14,6 +14,7 @@ import { formatCurrency } from '@/lib/format';
 import { hyperPayAmountIssue, storeHyperPayCheckout } from '@/lib/hyperpay';
 import { logger } from '@/lib/logger';
 import { amountStep, fractionDigitsOf, toMinorUnits } from '@/lib/money';
+import { loadMoyasar } from '@/lib/moyasar';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { hyperPayRefusalFrom, topUpBelowMinimumFrom, walletApi, type MoyasarPaymentData } from '@/lib/api';
 import type {
@@ -118,6 +119,9 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
 
   // Moyasar form container
   const moyasarRef = useRef<HTMLDivElement>(null);
+  /** The Moyasar script failed, was blocked or timed out; `moyasarAttempt` retries it. */
+  const [moyasarFailed, setMoyasarFailed]   = useState(false);
+  const [moyasarAttempt, setMoyasarAttempt] = useState(0);
 
   /**
    * Balance and top-up options, always together.
@@ -185,6 +189,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     setCardChoice('new');
     setCardChoiceNotice('');
     setRedirecting(false);
+    setMoyasarFailed(false);
 
     void loadWallet(driver.id, driver.walletBalance ?? 0);
 
@@ -193,42 +198,44 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
     void loadSavedCards(true);
   }, [open, driver, loadWallet, loadSavedCards]);
 
-  // Initialize Moyasar form once we're on the "new card" view and paymentData is ready
+  // Initialize Moyasar form once we're on the "new card" view and paymentData is ready.
+  // The script is loaded here, on demand — not on every page (FA-002).
   useEffect(() => {
     if (step !== 'card' || cardMode !== 'new' || !paymentData) return;
 
-    let timer: ReturnType<typeof setTimeout>;
+    let cancelled = false;
+    setMoyasarFailed(false);
 
-    const tryInit = () => {
-      const w = window as typeof window & { Moyasar?: typeof Moyasar };
-      if (!w.Moyasar || !moyasarRef.current) {
-        timer = setTimeout(tryInit, 150);
-        return;
-      }
+    loadMoyasar()
+      .then((moyasar) => {
+        if (cancelled || !moyasarRef.current) return;
+        moyasarRef.current.innerHTML = '';
 
-      moyasarRef.current.innerHTML = '';
+        // Use backend-provided callback_url; fall back to our page if empty
+        const callbackUrl = paymentData.callbackUrl || `${window.location.origin}/payment-callback`;
 
-      // Use backend-provided callback_url; fall back to our page if empty
-      const callbackUrl = paymentData.callbackUrl || `${window.location.origin}/payment-callback`;
-
-      w.Moyasar.init({
-        element:             moyasarRef.current,
-        amount:              paymentData.amount,           // already in halalas
-        currency:            paymentData.currency,
-        description:         paymentData.description,
-        publishable_api_key: paymentData.publishableKey,
-        callback_url:        callbackUrl,
-        language:            locale,                       // follow the app's language (ar/en)
-        methods:             ['creditcard'],
-        credit_card:         { save_card: true },          // renders the "save this card" checkbox
-        metadata:            paymentData.metadata,        // ← MUST be passed unchanged
+        moyasar.init({
+          element:             moyasarRef.current,
+          amount:              paymentData.amount,           // already in halalas
+          currency:            paymentData.currency,
+          description:         paymentData.description,
+          publishable_api_key: paymentData.publishableKey,
+          callback_url:        callbackUrl,
+          language:            locale,                       // follow the app's language (ar/en)
+          methods:             ['creditcard'],
+          credit_card:         { save_card: true },          // renders the "save this card" checkbox
+          metadata:            paymentData.metadata,        // ← MUST be passed unchanged
+        });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        logger.error('[TopUpModal] Moyasar form unavailable:', err);
+        setMoyasarFailed(true);
       });
-    };
 
-    tryInit();
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, cardMode, paymentData]);
+  }, [step, cardMode, paymentData, moyasarAttempt]);
 
   if (!driver) return null;
 
@@ -425,6 +432,9 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
    */
   const enterNewCard = async () => {
     setApiError('');
+    // Fetch Moyasar's script while `initiate` runs (Saudi form only); the card
+    // step awaits it and reports a failure there.
+    if (!expectHyperPay) void loadMoyasar().catch(() => undefined);
     // A Jordanian top-up never shows the card step: the amount step's button
     // spins until the HyperPay page takes over.
     if (!expectHyperPay) {
@@ -965,6 +975,17 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
               {initiating || !paymentData ? (
                 <div className="flex items-center justify-center py-16 text-slate-400">
                   <Loader2 className="h-6 w-6 animate-spin" />
+                </div>
+              ) : moyasarFailed ? (
+                <div
+                  role="alert"
+                  className="flex flex-col items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-8 text-center text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-400"
+                >
+                  <AlertTriangle className="h-5 w-5" />
+                  <span>{t('drivers.cardFormLoadFailed')}</span>
+                  <Button type="button" variant="secondary" onClick={() => setMoyasarAttempt((n) => n + 1)}>
+                    {t('common.retry')}
+                  </Button>
                 </div>
               ) : (
                 /* Moyasar injects the card form (incl. its "save card" option) here */

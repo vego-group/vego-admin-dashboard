@@ -12,6 +12,14 @@
  */
 const HYPERPAY_HOSTS = ['https://eu-test.oppwa.com', 'https://eu-prod.oppwa.com'].join(' ');
 
+/**
+ * `'unsafe-eval'` is for `next dev` only (React Refresh and webpack's eval
+ * source maps need it). The production build runs without it (FA-002); `next
+ * build` sets NODE_ENV=production before this file is read, and the headers are
+ * fixed at build time.
+ */
+const SCRIPT_EVAL = process.env.NODE_ENV === 'production' ? '' : " 'unsafe-eval'";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -34,7 +42,10 @@ const nextConfig = {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.moyasar.com ${HYPERPAY_HOSTS}`,
+              // Moyasar's form script is added on demand by the top-up form
+              // (src/lib/moyasar.ts), never on page load; the host stays listed
+              // here because client-side navigation keeps the first page's CSP.
+              `script-src 'self' 'unsafe-inline'${SCRIPT_EVAL} https://cdn.moyasar.com ${HYPERPAY_HOSTS}`,
               `style-src 'self' 'unsafe-inline' https://cdn.moyasar.com ${HYPERPAY_HOSTS}`,
               // Map tiles (src/lib/map-tiles.ts): CARTO's keyed URLs use the bare
               // host, which `*.basemaps.cartocdn.com` does not match; OSM is the
