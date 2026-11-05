@@ -484,14 +484,16 @@ export type TransactionType   =
 export type TransactionStatus = 'completed' | 'pending' | 'failed' | 'cancelled' | 'unknown';
 
 /**
- * Which way the money moved: `'in'` = credit / refund, `'out'` = debit.
+ * Which way the money moved: `'in'` = credit / refund, `'out'` = debit, and
+ * `'unknown'` for a row with no `direction` whose `type` no document names
+ * (FA-411) — shown neutral, with no sign, never as a credit.
  *
  * The backend's confirmed convention is that **a debit is a positive amount with
  * `type: "debit"`, never a negative** — so the sign of `amount` carries no
  * information and must never be used to tell a debit from a credit. Colour,
  * sign prefixes and any ledger arithmetic key off this field.
  */
-export type TransactionDirection = 'in' | 'out';
+export type TransactionDirection = 'in' | 'out' | 'unknown';
 
 /**
  * A wallet row's `payment_method`, read into one of three shapes:
@@ -521,7 +523,7 @@ export interface WalletTransaction {
    * the lossy convenience view. Absent on locally-constructed fixtures.
    */
   money?: Money;
-  /** Credit or debit. The only safe source of the sign. */
+  /** Credit, debit, or unknown (no sign). The only safe source of the sign. */
   direction: TransactionDirection;
   /**
    * The backend's `signed_amount` — an exact decimal string carrying the sign

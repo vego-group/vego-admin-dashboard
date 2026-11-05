@@ -684,6 +684,13 @@ const DEBIT_TYPES = new Set([
 ]);
 
 /**
+ * Transaction `type` values that move money **into** the wallet: the stored
+ * `credit`, the legacy top-up spellings and `refund`. Bonuses are matched
+ * through `BONUS_TX_TYPES` / `ledger_type` in {@link toDirection}.
+ */
+const CREDIT_TYPES = new Set(['credit', 'top_up', 'topup', 'refund']);
+
+/**
  * Which way the money moved.
  *
  * The backend's `direction` is authoritative when present. Otherwise the *type*
@@ -692,11 +699,19 @@ const DEBIT_TYPES = new Set([
  * **positive** amount with `type: "debit"`, and a negative passed in is
  * normalised to its magnitude on write. Reading the sign was exactly why debits
  * rendered green as credits.
+ *
+ * A type no document names, with no `direction`, is `'unknown'` (FA-411): a
+ * hold, capture or release row must not read as income. It used to default to
+ * `'in'`, a green "+".
  */
 function toDirection(tx: ApiTransaction): TransactionDirection {
   const raw = (tx.direction ?? '').toLowerCase();
   if (raw === 'in' || raw === 'out') return raw;
-  return DEBIT_TYPES.has(tx.type ?? '') || tx.ledger_type === 'bonus_reversal' ? 'out' : 'in';
+  const type   = tx.type ?? '';
+  const ledger = tx.ledger_type ?? '';
+  if (DEBIT_TYPES.has(type) || ledger === 'bonus_reversal') return 'out';
+  if (CREDIT_TYPES.has(type) || BONUS_TX_TYPES.includes(type) || ledger === 'bonus') return 'in';
+  return 'unknown';
 }
 
 /**

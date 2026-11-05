@@ -195,6 +195,9 @@ function defaultTo(): string { return isoDate(new Date()); }
  * Debits arrive positive (`type: "debit"`), so the old `startsWith('-')` test
  * exported every single row with a leading `+` and a reconciliation against the
  * export added spending to the balance instead of subtracting it.
+ *
+ * A row whose direction is unknown (FA-411) gets no sign of ours: the value as
+ * the backend sent it, never a "+" it did not state.
  */
 function csvAmount(tx: WalletTransaction, fleetDecimals: number | null): string {
   const decimals = tx.money?.decimals ?? fleetDecimals ?? fractionDigitsOf(tx.amount);
@@ -203,6 +206,7 @@ function csvAmount(tx: WalletTransaction, fleetDecimals: number | null): string 
   const source = tx.signedAmount
     || tx.money?.amount
     || fromMinorUnits(toMinorUnits(tx.amount, decimals), decimals);
+  if (tx.direction === 'unknown') return source;
   return `${tx.direction === 'out' ? '-' : '+'}${source.replace(/^[+-]/, '')}`;
 }
 
@@ -645,8 +649,10 @@ export default function WalletPage() {
                   const StatusIcon = STATUS_ICON[tx.status] ?? HelpCircle;
                   // Direction, never the sign. A debit is a positive amount with
                   // type "debit" — reading `amount >= 0` painted every debit
-                  // green as if it were a credit.
+                  // green as if it were a credit. An unknown direction is
+                  // neutral: grey, no sign (FA-411).
                   const isCredit   = tx.direction === 'in';
+                  const isDebit    = tx.direction === 'out';
                   const payment    = paymentMethodText(tx, t);
                   return (
                     <tr
@@ -664,10 +670,12 @@ export default function WalletPage() {
                       </td>
                       <td className={cn(
                         'px-5 py-4 font-bold tabular-nums',
-                        isCredit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400',
+                        isCredit ? 'text-emerald-600 dark:text-emerald-400'
+                          : isDebit ? 'text-rose-600 dark:text-rose-400'
+                          : 'text-slate-600 dark:text-slate-300',
                       )}>
                         {/* `amount` is a magnitude; the sign is the direction's. */}
-                        <span dir="ltr">{isCredit ? '+' : '−'}{formatMoney(tx.amount, locale)}</span>
+                        <span dir="ltr">{isCredit ? '+' : isDebit ? '−' : ''}{formatMoney(tx.amount, locale)}</span>
                       </td>
                       <td className="px-5 py-4">
                         <span className={cn(
