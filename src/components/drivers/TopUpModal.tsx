@@ -25,6 +25,7 @@ import {
   type MoyasarPaymentData,
 } from '@/lib/api';
 import { isIndeterminateFailure } from '@/lib/api/client';
+import { failureMessage, serverMessage } from '@/lib/api-errors';
 import type {
   CardChoice, CurrencyCode, Driver, HyperPayCheckout, MinTopUpReason, Money, SavedCard, ServicePrice, TopUpOptions,
 } from '@/types';
@@ -437,8 +438,8 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
       setAmountError(minimumMessage(rejected.minTopUp, rejected.reason));
     } else {
       // No `meta.min_topup` to quote — the backend's own sentence is still better
-      // than a generic "payment failed".
-      setAmountError(rejected.message);
+      // than a generic "payment failed". Never the client's "HTTP 422" (FA-422).
+      setAmountError(serverMessage(err) ?? t('drivers.topUpBelowMinimum'));
     }
 
     // The amount field lives on step 1; there is nothing to fix on the card step.
@@ -558,7 +559,12 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
           logger.error('[TopUpModal] initiate answer unusable:', err.detail);
           setApiError(t('drivers.initiateIncomplete'));
         }
-        else setApiError(err instanceof Error ? err.message : 'Failed to initialize payment. Please try again.');
+        // A refusal: the backend's own words, or ours — never the client's
+        // English (FA-422). The details are in the log.
+        else {
+          logger.error('[TopUpModal] initiate failed:', err);
+          setApiError(failureMessage(err, t, t('drivers.initiateFailed')));
+        }
       }
     } finally {
       if (seq === initiateSeq.current) setInitiating(false);
@@ -665,7 +671,8 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
       }
       endAttempt();
       if (!handledAsBelowMinimum(err)) {
-        setApiError(err instanceof Error ? err.message : t('drivers.chargeFailed'));
+        logger.error('[TopUpModal] charge-saved failed:', err);
+        setApiError(failureMessage(err, t, t('drivers.chargeFailed')));
       }
     } finally {
       setCharging(false);
@@ -682,7 +689,8 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
         return next;
       });
     } catch (err) {
-      setApiError(err instanceof Error ? err.message : t('drivers.chargeFailed'));
+      logger.error('[TopUpModal] removing a saved card failed:', err);
+      setApiError(failureMessage(err, t, t('wallet.removeCardFailed')));
     }
   };
 

@@ -104,6 +104,24 @@ function handleUnauthorized(sentToken: string | null): void {
   onUnauthorized?.();
 }
 
+/**
+ * A 2xx answer of `{ success: false, message }`: the backend declined, in its
+ * own words — `serverMessage`, or null when it wrote none. `message` is the
+ * client's English fallback, for the log only; show `serverMessage` or a
+ * translated text (FA-422). It is classified like any other thrown Error: not
+ * an indeterminate failure and not a 4xx refusal.
+ */
+export class DeclinedError extends Error {
+  public readonly serverMessage: string | null;
+
+  constructor(serverMessage: unknown, fallback: string) {
+    const text = typeof serverMessage === 'string' && serverMessage.trim() ? serverMessage.trim() : null;
+    super(text ?? fallback);
+    this.name = 'DeclinedError';
+    this.serverMessage = text;
+  }
+}
+
 export class ApiNotConfiguredError extends Error {
   constructor() {
     super(

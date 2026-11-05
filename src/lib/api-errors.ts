@@ -17,7 +17,7 @@
  * Everything else stays global: a 500 is not a phone-number problem.
  */
 
-import { ApiError, isTimeoutError } from '@/lib/api/client';
+import { ApiError, DeclinedError, isTimeoutError } from '@/lib/api/client';
 
 /** The form fields these errors can land on. */
 export type FormFieldName = 'country' | 'phone' | 'name';
@@ -129,6 +129,7 @@ type Translate = (key: string, params?: Record<string, string | number>) => stri
  * neither is a sentence anyone wrote, and neither is in the UI language.
  */
 export function serverMessages(err: unknown): string[] | null {
+  if (err instanceof DeclinedError) return err.serverMessage ? [err.serverMessage] : null;
   if (!(err instanceof ApiError) || err.status === 0) return null;
   const fieldMessages = Array.from(new Set(
     Object.values(err.errors ?? {})
@@ -160,4 +161,18 @@ export function failureLines(err: unknown, t: Translate): string[] {
       : t('common.requestFailedStatus', { status: err.status })];
   }
   return [t('common.error')];
+}
+
+/**
+ * One line for a form's error banner (FA-422): the backend's own words when it
+ * wrote some, "no connection" or "no answer in time" in the UI language, and
+ * otherwise `fallback` — the caller's specific, translated sentence. Never the
+ * client's own English ("Network error: …", "HTTP 500", a thrown guard).
+ */
+export function failureMessage(err: unknown, t: Translate, fallback: string): string {
+  const fromServer = serverMessages(err);
+  if (fromServer) return fromServer.join(' ');
+  if (isTimeoutError(err)) return t('common.requestTimedOut');
+  if (err instanceof ApiError && err.status === 0) return t('common.requestFailedNetwork');
+  return fallback;
 }

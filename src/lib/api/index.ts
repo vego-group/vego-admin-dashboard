@@ -9,7 +9,7 @@
  * Auth prefix:  /fleet-admin/*
  */
 
-import { ApiError, apiClient, isTimeoutError, PAYMENT_TIMEOUT_MS } from '@/lib/api/client';
+import { ApiError, apiClient, DeclinedError, isTimeoutError, PAYMENT_TIMEOUT_MS } from '@/lib/api/client';
 import { serverMessage } from '@/lib/api-errors';
 import {
   SEEDED_COUNTRIES,
@@ -2871,7 +2871,7 @@ function mapHyperPayCheckout(raw: ApiHyperPayCheckout, requestedChoice: CardChoi
     !currency        && 'currency',
   ].filter(Boolean);
   if (missing.length > 0 || !money || !currency) {
-    throw new Error(
+    throw new PaymentSetupError(
       `The HyperPay checkout is missing ${missing.join(', ')}. Refusing to start a payment without it.`,
     );
   }
@@ -3191,7 +3191,7 @@ export const walletApi = {
       } & ApiHyperPayCheckout;
     } & ApiHyperPayCheckout>('/fleet-admin/wallet/top-up/initiate', body, { timeoutMs: PAYMENT_TIMEOUT_MS });
 
-    if (res.success === false) throw new Error(res.message ?? 'Top-up initiation failed');
+    if (res.success === false) throw new DeclinedError(res.message, 'Top-up initiation failed');
 
     // The gateway may sit inside `data` or beside it. A response without one is
     // the Saudi response as it always was.
@@ -3201,7 +3201,7 @@ export const walletApi = {
       return mapHyperPayCheckout(res.data?.checkout_id != null ? res.data : res, params.cardChoice);
     }
     if (gateway && gateway !== 'moyasar') {
-      throw new Error(
+      throw new PaymentSetupError(
         `Top-up initiation returned a gateway this dashboard cannot pay with ("${gateway}"). ` +
         'Refusing to start a payment.',
       );
@@ -3266,7 +3266,7 @@ export const walletApi = {
       data?: { status?: string; amount?: number; balance?: number };
     }>('/fleet-admin/wallet/top-up/verify', { payment_id: paymentId }, { timeoutMs: PAYMENT_TIMEOUT_MS });
 
-    if (res.success === false) throw new Error(res.message ?? 'Payment verification failed');
+    if (res.success === false) throw new DeclinedError(res.message, 'Payment verification failed');
 
     return {
       status:  optionalString(res.data?.status)?.toLowerCase() ?? null,
@@ -3291,7 +3291,7 @@ export const walletApi = {
       checkout_id: checkoutId,
     }, { timeoutMs: PAYMENT_TIMEOUT_MS });
 
-    if (res.success === false) throw new Error(res.message ?? 'Payment verification failed');
+    if (res.success === false) throw new DeclinedError(res.message, 'Payment verification failed');
 
     const d = (res.data && typeof res.data === 'object' && !Array.isArray(res.data))
       ? res.data
@@ -3399,7 +3399,7 @@ export const walletApi = {
     };
     const res = await apiClient.put<unknown>('/fleet-admin/billing-address', body);
     if (res && typeof res === 'object' && (res as { success?: unknown }).success === false) {
-      throw new Error((res as { message?: string }).message ?? 'Could not save the billing address.');
+      throw new DeclinedError((res as { message?: unknown }).message, 'Could not save the billing address.');
     }
     // Some endpoints answer a write with `{ success: true }` only — the address
     // we sent is then the address on file.
@@ -3444,7 +3444,7 @@ export const walletApi = {
       card_id:   params.cardId,
     }, { timeoutMs: PAYMENT_TIMEOUT_MS, headers: { 'Idempotency-Key': params.idempotencyKey } });
 
-    if (res.success === false) throw new Error(res.message ?? 'Could not charge the saved card.');
+    if (res.success === false) throw new DeclinedError(res.message, 'Could not charge the saved card.');
 
     const d = res.data ?? {};
     return {

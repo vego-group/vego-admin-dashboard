@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { brandLabel } from '@/components/wallet/SavedCardsList';
 import { walletApi, type HyperPayVerifyResult } from '@/lib/api';
 import { ApiError, isIndeterminateFailure } from '@/lib/api/client';
+import { serverMessage } from '@/lib/api-errors';
 import { ltrIsolate } from '@/lib/format';
 import { clearHyperPayCheckout } from '@/lib/hyperpay';
 import { useFleetContext } from '@/hooks/useFleetContext';
@@ -66,9 +67,12 @@ function isRefusal(err: unknown): err is ApiError {
   return err instanceof ApiError && err.status >= 400 && err.status < 500 && !isIndeterminateFailure(err);
 }
 
-/** The backend's own words for a refusal, unless it is a bare "HTTP 422". */
+/**
+ * The backend's own words for a refusal — its field messages first — or null
+ * for the client's bare "HTTP 422", so the translated default shows (FA-422).
+ */
 function refusalMessage(err: ApiError): string | null {
-  return err.message && !/^HTTP \d{3}$/.test(err.message) ? err.message : null;
+  return serverMessage(err);
 }
 
 /** The checkout id from `?id=`, or out of `resourcePath=/v1/checkouts/<id>/payment`. */

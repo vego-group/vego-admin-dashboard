@@ -409,6 +409,9 @@ const en = {
     paymentAmountMismatch: 'The payment server prepared {{prepared}}, not the {{shown}} shown here, so the card form was not opened. Nothing has been charged. Close this form and start the top-up again.',
     initiateNoAnswer: "The payment server didn't answer, so no card form was opened. Nothing has been charged. Please try again.",
     initiateIncomplete: "The payment server's answer was incomplete, so no card form was opened. Nothing has been charged. Please try again.",
+    // Translated stand-ins for the client's English error text (FA-422).
+    initiateFailed: "The payment couldn't be started. Nothing has been charged. Please try again.",
+    topUpBelowMinimum: 'This amount is below the minimum top-up.',
     // The fleet profile has no country yet (FA-424): Pay waits for it.
     topUpCountryUnknown: "Couldn't load your fleet's country",
     topUpCountryUnknownHint: 'Card payments depend on it, so Pay stays off until it loads. Nothing has been charged.',
