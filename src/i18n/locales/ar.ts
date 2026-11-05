@@ -770,7 +770,6 @@ const ar: Translations = {
     sync: 'مزامنة',
     avgWait: 'متوسط الانتظار',
     todaySwaps: 'تبديلات اليوم',
-    viewDiagnostics: 'عرض التشخيص الكامل',
     searchCabinets: 'بحث في الخزائن...',
     efficiencyOverview: 'نظرة عامة على الكفاءة',
     recentSwaps: 'آخر عمليات التبديل',

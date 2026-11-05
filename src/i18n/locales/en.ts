@@ -768,7 +768,6 @@ const en = {
     sync: 'Sync',
     avgWait: 'AVG WAIT',
     todaySwaps: 'TODAY SWAPS',
-    viewDiagnostics: 'View Full Diagnostics',
     searchCabinets: 'Search cabinets...',
     efficiencyOverview: 'Efficiency Overview',
     recentSwaps: 'Recent Swaps',

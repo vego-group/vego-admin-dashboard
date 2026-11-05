@@ -28,7 +28,8 @@ function pinHtml(size: number, grad: string, ring: string): TrustedHtml {
 /**
  * The cabinet popup. Every API value goes through the html`` tag, which escapes
  * it (see @/lib/html); the card paints its own light and dark panels, so it
- * reads the same in both themes.
+ * reads the same in both themes. It had a "View Full Diagnostics" button that
+ * did nothing; there is no cabinet detail view to open yet (FA-322).
  */
 function stationPopup(s: SwappingStation, t: Translate): TrustedHtml {
   // No capacity, no share: "—" and an empty bar, not a red 0 % (FA-308).
@@ -67,11 +68,10 @@ function stationPopup(s: SwappingStation, t: Translate): TrustedHtml {
         <div style="height:100%;background:${barColor};width:${avail ?? 0}%;border-radius:999px"></div>
       </div>
     </div>
-    <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#64748b;margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#64748b">
       <span>&#9201; ${t('mapPopup.avgWait', { minutes: s.avgWaitTimeMinutes })}</span>
       <span>${t('mapPopup.todaySwaps', { count: s.todaySwaps })}</span>
     </div>
-    <button style="width:100%;background:#1e293b;color:#f8fafc;border:none;padding:9px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:0.01em">${t('batterySwapping.viewDiagnostics')}</button>
   </div>
 </div>`;
 }

@@ -27,18 +27,20 @@ function CirclePercent({ value, error }: { value: number | undefined; error: boo
   );
 }
 
-interface Props { cabinet: FastChargingCabinet; onClick?: () => void; }
+// Not clickable: there is no pile detail view yet, so the card carries no
+// pointer cursor, hover lift or click handler that would promise one (FA-322).
+interface Props { cabinet: FastChargingCabinet; }
 
-export function FastChargingCabinetCard({ cabinet, onClick }: Props) {
+export function FastChargingCabinetCard({ cabinet }: Props) {
   const { t } = useI18n();
   const hasError = cabinet.status === 'error';
   // No ports reported: "—", not a 0 % that reads as an idle cabinet (FA-308).
   const utilization = sharePercent(cabinet.chargingPorts, cabinet.totalPorts);
 
   return (
-    <Card className={cn('relative cursor-pointer p-5 transition-all hover:shadow-card-hover',
+    <Card className={cn('relative p-5',
       hasError && 'ring-1 ring-rose-200 dark:ring-rose-500/30'
-    )} onClick={onClick}>
+    )}>
       {hasError && (
         <span className="absolute end-3 top-3 rounded bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
           ERROR

@@ -26,9 +26,11 @@ function CirclePercent({ value }: { value: number | undefined }) {
   );
 }
 
-interface Props { station: SwappingStation; onClick?: () => void; }
+// Not clickable: there is no cabinet detail view yet, so the card carries no
+// pointer cursor, hover lift or click handler that would promise one (FA-322).
+interface Props { station: SwappingStation; }
 
-export function SwappingStationCard({ station, onClick }: Props) {
+export function SwappingStationCard({ station }: Props) {
   const { t } = useI18n();
   // No capacity, no share: "—" and an empty bar, never NaN% (FA-308). The bar
   // used to divide by `capacity || 1`, which drew 300 % wide segments.
@@ -39,7 +41,7 @@ export function SwappingStationCard({ station, onClick }: Props) {
   const emptyPct  = sharePercent(station.emptySlots,        total) ?? 0;
 
   return (
-    <Card className="cursor-pointer p-5 transition-all hover:shadow-card-hover" onClick={onClick}>
+    <Card className="p-5">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-sm font-bold text-slate-900 dark:text-slate-50">{station.name}</h3>
