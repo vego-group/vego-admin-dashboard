@@ -31,6 +31,12 @@ export class DocumentUploadError extends Error {
   }
 }
 
+/**
+ * Document image links are signed and expire 15 minutes after they are
+ * issued. While the form stays open they are re-fetched well inside that.
+ */
+const DOCUMENT_LINK_REFRESH_MS = 10 * 60_000;
+
 // ── Form value shape ──────────────────────────────────────────────────────────
 
 /**
@@ -167,17 +173,33 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
     if (submitError) submitErrorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [submitError]);
 
-  // On edit, fetch the driver's document detail (image URLs + rejection reasons)
-  // which the list endpoint doesn't include.
+  // On edit, fetch the driver's document detail (image links + rejection
+  // reasons), which the list endpoint doesn't include. The links are signed and
+  // expire after 15 minutes, so they come from a fresh fetch each time the form
+  // opens — never from the list — and are fetched again while it stays open,
+  // including when the tab comes back after being hidden.
   useEffect(() => {
     setDocDetail(null);
     if (!open || !driver) return;
     let cancelled = false;
-    (async () => {
+    let fetchedAt = 0;
+    const load = async () => {
       const detail = await driversApi.get(driver.id);
-      if (!cancelled && detail) setDocDetail(detail.documents);
-    })();
-    return () => { cancelled = true; };
+      if (cancelled) return;
+      fetchedAt = Date.now();
+      if (detail) setDocDetail(detail.documents);
+    };
+    void load();
+    const timer = window.setInterval(() => { void load(); }, DOCUMENT_LINK_REFRESH_MS);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && Date.now() - fetchedAt > DOCUMENT_LINK_REFRESH_MS) void load();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [open, driver]);
 
   const update = <K extends keyof DriverFormValues>(key: K, val: DriverFormValues[K]) => {

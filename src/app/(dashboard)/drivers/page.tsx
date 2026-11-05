@@ -50,6 +50,23 @@ function recencyKey(d: Driver): number {
   return Number.isFinite(id) ? id : 0;
 }
 
+/**
+ * The driver without its document image links. Those are signed and expire 15
+ * minutes after they are issued, so the list keeps none: the edit form fetches
+ * fresh ones each time it opens.
+ */
+function withoutDocumentLinks(driver: Driver): Driver {
+  const { license, plate } = driver.documents;
+  return {
+    ...driver,
+    documents: {
+      ...driver.documents,
+      license: { ...license, fileUrl: undefined, backFileUrl: undefined },
+      plate:   { ...plate, fileUrl: undefined },
+    },
+  };
+}
+
 export default function DriversPage() {
   const { t } = useI18n();
   const { tv } = useVehicleTerm();
@@ -97,7 +114,7 @@ export default function DriversPage() {
           }),
         ]);
         if (!cancelled) {
-          setDrivers(driverData);
+          setDrivers(driverData.map(withoutDocumentLinks));
           setMotorcycles(motorcycleData);
         }
       } catch (err) {
@@ -180,11 +197,13 @@ export default function DriversPage() {
       },
     });
     // The driver exists from here on, whatever the upload does.
-    setDrivers((prev) => [created, ...prev]);
+    setDrivers((prev) => [withoutDocumentLinks(created), ...prev]);
     const docs = await uploadDocsIfAny(created.id, values);
     if (docs) {
       setDrivers((prev) => prev.map((d) => (
-        d.id === created.id ? { ...d, documents: { ...d.documents, license: docs.license, plate: docs.plate } } : d
+        d.id === created.id
+          ? withoutDocumentLinks({ ...d, documents: { ...d.documents, license: docs.license, plate: docs.plate } })
+          : d
       )));
     }
     setSuccessDialog({ kind: 'added' });
@@ -225,7 +244,7 @@ export default function DriversPage() {
     const applyUpdate = (docs: Awaited<ReturnType<typeof uploadDocsIfAny>>) =>
       setDrivers((prev) => prev.map((d) => {
         if (d.id !== updated.id) return d;
-        return {
+        return withoutDocumentLinks({
           ...updated,
           status:        d.status,
           walletBalance: d.walletBalance,
@@ -234,7 +253,7 @@ export default function DriversPage() {
           charges:       d.charges,
           swaps:         d.swaps,
           documents:     docs ? { ...updated.documents, license: docs.license, plate: docs.plate } : updated.documents,
-        };
+        });
       }));
     try {
       applyUpdate(await uploadDocsIfAny(driverId, values));

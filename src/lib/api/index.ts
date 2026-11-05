@@ -115,6 +115,12 @@ interface ApiDriver {
   driving_license_number?: string | null;
   driving_license_expiry?: string | null;
   driving_license_file?: string | null;
+  /**
+   * Signed link to the licence image, on the driver detail (backend note
+   * 2026-11-05). Like every document `file_url`, it expires 15 minutes after
+   * it is issued: never store it, fetch the driver again when it is needed.
+   */
+  driving_license_file_url?: string | null;
   plate_number?: string | null;
   has_license?: boolean;
   // Document status on list rows (added with the upload feature)
@@ -466,7 +472,8 @@ function mapDriver(d: ApiDriver): Driver {
   // one. Without it, a licence image on record is "Pending review" — never
   // "Verified", which only a reviewer can make it (FA-226). A licence number
   // alone is not a reviewable document.
-  const hasLicenseFile = !!(license?.file_url || license?.back_file_url || d.driving_license_file);
+  const licenseFileUrl = license?.file_url ?? d.driving_license_file_url ?? undefined;
+  const hasLicenseFile = !!(licenseFileUrl || license?.back_file_url || d.driving_license_file);
   const licenseStatus  = toDocStatus(license?.status ?? d.driving_license_status, hasLicenseFile);
 
   // The document block is the truth and the flat column is the fallback, in that
@@ -480,7 +487,7 @@ function mapDriver(d: ApiDriver): Driver {
       hasLicense,
       number:          licenseNum,
       expiryDate:      license?.expiry_date ?? d.driving_license_expiry ?? undefined,
-      fileUrl:         license?.file_url,
+      fileUrl:         licenseFileUrl,
       backFileUrl:     license?.back_file_url,
       rejectionReason: license?.rejection_reason ?? undefined,
     },

@@ -207,6 +207,12 @@ export interface BatteryStation {
 
 export type DocumentStatus = 'not_uploaded' | 'pending' | 'verified' | 'rejected';
 
+/**
+ * A driver's documents. `fileUrl` / `backFileUrl` are **signed links that
+ * expire 15 minutes after they are issued** (backend, 2026-11-05): only the
+ * driver detail carries them, and nothing may keep one — the edit form fetches
+ * the driver again each time it opens, and while it stays open.
+ */
 export interface DriverDocuments {
   license: {
     status: DocumentStatus;
