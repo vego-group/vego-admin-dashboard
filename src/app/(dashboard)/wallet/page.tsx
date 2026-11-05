@@ -206,6 +206,23 @@ function csvAmount(tx: WalletTransaction, fleetDecimals: number | null): string 
   return `${tx.direction === 'out' ? '-' : '+'}${source.replace(/^[+-]/, '')}`;
 }
 
+/** One CSV cell: quoted, with embedded quotes doubled. */
+function csvCell(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+/**
+ * A text cell that a spreadsheet can't run (FA-415). Driver names, notes and
+ * admin names are user-controlled (a driver registers from the mobile app), and
+ * Excel, LibreOffice and Sheets treat a cell starting with `=`, `+`, `-` or `@`
+ * — or a tab or carriage return before one — as a formula. A leading `'` makes
+ * the cell plain text. The Amount column is never passed through this: its
+ * leading sign is data, and it is built by {@link csvAmount}, not typed by anyone.
+ */
+function csvTextCell(value: string): string {
+  return csvCell(/^[=+\-@\t\r]/.test(value) ? `'${value}` : value);
+}
+
 function exportCsv(
   rows: WalletTransaction[],
   currency: CurrencyCode | null,
@@ -222,16 +239,16 @@ function exportCsv(
     'Type', 'Payment Method', 'Note', 'Status', 'Admin',
   ];
   const lines = rows.map((r) => [
-    formatDT(r.createdAt, r.createdAt),
-    r.driverName,
-    csvAmount(r, decimals),
-    r.money?.currency ?? currency ?? '',
-    csvType(r),
-    paymentMethodText(r, t) ?? '',
-    localisedNote(r, t) ?? '',
-    rawStatusOf(r),
-    r.adminName ?? '',
-  ].map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','));
+    csvTextCell(formatDT(r.createdAt, r.createdAt)),
+    csvTextCell(r.driverName),
+    csvCell(csvAmount(r, decimals)),
+    csvTextCell(r.money?.currency ?? currency ?? ''),
+    csvTextCell(csvType(r)),
+    csvTextCell(paymentMethodText(r, t) ?? ''),
+    csvTextCell(localisedNote(r, t) ?? ''),
+    csvTextCell(rawStatusOf(r)),
+    csvTextCell(r.adminName ?? ''),
+  ].join(','));
   // The BOM is what tells Excel the file is UTF-8. Without it Excel on Windows
   // reads the bytes in the system code page and garbles every Arabic name.
   const csv  = '﻿' + [headers.join(','), ...lines].join('\n');
