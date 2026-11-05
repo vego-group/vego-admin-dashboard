@@ -6,6 +6,7 @@ import { Wallet, CreditCard, Shield, ChevronLeft, Plus, Loader2, MapPin, AlertTr
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
+import { LoadError } from '@/components/ui/LoadError';
 import { BillingAddressForm } from '@/components/wallet/BillingAddressForm';
 import { SavedCardsList, brandLabel } from '@/components/wallet/SavedCardsList';
 import { useI18n } from '@/i18n/I18nProvider';
@@ -70,7 +71,10 @@ function savedCardToken(card: SavedCard): string {
 
 export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const { t, locale } = useI18n();
-  const { formatMoney, currency, currencyDecimals, currencyStatus, isoCountryCode } = useFleetContext();
+  const {
+    formatMoney, currency, currencyDecimals, currencyStatus, isoCountryCode,
+    isLoading: profileLoading, refresh: refreshProfile,
+  } = useFleetContext();
   const router = useRouter();
 
   const [step, setStep]               = useState<Step>('amount');
@@ -92,6 +96,14 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   const [cardChoiceNotice, setCardChoiceNotice] = useState('');
   const [redirecting, setRedirecting] = useState(false);
   const expectHyperPay = isoCountryCode === 'JO';
+  /**
+   * The fleet's country decides what Pay sends (FA-424): a Jordanian request
+   * carries the admin's card choice and "Save this card" answer and is held to
+   * two decimals; a Saudi one does not. Until `/fleet-admin/me` has said which,
+   * Pay stays off — a Jordanian fleet whose profile failed used to go out as a
+   * Saudi request, with `save_card: true` nobody agreed to.
+   */
+  const countryKnown = isoCountryCode != null;
 
   // Card step — what initiateTopUp returned for the Moyasar "new card" form,
   // tagged with the exact top-up it was created for (FA-401). It is only used
@@ -484,6 +496,8 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
    * the Moyasar config (Saudi Arabia), or a HyperPay checkout (Jordan).
    */
   const enterNewCard = async () => {
+    // Never initiate for a fleet whose country — and so gateway — is unknown.
+    if (!countryKnown) return;
     setApiError('');
     // Fetch Moyasar's script while `initiate` runs (Saudi form only); the card
     // step awaits it and reports a failure there.
@@ -504,12 +518,14 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
         driverId: driver.id,
         amount:   { minorUnits: amountMinorUnits, decimals: scaleDecimals },
         // Moyasar asks "save this card?" inside its own form, so the Saudi
-        // request always allows it. The HyperPay widget asks nothing — the
-        // admin's checkbox on this form is the consent, and only a new card
-        // can be saved (`save_card` is not sent with "saved").
+        // request allows it and the admin's tick there is the consent. The
+        // HyperPay widget asks nothing — the admin's checkbox on this form is
+        // the consent, and only a new card can be saved (`save_card` is not
+        // sent with "saved"). Any other country has no consent to offer, so
+        // `save_card` is false (FA-424).
         ...(expectHyperPay
           ? { cardChoice: effectiveChoice, saveCard: effectiveChoice === 'new' && saveCard }
-          : { saveCard: true }),
+          : { saveCard: isoCountryCode === 'SA' }),
       });
       // The form moved on (new amount, Back, closed): this answer is for a top-up
       // nobody is looking at any more.
@@ -547,6 +563,7 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
   };
 
   const handleProceedToCard = async () => {
+    if (!countryKnown) return;
     if (!validateAmount()) return;
     setApiError('');
     setCardChoiceNotice('');
@@ -924,6 +941,17 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
               </label>
             )}
 
+            {/* The profile answered without a country, or not at all: Pay stays
+                off until it is known (FA-424). Retry asks for it again. */}
+            {!countryKnown && currencyStatus !== 'pending' && (
+              <LoadError
+                title={t('drivers.topUpCountryUnknown')}
+                lines={[t('drivers.topUpCountryUnknownHint')]}
+                onRetry={() => { void refreshProfile(); }}
+                retrying={profileLoading}
+              />
+            )}
+
             {/* API error */}
             {apiError && (
               <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-400">
@@ -979,9 +1007,10 @@ export function TopUpModal({ open, onClose, driver }: TopUpModalProps) {
                 type="button"
                 variant="primary"
                 isLoading={initiating || redirecting}
-                // Jordan: not before the saved cards are known — the choice
-                // they decide is part of what Pay sends.
-                disabled={amountInvalid || (expectHyperPay && cardsLoading)}
+                // Not before the fleet's country is known (FA-424). Jordan: not
+                // before the saved cards are known either — the choice they
+                // decide is part of what Pay sends.
+                disabled={amountInvalid || !countryKnown || (expectHyperPay && cardsLoading)}
                 onClick={handleProceedToCard}
                 className="min-w-[160px]"
                 leftIcon={!(initiating || redirecting) ? <CreditCard className="h-4 w-4" /> : undefined}
