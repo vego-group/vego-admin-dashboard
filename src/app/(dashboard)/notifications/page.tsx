@@ -101,7 +101,7 @@ export default function NotificationsPage() {
       alert:   notifications.filter((n) => n.type === 'alert').length,
       error:   notifications.filter((n) => n.type === 'error').length,
     }),
-    [notifications]
+    [notifications, total]
   );
 
   const filtered = useMemo(() => {
