@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronDown, Clock, Phone, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { ChevronDown, Clock, Info, Phone, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { AUTH_NETWORK_ERROR, useAuthStore } from '@/store/auth';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useCountries } from '@/hooks/useCountries';
@@ -143,6 +143,18 @@ export default function LoginPage() {
               >
                 <Clock className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{t('auth.sessionExpired')}</span>
+              </div>
+            )}
+
+            {/* The operator signed out, but the server did not confirm it revoked
+                the token: the session ended in this browser only. */}
+            {signOutReason === 'revoke_unconfirmed' && (
+              <div
+                role="status"
+                className="mt-6 flex items-start gap-2 rounded-lg bg-slate-100 px-3 py-2.5 text-xs font-medium text-slate-600"
+              >
+                <Info className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{t('auth.signedOutThisDeviceOnly')}</span>
               </div>
             )}
 

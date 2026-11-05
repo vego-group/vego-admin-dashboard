@@ -683,6 +683,7 @@ const en = {
     smartMobility: 'Smart Mobility Management System',
     noFleetAdminAccess: "This account doesn't have access to the Fleet Admin dashboard.",
     sessionExpired: 'Your session has expired. Please sign in again.',
+    signedOutThisDeviceOnly: "Signed out on this device only. The server didn't confirm the sign-out.",
     cannotConnect: 'Cannot connect to the server. Please check your connection and try again.',
     // Login page
     loginSubtitle: 'Enter your phone number to sign in to your account',

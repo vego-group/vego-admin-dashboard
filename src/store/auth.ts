@@ -56,8 +56,13 @@ export interface AuthResult {
  *   (e.g. a superadmin) in, and `/fleet-admin/me` answered 403.
  * - `session_expired` — an authenticated request answered 401: the token
  *   expired or was revoked.
+ * - `revoke_unconfirmed` — the operator signed out, but the server did not
+ *   confirm it revoked the token (network error, timeout or a non-2xx answer).
+ *   The session ended in this browser only, and the login page says so (FA-004).
  */
-export type SignOutReason = 'not_fleet_admin' | 'session_expired';
+export type SignOutReason = 'not_fleet_admin' | 'session_expired' | 'revoke_unconfirmed';
+
+const SIGN_OUT_REASONS: readonly SignOutReason[] = ['not_fleet_admin', 'session_expired', 'revoke_unconfirmed'];
 
 /**
  * The store's `error` when an auth request never reached the server. It is the
@@ -95,7 +100,7 @@ function takeStoredSignOutReason(): SignOutReason | null {
   try {
     const stored = sessionStorage.getItem(SIGN_OUT_REASON_KEY);
     sessionStorage.removeItem(SIGN_OUT_REASON_KEY);
-    return stored === 'not_fleet_admin' || stored === 'session_expired' ? stored : null;
+    return SIGN_OUT_REASONS.find((reason) => reason === stored) ?? null;
   } catch {
     return null;
   }
@@ -182,14 +187,18 @@ const LOGOUT_TIMEOUT_MS = 5_000;
 /**
  * Revoke the token on the server: `POST /super-admin/logout`, the shared staff
  * auth this app signs in through (`/super-admin/login`, `/super-admin/verify-otp`).
+ * The backend serves it under `auth:sanctum` with no role check, so it takes a
+ * fleet-admin token.
  *
- * Best effort. A failure, a timeout or a 401 (the token had already expired)
- * is logged and the caller signs out locally regardless — the operator asked
- * to leave, and nothing here may keep them signed in. It runs outside the
- * shared apiClient so that a 401 here does not read as "your session expired".
+ * Best effort: the caller signs out locally regardless — the operator asked to
+ * leave, and nothing here may keep them signed in. Returns whether the server
+ * confirmed the token is no longer valid: a 2xx, or a 401 (it had already
+ * expired). Anything else — a 403, a 5xx, the network, the timeout — is
+ * reported to the operator as "signed out on this device only". It runs outside
+ * the shared apiClient so that a 401 here does not read as "your session expired".
  */
-async function revokeToken(token: string): Promise<void> {
-  if (!BASE_URL) return;
+async function revokeToken(token: string): Promise<boolean> {
+  if (!BASE_URL) return false;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LOGOUT_TIMEOUT_MS);
   try {
@@ -202,9 +211,12 @@ async function revokeToken(token: string): Promise<void> {
       },
       signal: controller.signal,
     });
-    if (!res.ok) logger.warn(`[auth] Server logout answered ${res.status}; signing out locally anyway.`);
+    if (res.ok || res.status === 401) return true;
+    logger.warn(`[auth] Server logout answered ${res.status}; signing out locally anyway.`);
+    return false;
   } catch (err) {
     logger.warn('[auth] Server logout failed; signing out locally anyway:', err);
+    return false;
   } finally {
     clearTimeout(timer);
   }
@@ -312,8 +324,8 @@ export const useAuthStore = create<AuthState>()(
 
       logout: async () => {
         const { token } = get();
-        if (token) await revokeToken(token);
-        get().signOut();
+        const revoked = token ? await revokeToken(token) : true;
+        get().signOut(revoked ? undefined : 'revoke_unconfirmed');
       },
 
       // The country choice survives sign-out on purpose: it is a preference, not
