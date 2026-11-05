@@ -21,6 +21,12 @@ import type { Translations } from './en';
  * would render `للدراجة نارية`, and `ل{{alVehicle}}` would render `لالدباب`.
  * Use the derived forms; `useVehicleTerm` owns the morphology.
  *
+ * **No agreement with the noun (FA-216).** SA's دباب is masculine and JO's
+ * دراجة نارية is feminine, and `vehicle_term` carries no gender. So no verb,
+ * adjective, demonstrative or pronoun may agree with `{{vehicle}}`: write
+ * «جهاز {{alVehicle}}», «تعيين {{alVehicle}}» or «{{lilVehicle}}», never
+ * «هذه {{alVehicle}}», «{{alVehicle}} المعيّنة» or «قفلها».
+ *
  * `{{Vehicle}}` / `{{Vehicles}}` exist so English can title-case and pluralise.
  * In Arabic they resolve to the same singular, so prefer `{{alVehicle}}` and
  * phrase around the plural rather than reaching for `{{vehicles}}`.
@@ -170,10 +176,10 @@ const ar: Translations = {
   },
   fleet: {
     title: 'إدارة الأسطول',
-    subtitle: 'راقب وأدر أسطول {{alVehicle}} الكهربائية بالكامل',
-    active: 'نشطة',
+    subtitle: 'راقب أسطولك الكهربائي وأدِره بالكامل',
+    active: 'في الخدمة',
     charging: 'قيد الشحن',
-    idle: 'خاملة',
+    idle: 'في وضع الخمول',
     maintenance: 'صيانة',
     battery: 'البطارية',
     lastReported: 'آخر إبلاغ',
@@ -253,10 +259,10 @@ const ar: Translations = {
     licenseNumberPlaceholder: { SA: 'SA-XXXXXX' },
     vehicleAssignment: 'تعيين {{alVehicle}}',
     assignVehicle: 'تعيين {{vehicle}}',
-    assignedVehicle: '{{alVehicle}} المعيّنة',
+    assignedVehicle: 'تعيين {{alVehicle}} الحالي',
     assignVehicleElsewhere:
       'يتم التعيين من إجراء «تعيين {{vehicle}}» في قائمة السائقين، وليس من هذا النموذج.',
-    noVehicleAssigned: 'لا توجد {{vehicle}} معيّنة',
+    noVehicleAssigned: 'لم يتم تعيين {{vehicle}}',
     noteLabel: 'ملاحظة',
     assignmentHint:
       'استخدم إجراء «تعيين {{vehicle}}» في قائمة السائقين لتعيين {{vehicle}} لهذا السائق. ويمكنك تغيير التعيين في أي وقت.',
@@ -344,17 +350,17 @@ const ar: Translations = {
     assignMotorcycleAction: 'تعيين {{vehicle}}',
     changeMotorcycleAction: 'تغيير {{alVehicle}}',
     unassignMotorcycle: 'إلغاء التعيين',
-    currentMotorcycle: '{{alVehicle}} الحالية',
+    currentMotorcycle: 'التعيين الحالي',
     selectMotorcycle: 'اختر {{vehicle}}',
     searchMotorcycles: 'ابحث باللوحة أو الرقم أو الموديل…',
-    noAvailableMotorcycles: 'لا توجد {{vehicle}} غير معيَّنة متاحة.',
+    noAvailableMotorcycles: 'لا يوجد ما يمكن تعيينه حالياً: كل ما في أسطولك معيَّن لسائقين.',
     noMotorcycleAssigned: 'بدون {{vehicle}}',
     assignMotorcycleFailed: 'تعذّر تعيين {{alVehicle}}.',
     unassignMotorcycleFailed: 'تعذّر إلغاء تعيين {{alVehicle}}.',
     motorcycleAssignedTitle: 'تم تعيين {{alVehicle}}',
     motorcycleAssignedDescription: 'تم تعيين {{motorcycle}} للسائق {{driver}}.',
     motorcycleUnassignedTitle: 'تم إلغاء تعيين {{alVehicle}}',
-    motorcycleUnassignedDescription: 'لم يعد للسائق {{driver}} {{vehicle}} معيَّنة.',
+    motorcycleUnassignedDescription: 'تم إلغاء تعيين {{alVehicle}} للسائق {{driver}}.',
     topUpWallet: 'شحن المحفظة',
     topUpWalletDescription: 'إضافة رصيد إلى محفظة السائق',
     topUpBlockedNotice: 'هذا السائق محظور، ولن يتمكن من استخدام الرصيد حتى يتم إلغاء الحظر.',
@@ -464,7 +470,7 @@ const ar: Translations = {
     temperature: 'الحرارة',
     // Driver assignment card
     driverAssignment: 'تعيين السائق',
-    noDriverAssigned: 'لا يوجد سائق معين حالياً لهذه {{alVehicle}}.',
+    noDriverAssigned: 'لا يوجد سائق معيَّن حالياً {{lilVehicle}}.',
     selectDriver: 'اختر سائقاً…',
     assignDriver: 'تعيين سائق',
     unassignDriver: 'إلغاء تعيين السائق',
@@ -478,19 +484,19 @@ const ar: Translations = {
     // يملكها سائقوه. الفرق مكتوب هنا بدل تركه لفريق الدعم.
     fleetControlledTitle: 'تحت تحكم أسطولك',
     fleetControlledNote:
-      'المحرك والقفل وحد السرعة ملك للأسطول في {{alVehicle}} التي تملكها. تطبيق السائق لا يستطيع تشغيل هذه {{alVehicle}} ولا فتح قفلها ولا رفع حد سرعتها — المشغّل من هنا فقط. أما المالك الفرد الذي يقود {{vehicle}} يملكها بنفسه فتبقى هذه الأدوات في تطبيقه.',
+      'المحرك والقفل وحد السرعة بيد الأسطول المالك. لا يستطيع تطبيق السائق تشغيل المحرك ولا فتح القفل ولا رفع حد السرعة — يتم ذلك من هنا فقط. أما المالك الفرد الذي يقود {{vehicle}} من ملكه فتبقى هذه الأدوات في تطبيقه.',
 
     // ── نتائج الأوامر (CR-7.2) ──────────────────────────────────────────────
-    commandUnsupported: 'جهاز هذه {{alVehicle}} لا يدعم هذا الأمر.',
-    commandUnsupportedTooltip: 'غير مدعوم في جهاز هذه {{alVehicle}}.',
-    commandOffline: 'هذه {{alVehicle}} غير متصلة — لا يمكن للأوامر الوصول إليها الآن.',
-    emergencyStopConfirmTitle: 'قطع الطاقة عن هذه {{alVehicle}}؟',
+    commandUnsupported: 'جهاز {{alVehicle}} لا يدعم هذا الأمر.',
+    commandUnsupportedTooltip: 'غير مدعوم في جهاز {{alVehicle}}.',
+    commandOffline: 'جهاز {{alVehicle}} غير متصل — لا يمكن للأوامر الوصول إليه الآن.',
+    emergencyStopConfirmTitle: 'قطع الطاقة عن {{alVehicle}}؟',
     emergencyStopConfirmDescription:
-      'الإيقاف الطارئ يقطع المحرك ويقفل {{alVehicle}} فوراً أينما كانت. وإن كان سائق يقودها فستتوقف تحته. لا تستخدمه إلا حين يجب ألا تستمر {{alVehicle}} في الحركة.',
+      'الإيقاف الطارئ يقطع المحرك ويقفل {{alVehicle}} فوراً في أي مكان. وإن كان سائق يقود {{alVehicle}} فسيتوقف المحرك أثناء القيادة. لا تستخدمه إلا عند الضرورة لإيقاف الحركة.',
     emergencyStopConfirmAction: 'إيقاف طارئ',
     speedLimitUnknown: 'غير مُبلَّغ عنه',
     speedLimitUnknownHint:
-      'لم تُبلِّغ هذه {{alVehicle}} عن حد سرعة. تحديد حد أدناه يرسله إلى الجهاز.',
+      'لم يُبلِّغ جهاز {{alVehicle}} عن حد سرعة. تحديد حد أدناه يرسله إلى الجهاز.',
   },
   zones: {
     title: 'إدارة النطاقات',
@@ -617,7 +623,7 @@ const ar: Translations = {
   },
   reports: {
     title: 'إدارة التقارير',
-    subtitle: 'راقب وأدر أسطول {{alVehicle}} الكهربائية بالكامل',
+    subtitle: 'راقب أسطولك الكهربائي وأدِره بالكامل',
     partialLoad: 'تعذّر تحميل بعض بيانات التقارير:',
     sectionMetrics: 'المؤشرات الرئيسية',
     sectionWeeklySessions: 'الجلسات الأسبوعية',
@@ -793,11 +799,14 @@ const ar: Translations = {
     switchLanguage: 'تغيير اللغة',
   },
   status: {
-    active: 'نشطة',
+    // Vehicle statuses: no adjective agreeing with the noun (FA-216).
+    active: 'في الخدمة',
     charging: 'قيد الشحن',
-    idle: 'خاملة',
+    idle: 'في وضع الخمول',
     maintenance: 'صيانة',
-    inactive: 'غير نشطة',
+    // Driver statuses (FA-239): السائق is masculine, whatever the vehicle noun.
+    driverActive: 'نشط',
+    driverInactive: 'غير نشط',
     pending: 'قيد الانتظار',
     blocked: 'محظور',
   },

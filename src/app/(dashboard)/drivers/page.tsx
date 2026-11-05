@@ -396,9 +396,9 @@ export default function DriversPage() {
 
   const tabOptions = [
     { value: 'all' as TabValue,      label: t('common.all') },
-    { value: 'active' as TabValue,   label: t('status.active') },
+    { value: 'active' as TabValue,   label: t('status.driverActive') },
     { value: 'blocked' as TabValue,  label: t('status.blocked') },
-    { value: 'inactive' as TabValue, label: t('status.inactive') },
+    { value: 'inactive' as TabValue, label: t('status.driverInactive') },
   ];
 
   if (forbidden) {

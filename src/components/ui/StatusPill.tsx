@@ -24,9 +24,11 @@ const stationToneMap: Record<StationStatus, 'success' | 'info' | 'warning'> = {
   in_use: 'warning',
 };
 
+// Drivers have their own active/inactive words: the vehicle ones can't agree
+// with both a person and every country's vehicle noun in Arabic (FA-239).
 const driverKeyMap: Record<DriverStatus, string> = {
-  active:   'active',
-  inactive: 'inactive',
+  active:   'driverActive',
+  inactive: 'driverInactive',
   pending:  'pending',
   blocked:  'blocked',
 };

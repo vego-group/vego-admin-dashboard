@@ -793,11 +793,14 @@ const en = {
     switchLanguage: 'Switch language',
   },
   status: {
+    // Vehicle statuses.
     active: 'Active',
     charging: 'Charging',
     idle: 'Idle',
     maintenance: 'Maintenance',
-    inactive: 'Inactive',
+    // Driver statuses: their own keys, since Arabic needs other words (FA-239).
+    driverActive: 'Active',
+    driverInactive: 'Inactive',
     pending: 'Pending',
     blocked: 'Blocked',
   },
