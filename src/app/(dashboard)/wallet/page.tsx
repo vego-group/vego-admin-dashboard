@@ -554,11 +554,12 @@ export default function WalletPage() {
           </div>
         </div>
 
-        {/* Fleet drivers can top up their own wallets, so bonus rows can appear
-            here, and the type filter has no option of its own for them yet. */}
+        {/* Fleet-funded top-ups never earn a bonus (decided rule). Bonus rows can
+            still appear here from drivers' own top-ups; this line no longer claims
+            which filter lists them (FA-430). */}
         <p className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-400 dark:text-slate-500">
           <Info className="h-3 w-3 shrink-0" />
-          {t('wallet.bonusesUnderTopUp')}
+          {t('wallet.fleetTopUpsNoBonus')}
         </p>
 
         {/* A filter the endpoint refused, in its own words. Without this the

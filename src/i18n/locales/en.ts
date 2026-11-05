@@ -838,7 +838,7 @@ const en = {
     resultTruncated:
       'Too many matching transactions to load in full — this view and the CSV export are incomplete. Narrow the date range.',
     filterRejected: 'The server rejected this filter, so nothing could be loaded:',
-    bonusesUnderTopUp: 'Bonuses are listed under Top-Up',
+    fleetTopUpsNoBonus: "Top-ups paid from this dashboard don't earn bonuses.",
     typeTopUp: 'Top-Up',
     typeFastCharge: 'Fast Charge',
     typeBatterySwap: 'Battery Swap',
