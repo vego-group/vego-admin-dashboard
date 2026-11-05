@@ -59,6 +59,7 @@ import type {
   DriverSession,
   DriverStatusChangeResult,
   FleetProfile,
+  GpsSignal,
   IoTDevice,
   SessionKind,
   SessionStatus,
@@ -529,6 +530,15 @@ function toSupportedCommands(raw: unknown): string[] | undefined {
     .filter(Boolean);
 }
 
+/**
+ * A GPS fix quality as the device reported it, or 'unknown' when it reported
+ * none. A missing value used to read 'strong' (FA-218, FA-311).
+ */
+function toGpsSignal(raw: unknown): GpsSignal {
+  const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  return value === 'strong' || value === 'weak' || value === 'none' ? value : 'unknown';
+}
+
 function mapMotorcycle(m: ApiMotorcycle): Vehicle {
   const iot = m.iot_device;
   const gps = iot?.latest_gps;
@@ -564,7 +574,8 @@ function mapMotorcycle(m: ApiMotorcycle): Vehicle {
     assignedDriverName: driver?.name,
     lastTripAt:         m.last_trip_at ?? new Date().toISOString(),
     totalDistanceKm:    readNumber(m.total_distance_km),
-    currentSpeedKmh:    gps?.speed ?? iot?.speed_kmh ?? 0,
+    // The last reading, or nothing — 0 km/h is a reading, "no telemetry" is not.
+    currentSpeedKmh:    readNumber(gps?.speed, iot?.speed_kmh),
     estimatedRangeKm:   readNumber(m.estimated_range_km),
     // No default. This was `?? 80` — a ceiling no fleet had set, shown back to
     // the operator as theirs, on a slider that stopped at 45. Unknown is
@@ -572,8 +583,9 @@ function mapMotorcycle(m: ApiMotorcycle): Vehicle {
     speedLimitKmh:      m.speed_limit_kmh ?? undefined,
     isLocked:           m.is_locked ?? false,
     isEngineRunning:    m.is_engine_running ?? false,
-    gpsSignal:          (gps?.gps_signal ?? iot?.gps_signal ?? 'strong') as Vehicle['gpsSignal'],
+    gpsSignal:          toGpsSignal(gps?.gps_signal ?? iot?.gps_signal),
     isOnline:           iot?.is_online ?? false,
+    lastSeenAt:         iot?.last_seen_at || undefined,
     supportedCommands:  toSupportedCommands(m.supported_commands ?? iot?.supported_commands),
   };
 }
@@ -3328,7 +3340,6 @@ function mapDevice(d: RawDevice): IoTDevice {
   const isOnline =
     typeof d.is_online === 'boolean' ? d.is_online
     : (d.status ?? d.connection_status) === 'online';
-  const gpsSignal = (gps.gps_signal ?? d.gps_signal ?? d.signal ?? 'strong') as IoTDevice['gpsSignal'];
   return {
     id:              String(d.id ?? d.device_id ?? d.imei ?? ''),
     deviceId:        String(d.device_id ?? d.imei ?? d.serial ?? d.id ?? ''),
@@ -3336,7 +3347,7 @@ function mapDevice(d: RawDevice): IoTDevice {
     motorcyclePlate: moto.plate_number ?? moto.plate ?? d.plate_number ?? undefined,
     status:          (isOnline ? 'online' : 'offline') as DeviceStatus,
     batteryLevel:    num(battery.soc ?? battery.relative_soc ?? d.battery_level ?? d.battery ?? d.soc ?? moto.battery_level),
-    gpsSignal:       (['strong', 'weak', 'none'].includes(gpsSignal) ? gpsSignal : 'strong') as IoTDevice['gpsSignal'],
+    gpsSignal:       toGpsSignal(gps.gps_signal ?? d.gps_signal ?? d.signal),
     latitude:        num(gps.latitude ?? d.latitude ?? d.lat),
     longitude:       num(gps.longitude ?? d.longitude ?? d.lng ?? d.lon),
     speedKmh:        num(gps.speed ?? d.speed_kmh ?? d.speed),

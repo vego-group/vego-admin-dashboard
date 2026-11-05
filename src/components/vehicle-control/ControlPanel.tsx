@@ -324,9 +324,10 @@ export function ControlPanel({
           style={{ borderColor: 'rgb(var(--border))' }}
         >
           <div className="flex items-center justify-between text-xs">
+            {/* As last reported: nothing on this page polls (FA-315). */}
             <span className="text-slate-500">{t('vehicleControl.currentSpeed')}</span>
             <span className="font-bold tabular-nums text-slate-900 dark:text-slate-100">
-              {vehicle.currentSpeedKmh} {t('common.kmh')}
+              {vehicle.currentSpeedKmh === undefined ? '—' : `${vehicle.currentSpeedKmh} ${t('common.kmh')}`}
             </span>
           </div>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
@@ -335,7 +336,7 @@ export function ControlPanel({
               style={{
                 // Same scale as every other speed here, so a vehicle doing
                 // 60 km/h no longer renders as a full bar.
-                width: `${Math.min(100, Math.max(0, (vehicle.currentSpeedKmh / VEHICLE_SPEED_LIMIT_MAX) * 100)) || 0}%`,
+                width: `${Math.min(100, Math.max(0, ((vehicle.currentSpeedKmh ?? 0) / VEHICLE_SPEED_LIMIT_MAX) * 100)) || 0}%`,
               }}
             />
           </div>
@@ -475,16 +476,18 @@ export function ControlPanel({
           />
           <SystemStatusRow
             label={t('vehicleControl.gpsSignal')}
-            // 'none' used to render as a bare em dash — indistinguishable from
-            // "we have no reading" when it means "the device reports no fix".
+            // 'none' is the device reporting no fix; 'unknown' is no reading at
+            // all, which used to be shown as a green "Strong" (FA-218).
             value={
               vehicle.gpsSignal === 'strong'
                 ? t('vehicleControl.strong')
                 : vehicle.gpsSignal === 'weak'
                 ? t('vehicleControl.weak')
-                : t('vehicleControl.gpsNone')
+                : vehicle.gpsSignal === 'none'
+                ? t('vehicleControl.gpsNone')
+                : t('vehicleControl.gpsUnknown')
             }
-            tone={vehicle.gpsSignal === 'strong' ? 'success' : 'warning'}
+            tone={vehicle.gpsSignal === 'strong' ? 'success' : vehicle.gpsSignal === 'unknown' ? 'neutral' : 'warning'}
           />
           <SystemStatusRow
             label={t('vehicleControl.connection')}

@@ -98,7 +98,8 @@ export function FleetStatusPanel({ metrics }: FleetStatusPanelProps) {
                 <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
                   {item.label}
                 </p>
-                <p className="text-[11px] text-slate-500">{t('common.lastUpdate')}</p>
+                {/* Was "Last update now": the counts load once (FA-315). */}
+                <p className="text-[11px] text-slate-500">{t('common.lastKnown')}</p>
               </div>
             </div>
             <span className="shrink-0 text-base font-bold tabular-nums text-slate-900 dark:text-slate-50">

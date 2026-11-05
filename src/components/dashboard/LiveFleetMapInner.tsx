@@ -81,7 +81,7 @@ function vehiclePopup(v: Vehicle, t: Translate): TrustedHtml {
   const bikeIconIndigo = BIKE_SVG.replace(/stroke="white"/g, 'stroke="#4f46e5"');
   const driverLine = v.assignedDriverName
     ? html`<div style="font-size:11px;color:rgb(var(--muted-foreground));margin-bottom:10px">&#128100; ${v.assignedDriverName}</div>` : '';
-  const speedLine = v.currentSpeedKmh > 0
+  const speedLine = (v.currentSpeedKmh ?? 0) > 0
     ? html`<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px"><span style="color:rgb(var(--muted-foreground))">${t('mapPopup.speed')}</span><span style="font-weight:600;color:rgb(var(--foreground))">${v.currentSpeedKmh} ${t('common.kmh')}</span></div>` : '';
   return html`<div style="font-family:system-ui,sans-serif;width:224px;padding:16px">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px">
@@ -231,15 +231,13 @@ export default function LiveFleetMapInner({
       className="relative overflow-hidden rounded-2xl border"
       style={{ borderColor: 'rgb(var(--border))', height }}
     >
-      {/* Live badge — sits above the map via z-index. Top-right in both
-          directions: Leaflet keeps its zoom control top-left in Arabic too, so
-          `end-4` would cover it there. */}
+      {/* What the pins are: positions as last reported when the page loaded.
+          This said "Live Updates" with a pulsing dot, and nothing polls
+          (FA-315). Top-right in both directions: Leaflet keeps its zoom
+          control top-left in Arabic too, so `end-4` would cover it there. */}
       <div className="pointer-events-none absolute right-4 top-4 z-[1001] inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm backdrop-blur dark:bg-slate-900/90 dark:text-slate-200">
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-        </span>
-        {t('common.liveUpdates')}
+        <span className="inline-flex h-2 w-2 rounded-full bg-slate-400" />
+        {t('common.lastKnownPositions')}
       </div>
       <div ref={containerRef} className="h-full w-full" />
     </div>

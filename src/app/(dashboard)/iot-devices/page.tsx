@@ -24,10 +24,12 @@ import { logger } from '@/lib/logger';
 type TabValue = 'all' | DeviceStatus;
 const PAGE_SIZE = 12;
 
-const GPS_TONE: Record<IoTDevice['gpsSignal'], { tone: 'success' | 'warning' | 'danger'; key: string }> = {
-  strong: { tone: 'success', key: 'iotDevices.gpsStrong' },
-  weak:   { tone: 'warning', key: 'iotDevices.gpsWeak' },
-  none:   { tone: 'danger',  key: 'iotDevices.gpsNone' },
+const GPS_TONE: Record<IoTDevice['gpsSignal'], { tone: 'success' | 'warning' | 'danger' | 'neutral'; key: string }> = {
+  strong:  { tone: 'success', key: 'iotDevices.gpsStrong' },
+  weak:    { tone: 'warning', key: 'iotDevices.gpsWeak' },
+  none:    { tone: 'danger',  key: 'iotDevices.gpsNone' },
+  // No reading: neutral, and counted under "Weak / No GPS" — not a green "Strong".
+  unknown: { tone: 'neutral', key: 'iotDevices.gpsUnknown' },
 };
 
 export default function IoTDevicesPage() {

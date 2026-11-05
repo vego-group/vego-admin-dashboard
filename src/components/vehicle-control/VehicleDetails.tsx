@@ -7,10 +7,9 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import {
   Battery,
   MapPin,
-  Navigation,
   User,
-  Maximize2,
   Gauge,
+  ExternalLink,
   Repeat,
   Zap,
   BatteryCharging,
@@ -21,7 +20,7 @@ import {
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { cn } from '@/lib/cn';
-import { formatBatteryLevel, formatNumber } from '@/lib/format';
+import { formatBatteryLevel, formatNumber, formatRelativeTime } from '@/lib/format';
 import { vehicleDisplayName } from '@/lib/vehicle-label';
 import type { Vehicle } from '@/types';
 import type { MotorcycleBattery, MotorcycleStatistics } from '@/lib/api';
@@ -220,34 +219,42 @@ export function VehicleDetails({
                 {t('vehicleControl.currentSpeed')}
               </p>
               <p className="font-medium tabular-nums text-slate-900 dark:text-slate-100">
-                {vehicle.currentSpeedKmh} {t('common.kmh')}
+                {vehicle.currentSpeedKmh === undefined ? '—' : `${vehicle.currentSpeedKmh} ${t('common.kmh')}`}
               </p>
             </div>
           </li>
         </ul>
       </Card>
 
-      {/* Live Location */}
+      {/* Last known position. This was "Live Location" over a "Map View
+          Placeholder", with a "Full Map" button that did nothing. Nothing on
+          this page polls, so it shows what the vehicle last reported, and
+          when (FA-223, FA-315). */}
       <Card className="p-5">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-50">
-            {t('vehicleControl.liveLocation')}
-          </h3>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:text-brand-700"
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-50">
+          {t('vehicleControl.lastKnownPosition')}
+        </h3>
+        {vehicle.coordinates ? (
+          <a
+            href={`https://www.google.com/maps?q=${vehicle.coordinates.lat},${vehicle.coordinates.lng}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:underline dark:text-indigo-400"
           >
-            <Maximize2 className="h-3.5 w-3.5" />
-            {t('vehicleControl.fullMap')}
-          </button>
-        </div>
-
-        <div className="relative mt-3 flex h-[140px] items-center justify-center overflow-hidden rounded-xl bg-slate-100 dark:bg-slate-800">
-          <div className="text-center text-slate-400">
-            <Navigation className="mx-auto h-6 w-6" />
-            <p className="mt-1.5 text-xs font-medium">{t('vehicleControl.mapPlaceholder')}</p>
-          </div>
-        </div>
+            <MapPin className="h-4 w-4 shrink-0" />
+            <span dir="ltr" className="tabular-nums">
+              {vehicle.coordinates.lat.toFixed(5)}, {vehicle.coordinates.lng.toFixed(5)}
+            </span>
+            <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-label={t('vehicleControl.openInMaps')} />
+          </a>
+        ) : (
+          <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">{t('common.locationUnknown')}</p>
+        )}
+        {vehicle.lastSeenAt && (
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            {t('vehicleControl.lastSeen', { time: formatRelativeTime(vehicle.lastSeenAt, locale) })}
+          </p>
+        )}
       </Card>
     </div>
   );

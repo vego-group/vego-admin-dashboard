@@ -142,6 +142,13 @@ export type Locale = 'en' | 'ar';
 export type Direction = 'ltr' | 'rtl';
 export type UserRole = 'admin' | 'operator';
 
+/**
+ * GPS fix quality as a device reported it. 'unknown' = no telemetry: a missing
+ * value used to read 'strong', a green "Strong" for a vehicle or device that
+ * had sent nothing (FA-218, FA-311).
+ */
+export type GpsSignal = 'strong' | 'weak' | 'none' | 'unknown';
+
 export interface Vehicle {
   id: string;
   /** As the API sends it; absent when it has none. Show `vehicleDisplayName()`. */
@@ -165,7 +172,8 @@ export interface Vehicle {
   lastTripAt: string;
   /** Absent when not reported — rendered "—", never 0 (FA-206). */
   totalDistanceKm?: number;
-  currentSpeedKmh: number;
+  /** Speed in the last telemetry; absent when there is none — "—", never 0. */
+  currentSpeedKmh?: number;
   /** Absent when not reported (FA-207). */
   estimatedRangeKm?: number;
   /**
@@ -180,8 +188,11 @@ export interface Vehicle {
   speedLimitKmh?: number;
   isLocked: boolean;
   isEngineRunning: boolean;
-  gpsSignal: 'strong' | 'weak' | 'none';
+  /** As the device reported it; 'unknown' when it reported nothing (never 'strong'). */
+  gpsSignal: GpsSignal;
   isOnline: boolean;
+  /** When the vehicle's device last reported (`iot_device.last_seen_at`). */
+  lastSeenAt?: string;
   /**
    * The commands this vehicle's device advertises, when the payload lists them.
    *
@@ -422,7 +433,8 @@ export interface IoTDevice {
   status: DeviceStatus;
   /** Battery level of the paired motorcycle, 0–100. */
   batteryLevel?: number;
-  gpsSignal: 'strong' | 'weak' | 'none';
+  /** 'unknown' when the device reported no fix quality (FA-311). */
+  gpsSignal: GpsSignal;
   latitude?: number;
   longitude?: number;
   speedKmh?: number;
