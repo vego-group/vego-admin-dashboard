@@ -110,6 +110,7 @@ const en = {
     criticalOpen: 'Critical (open)',
     resolved: 'Resolved',
     resolve: 'Resolve',
+    resolveFailed: "This alarm couldn't be marked resolved.",
     allClearTitle: 'All clear',
     allClearDescription: 'There are no alarms to show for this filter.',
     severityCritical: 'Critical',

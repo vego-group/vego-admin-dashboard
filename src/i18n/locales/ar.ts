@@ -130,6 +130,7 @@ const ar: Translations = {
     criticalOpen: 'حرجة (مفتوحة)',
     resolved: 'محلولة',
     resolve: 'حل',
+    resolveFailed: 'تعذّر تعليم هذا الإنذار كمحلول.',
     allClearTitle: 'لا توجد إنذارات',
     allClearDescription: 'لا توجد إنذارات لعرضها ضمن هذا الفلتر.',
     severityCritical: 'حرج',

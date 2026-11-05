@@ -12,6 +12,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { NoAccessState } from '@/components/ui/NoAccessState';
 import { Pagination } from '@/components/ui/Pagination';
 import { LoadError } from '@/components/ui/LoadError';
+import { FailureNote } from '@/components/ui/FailureNote';
 import { ListPageNote, pageCount } from '@/components/ui/ListPageNote';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
@@ -54,6 +55,8 @@ export default function AlarmsPage() {
   const [reloadKey, setReloadKey] = useState(0);
   const [kpis, setKpis] = useState<{ unresolved: Kpi; critical: Kpi; resolved: Kpi } | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
+  /** The last resolve that failed: which alarm, and why (FA-307). */
+  const [resolveError, setResolveError] = useState<{ id: string; lines: string[] } | null>(null);
 
   // The list: one page of the selected tab, filtered and paged by the server
   // (FA-306). It used to be the first 50 alarms, filtered in the browser.
@@ -113,11 +116,19 @@ export default function AlarmsPage() {
   const handleResolve = async (alarm: Alarm) => {
     if (resolvingId) return;
     setResolvingId(alarm.id);
-    const ok = await alarmsApi.resolve(alarm.id);
-    // Re-read the page and the KPIs: the alarm leaves the Unresolved tab and
-    // the counts move, and the server is the one that knows by how much.
-    if (ok) setReloadKey((k) => k + 1);
-    setResolvingId(null);
+    setResolveError(null);
+    try {
+      await alarmsApi.resolve(alarm.id);
+      // Re-read the page and the KPIs: the alarm leaves the Unresolved tab and
+      // the counts move, and the server is the one that knows by how much.
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      logger.error('[Alarms] Failed to resolve alarm:', err);
+      // Said next to the alarm, in the backend's words when it wrote some.
+      setResolveError({ id: alarm.id, lines: failureLines(err, t) });
+    } finally {
+      setResolvingId(null);
+    }
   };
 
   if (forbidden) {
@@ -141,7 +152,7 @@ export default function AlarmsPage() {
       <Card className="mt-5 p-4">
         <SegmentedControl
           value={tab}
-          onChange={(v) => { setTab(v); setPage(1); }}
+          onChange={(v) => { setTab(v); setPage(1); setResolveError(null); }}
           options={[
             { value: 'unresolved', label: t('alarms.unresolved') },
             { value: 'resolved',   label: t('alarms.resolved') },
@@ -210,6 +221,13 @@ export default function AlarmsPage() {
                         </button>
                       )}
                     </div>
+                    {resolveError?.id === a.id && (
+                      <FailureNote
+                        title={t('alarms.resolveFailed')}
+                        lines={resolveError.lines}
+                        onDismiss={() => setResolveError(null)}
+                      />
+                    )}
                   </div>
                 </div>
               );
@@ -220,7 +238,7 @@ export default function AlarmsPage() {
 
       {list && rows.length > 0 && <ListPageNote list={list} />}
       {totalPages > 1 && (
-        <Pagination currentPage={page} totalPages={totalPages} onChange={setPage} disabled={loading} />
+        <Pagination currentPage={page} totalPages={totalPages} onChange={(p) => { setPage(p); setResolveError(null); }} disabled={loading} />
       )}
     </DashboardShell>
   );

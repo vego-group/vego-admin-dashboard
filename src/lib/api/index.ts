@@ -3687,14 +3687,13 @@ export const alarmsApi = {
     return { ...result, rows: result.rows.map(mapAlarm) };
   },
 
-  /** Mark an alarm resolved. Returns true on success. */
-  async resolve(id: string): Promise<boolean> {
-    try {
-      await apiClient.post(`/fleet-admin/alarms/${id}/resolve`);
-      return true;
-    } catch {
-      return false;
-    }
+  /**
+   * Mark an alarm resolved. Throws on failure (FA-307): the caller shows the
+   * backend's reason, so the operator is not left with a button that simply
+   * re-enables.
+   */
+  async resolve(id: string): Promise<void> {
+    await apiClient.post(`/fleet-admin/alarms/${id}/resolve`);
   },
 };
 
