@@ -7,6 +7,7 @@ import { fitToPoints, type LatLngTuple } from '@/lib/map-fit';
 import { clampPercent, html, trustedHtml, type TrustedHtml } from '@/lib/html';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useBasemap } from '@/hooks/useBasemap';
+import { useCountryViewport } from '@/hooks/useCountryViewport';
 import type { SwappingStation } from '@/types';
 
 export interface SwappingStationMapProps {
@@ -81,6 +82,7 @@ export default function SwappingStationMapInner({ stations, height = 420 }: Swap
   const markersRef   = useRef<LeafletMarker[]>([]);
   const hasFittedRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
+  const viewRef = useCountryViewport(mapRef, mapReady, hasFittedRef, 12);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -94,8 +96,8 @@ export default function SwappingStationMapInner({ stations, height = 420 }: Swap
       // Placeholder viewport only — replaced by fitToPoints() over the real
       // markers as soon as any arrive. Never used to place a marker.
       const map: LeafletMap = L.map(containerRef.current, {
-        center: [24.74, 46.672],
-        zoom: 12,
+        center: viewRef.current.center,
+        zoom: viewRef.current.zoom,
         zoomControl: true,
       });
 

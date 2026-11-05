@@ -6,6 +6,7 @@ import { AlertTriangle, Sparkles } from 'lucide-react';
 import { ZONE_TYPES, ZONE_TYPE_LIST, zoneSpeedLimitText } from '@/lib/zone-types';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useBasemap } from '@/hooks/useBasemap';
+import { useCountryViewport } from '@/hooks/useCountryViewport';
 import { cn } from '@/lib/cn';
 import { fitToPoints, type LatLngTuple } from '@/lib/map-fit';
 import { html, trustedHtml, type TrustedHtml } from '@/lib/html';
@@ -111,6 +112,9 @@ export default function ZoneMapInner({
   // Fit the viewport to real geometry exactly once — refitting mid-draw would
   // move the map under the operator's cursor.
   const hasFittedRef  = useRef(false);
+  // An empty map opens on the fleet's country, so a first zone is drawn there
+  // (FA-314). Never moved while the operator is drawing.
+  const viewRef = useCountryViewport(mapRef, mapReady, hasFittedRef, 12, drawingMode);
 
   // Stable callback refs (avoid stale closures in Leaflet handlers)
   const onZoneClickRef          = useRef(onZoneClick);
@@ -131,11 +135,12 @@ export default function ZoneMapInner({
       const L = (await import('leaflet')) as any;
       if (cancelled || !containerRef.current) return;
 
-      // Placeholder viewport only — replaced by fitToPoints() over the real
-      // zone polygons (and vehicle pins) as soon as any arrive.
+      // Placeholder viewport only — the fleet's country (FA-314), replaced by
+      // fitToPoints() over the real zone polygons (and vehicle pins) as soon as
+      // any arrive.
       const map = L.map(containerRef.current, {
-        center: [24.74, 46.69],
-        zoom: 13,
+        center: viewRef.current.center,
+        zoom: viewRef.current.zoom,
         zoomControl: true,
       });
 

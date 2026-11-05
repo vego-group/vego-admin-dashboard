@@ -7,6 +7,7 @@ import { fitToPoints, type LatLngTuple } from '@/lib/map-fit';
 import { clampPercent, html, trustedHtml, type TrustedHtml } from '@/lib/html';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useBasemap } from '@/hooks/useBasemap';
+import { useCountryViewport } from '@/hooks/useCountryViewport';
 import { vehicleDisplayName } from '@/lib/vehicle-label';
 import { formatBatteryLevel } from '@/lib/format';
 import type { Vehicle, BatteryStation } from '@/types';
@@ -115,6 +116,7 @@ export default function LiveFleetMapInner({
   const markersRef   = useRef<LeafletMarker[]>([]);
   const hasFittedRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
+  const viewRef = useCountryViewport(mapRef, mapReady, hasFittedRef, 12);
 
   /* Initialize map once */
   useEffect(() => {
@@ -126,11 +128,12 @@ export default function LiveFleetMapInner({
       const L = (await import('leaflet')) as any;
       if (cancelled || !containerRef.current) return;
 
-      // Placeholder viewport only — replaced by fitBounds() over the real
-      // markers as soon as any arrive. Never used to place a marker.
+      // Placeholder viewport only — the fleet's country (FA-314), replaced by
+      // fitBounds() over the real markers as soon as any arrive. Never used to
+      // place a marker.
       const map: LeafletMap = L.map(containerRef.current, {
-        center: [24.74, 46.672],
-        zoom: 13,
+        center: viewRef.current.center,
+        zoom: viewRef.current.zoom,
         zoomControl: true,
       });
 
