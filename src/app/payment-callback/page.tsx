@@ -12,7 +12,31 @@ import { useFleetContext } from '@/hooks/useFleetContext';
 import { useI18n } from '@/i18n/I18nProvider';
 import { logger } from '@/lib/logger';
 
-type Status = 'loading' | 'success' | 'failed' | 'pending';
+/**
+ * `notCompleted`: the payment ended without money being taken — the checkout
+ * expired, or the payment was cancelled, declined or rejected (FA-410).
+ */
+type Status = 'loading' | 'success' | 'failed' | 'notCompleted' | 'pending';
+
+/**
+ * HyperPay verify statuses that end a payment with **no money taken** (FA-410).
+ * Reconciliation marks an abandoned checkout `expired`; a cancelled, declined
+ * or rejected payment was never captured. These used to read "being confirmed,
+ * the balance will update shortly", for a payment that never will. Anything not
+ * listed here, and not `completed` / `failed`, stays pending: the backend's
+ * status list is not documented, and an unknown one may still settle.
+ */
+const NOT_COMPLETED_STATUSES: ReadonlySet<string> = new Set([
+  'expired', 'cancelled', 'canceled', 'declined', 'rejected',
+]);
+
+/** What a HyperPay verify status means for this page. */
+function hyperPayStatus(raw: string | null): Exclude<Status, 'loading'> {
+  if (raw === 'completed') return 'success';
+  if (raw === 'failed') return 'failed';
+  if (raw && NOT_COMPLETED_STATUSES.has(raw)) return 'notCompleted';
+  return 'pending';
+}
 
 /**
  * One verify per HyperPay checkout, shared by every mount in this tab.
@@ -68,6 +92,8 @@ export default function PaymentCallbackPage() {
   // Pending because the verify call got no usable answer (network, timeout,
   // 5xx, no status) — not because the gateway said "pending".
   const [uncertain, setUncertain] = useState(false);
+  // `notCompleted` because the checkout ran out, rather than a refusal.
+  const [expired, setExpired]   = useState(false);
 
   useEffect(() => {
     const params    = new URLSearchParams(window.location.search);
@@ -82,11 +108,13 @@ export default function PaymentCallbackPage() {
       const show = (s: Status, r: {
         amount?: string | null; balance?: string | null;
         brand?: string | null; last4?: string | null; message?: string | null;
+        rawStatus?: string | null;
       }) => {
         setAmount(r.amount ?? null);
         setBalance(r.balance ?? null);
         setCard(s === 'success' && r.brand && r.last4 ? { brand: r.brand, last4: r.last4 } : null);
         setGatewayMsg(s === 'failed' ? r.message ?? null : null);
+        setExpired(s === 'notCompleted' && r.rawStatus === 'expired');
         setStatus(s);
       };
 
@@ -94,7 +122,8 @@ export default function PaymentCallbackPage() {
       // than asking a second time.
       if (params.get('settled') === '1') {
         const s = params.get('status');
-        show(s === 'completed' ? 'success' : s === 'failed' ? 'failed' : 'pending', {
+        show(hyperPayStatus(s), {
+          rawStatus: s,
           amount:  params.get('amount'),
           balance: params.get('balance'),
           brand:   params.get('brand'),
@@ -119,10 +148,7 @@ export default function PaymentCallbackPage() {
 
       verification
         .then((result) => {
-          const s: Status =
-            result.status === 'completed' ? 'success'
-            : result.status === 'failed'  ? 'failed'
-            : 'pending';
+          const s = hyperPayStatus(result.status);
           if (s === 'pending' && result.status !== 'pending') {
             logger.warn(`[payment-callback] HyperPay verify returned status "${result.status}"; showing pending.`);
           }
@@ -133,12 +159,14 @@ export default function PaymentCallbackPage() {
             last4:   result.cardLast4,
             message: result.resultDescription,
           };
-          show(s, shown);
+          show(s, { ...shown, rawStatus: result.status });
 
           // Mark the URL as answered, like the saved-card `settled=1` hand-off.
+          // A not-completed answer keeps its own status, so a refresh can still
+          // tell "expired" from "declined".
           const marked = new URLSearchParams(params);
           marked.set('settled', '1');
-          marked.set('status', result.status === 'completed' || result.status === 'failed' ? result.status : 'pending');
+          marked.set('status', s === 'pending' ? 'pending' : result.status);
           for (const [key, value] of Object.entries(shown)) {
             if (value) marked.set(key, value); else marked.delete(key);
           }
@@ -308,6 +336,19 @@ export default function PaymentCallbackPage() {
             </div>
             <h2 className="mt-4 text-xl font-bold text-slate-900 dark:text-slate-50">{t('paymentCallback.failedTitle')}</h2>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{gatewayMsg ?? t('paymentCallback.failedDefault')}</p>
+            <Button variant="primary" className="mt-6 w-full" onClick={goToDrivers}>{t('paymentCallback.backToDrivers')}</Button>
+          </>
+        )}
+
+        {status === 'notCompleted' && (
+          <>
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800">
+              <XCircle className="h-8 w-8 text-slate-500 dark:text-slate-400" />
+            </div>
+            <h2 className="mt-4 text-xl font-bold text-slate-900 dark:text-slate-50">{t('paymentCallback.notCompletedTitle')}</h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              {expired ? t('paymentCallback.notCompletedExpiredBody') : t('paymentCallback.notCompletedBody')}
+            </p>
             <Button variant="primary" className="mt-6 w-full" onClick={goToDrivers}>{t('paymentCallback.backToDrivers')}</Button>
           </>
         )}

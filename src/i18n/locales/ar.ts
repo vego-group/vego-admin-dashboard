@@ -941,6 +941,9 @@ const ar: Translations = {
     paidWithCard: 'تم الدفع ببطاقة {{card}}',
     checkLedgerFirst: 'راجع معاملات المحفظة قبل المحاولة مرة أخرى.',
     openLedger: 'فتح معاملات المحفظة',
+    notCompletedTitle: 'لم يكتمل الدفع',
+    notCompletedBody: 'لم تتم هذه الدفعة، ولم يُخصم أي مبلغ. يمكنك بدء الشحن من جديد.',
+    notCompletedExpiredBody: 'انتهت مهلة جلسة الدفع قبل الخصم من البطاقة، ولم يُخصم أي مبلغ. يمكنك بدء الشحن من جديد.',
   },
 };
 

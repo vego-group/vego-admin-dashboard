@@ -937,6 +937,10 @@ const en = {
     paidWithCard: 'Paid with {{card}}',
     checkLedgerFirst: 'Check Wallet Transactions before trying again.',
     openLedger: 'Open Wallet Transactions',
+    // HyperPay: the payment ended with no money taken (FA-410).
+    notCompletedTitle: 'Payment not completed',
+    notCompletedBody: "This payment didn't go through, so no money was taken. You can start the top-up again.",
+    notCompletedExpiredBody: 'The payment session expired before the card was charged, so no money was taken. You can start the top-up again.',
   },
 };
 
