@@ -305,8 +305,15 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-1.5">
 
-                      {/* Active ↔ Inactive toggle switch */}
-                      {onToggleStatus && (
+                      {/* Active ↔ Inactive toggle switch — for active and
+                          inactive drivers only. On a pending driver it would be
+                          an approval, which belongs to VEGO (FA-203, FA-211);
+                          a blocked driver has Unblock. The spacer keeps the
+                          other actions aligned. */}
+                      {onToggleStatus && d.status !== 'active' && d.status !== 'inactive' && (
+                        <span className="inline-block h-5 w-9 shrink-0" aria-hidden />
+                      )}
+                      {onToggleStatus && (d.status === 'active' || d.status === 'inactive') && (
                         <button
                           type="button"
                           onClick={() => handleToggle(d)}

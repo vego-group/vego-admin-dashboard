@@ -61,7 +61,6 @@ import type {
   IoTDevice,
   SessionKind,
   SessionStatus,
-  DriverRegistrationRequest,
   FastChargingCabinet,
   FastChargingStatus,
   Notification,
@@ -329,26 +328,6 @@ interface ApiNotification {
   message?: string;
   created_at?: string;
   read_at?: string | null;
-}
-
-interface ApiRegistrationRequest {
-  id: number | string;
-  user_id?: number | string;
-  name?: string;
-  first_name?: string;
-  last_name?: string;
-  phone?: string;
-  email?: string;
-  created_at?: string;
-  requested_at?: string;
-  account_status?: string;
-  status?: string;
-  driving_license?: {
-    status?: string;
-    license_number?: string;
-    expiry_date?: string;
-  };
-  plate?: { status?: string; plate_number?: string };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1702,81 +1681,6 @@ export const driversApi = {
       `/fleet-admin/drivers/${id}/unblock`,
     );
     return toStatusChangeResult(res);
-  },
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Registration Requests API
-// ─────────────────────────────────────────────────────────────────────────────
-
-function mapRegistrationRequest(r: ApiRegistrationRequest): DriverRegistrationRequest {
-  const fullName = r.name ?? [r.first_name, r.last_name].filter(Boolean).join(' ');
-  const licStatus = toDocStatus(r.driving_license?.status);
-  const plStatus  = toDocStatus(r.plate?.status);
-  const docs: DriverDocuments = {
-    license: {
-      status:     licStatus,
-      hasLicense: !!r.driving_license,
-      number:     r.driving_license?.license_number,
-      expiryDate: r.driving_license?.expiry_date,
-    },
-    customsCard: { status: 'not_uploaded' },
-    plate: {
-      status: plStatus,
-      number: r.plate?.plate_number,
-    },
-  };
-
-  const reqStatus: DriverRegistrationRequest['status'] =
-    r.account_status === 'approved' || r.status === 'approved' ? 'approved'
-    : r.account_status === 'rejected' || r.status === 'rejected' ? 'rejected'
-    : 'pending';
-
-  return {
-    id:          String(r.id),
-    name:        fullName,
-    phone:       r.phone ?? '',
-    email:       r.email,
-    requestedAt: r.requested_at ?? r.created_at ?? new Date().toISOString(),
-    status:      reqStatus,
-    documents:   docs,
-  };
-}
-
-export const registrationRequestsApi = {
-  async list(): Promise<DriverRegistrationRequest[]> {
-    const raw = await apiClient.get<unknown>(
-      '/fleet-admin/registration-requests?status=under_review&per_page=50',
-    );
-    return extractList<ApiRegistrationRequest>(raw).map(mapRegistrationRequest);
-  },
-
-  async approve(req: DriverRegistrationRequest): Promise<Driver> {
-    const res = await apiClient.post<{ data?: ApiDriver } | ApiDriver>(
-      `/fleet-admin/registration-requests/${req.id}/approve`,
-    );
-    // Backend now returns the full driver object — try to use it
-    const raw = (res as { data?: ApiDriver }).data ?? (res as ApiDriver);
-    if (raw?.id) return mapDriver(raw as ApiDriver);
-    // Fallback: synthesise from the registration request
-    return {
-      id:           req.id,
-      name:         req.name,
-      phone:        req.phone,
-      email:        req.email,
-      vehicleModel: '',
-      status:       'active',
-      trips:        0,
-      totalCost:    0,
-      charges:      0,
-      swaps:        0,
-      walletBalance: 0,
-      documents:    req.documents,
-    };
-  },
-
-  async reject(id: string, reason: string): Promise<void> {
-    await apiClient.post(`/fleet-admin/registration-requests/${id}/reject`, { reason });
   },
 };
 

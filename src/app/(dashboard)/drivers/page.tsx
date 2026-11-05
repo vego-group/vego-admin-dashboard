@@ -413,11 +413,15 @@ export default function DriversPage() {
           icon={<Bike className="h-5 w-5" />}
           iconColor="indigo"
         />
+        {/* Informational only (FA-203). Drivers who registered in the app are
+            approved by VEGO (SuperAdmin), not by the fleet; drivers added here
+            are approved at once. There is nothing to act on from this page. */}
         <MetricCard
           label={t('drivers.pendingDrivers')}
           value={drivers.filter((d) => d.status === 'pending').length}
           icon={<Clock className="h-5 w-5" />}
           iconColor="blue"
+          hint={t('drivers.pendingDriversHint')}
         />
         <MetricCard
           label={t('drivers.inactive')}

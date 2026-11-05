@@ -234,18 +234,6 @@ export interface DriverDocuments {
   };
 }
 
-export type RegistrationRequestStatus = 'pending' | 'approved' | 'rejected';
-
-export interface DriverRegistrationRequest {
-  id: string;
-  name: string;
-  phone: string;
-  email?: string;
-  requestedAt: string;
-  status: RegistrationRequestStatus;
-  documents: DriverDocuments;
-}
-
 export interface Driver {
   id: string;
   name: string;

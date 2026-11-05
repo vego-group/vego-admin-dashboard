@@ -27,6 +27,8 @@ interface MetricCardProps {
   icon: React.ReactNode;
   iconColor?: IconColor;
   unit?: string;
+  /** A short line under the value, e.g. to say a number needs no action. */
+  hint?: string;
   className?: string;
 }
 
@@ -39,6 +41,7 @@ export function MetricCard({
   icon,
   iconColor = 'indigo',
   unit,
+  hint,
   className,
 }: MetricCardProps) {
   const { locale } = useI18n();
@@ -63,6 +66,9 @@ export function MetricCard({
               <span className="text-sm font-medium text-slate-500 dark:text-slate-400">{unit}</span>
             )}
           </div>
+          {hint && (
+            <p className="mt-2 text-[11px] leading-snug text-slate-500 dark:text-slate-400">{hint}</p>
+          )}
         </div>
         <div
           className={cn(

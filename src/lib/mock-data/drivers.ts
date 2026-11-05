@@ -1,4 +1,4 @@
-import type { Driver, DriverDocuments, DriverRegistrationRequest } from '@/types';
+import type { Driver, DriverDocuments } from '@/types';
 
 const verified: DriverDocuments = {
   license:     { status: 'verified', hasLicense: true, number: 'SA-112233', expiryDate: '2027-03-15' },
@@ -136,46 +136,3 @@ export const mockDrivers: Driver[] = [
   },
 ];
 
-const ago = (h: number) =>
-  new Date(Date.now() - h * 3_600_000).toISOString();
-
-export const mockPendingRequests: DriverRegistrationRequest[] = [
-  {
-    id: 'REQ-0001',
-    name: 'Omar Al-Rashidi',
-    phone: '557001234',
-    email: 'omar.rashidi@mail.com',
-    requestedAt: ago(2),
-    status: 'pending',
-    documents: {
-      license:     { status: 'pending', hasLicense: true, number: 'SA-334455' },
-      customsCard: { status: 'pending' },
-      plate:       { status: 'pending', number: 'MNO 2233' },
-    },
-  },
-  {
-    id: 'REQ-0002',
-    name: 'Rayan Al-Dosari',
-    phone: '535009988',
-    requestedAt: ago(7),
-    status: 'pending',
-    documents: {
-      license:     { status: 'not_uploaded', hasLicense: false },
-      customsCard: { status: 'pending' },
-      plate:       { status: 'not_uploaded' },
-    },
-  },
-  {
-    id: 'REQ-0003',
-    name: 'Turki Al-Anzi',
-    phone: '501122334',
-    email: 'turki@fleetco.sa',
-    requestedAt: ago(24),
-    status: 'pending',
-    documents: {
-      license:     { status: 'not_uploaded', hasLicense: false },
-      customsCard: { status: 'not_uploaded' },
-      plate:       { status: 'not_uploaded' },
-    },
-  },
-];
