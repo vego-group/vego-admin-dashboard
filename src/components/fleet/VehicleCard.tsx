@@ -75,9 +75,11 @@ export function VehicleCard({ vehicle, onClick, onAssignDriver }: VehicleCardPro
         style={{ borderColor: 'rgb(var(--border))' }}
       >
         <div>
-          <p className="text-slate-500">{t('fleet.lastTrip')}</p>
+          {/* When the device last reported. There are no trips (FA-217), and
+              a vehicle that never reported shows "—", not "just now". */}
+          <p className="text-slate-500">{t('fleet.lastReported')}</p>
           <p className="mt-0.5 font-semibold text-slate-700 dark:text-slate-200">
-            {formatRelativeTime(vehicle.lastTripAt, locale)}
+            {formatRelativeTime(vehicle.lastSeenAt, locale)}
           </p>
         </div>
         <div className="text-end">

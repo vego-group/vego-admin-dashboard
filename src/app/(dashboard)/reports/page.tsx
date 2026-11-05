@@ -7,7 +7,7 @@ import { MetricCard } from '@/components/dashboard/MetricCard';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { NoAccessState } from '@/components/ui/NoAccessState';
-import { WeeklyTripsChart } from '@/components/reports/WeeklyTripsChart';
+import { WeeklySessionsChart } from '@/components/reports/WeeklySessionsChart';
 import { BatteryDistributionChart } from '@/components/reports/BatteryDistributionChart';
 import { MonthlyRevenueChart } from '@/components/reports/MonthlyRevenueChart';
 import { CostAnalysisChart } from '@/components/reports/CostAnalysisChart';
@@ -25,7 +25,7 @@ import type {
 } from '@/types';
 import { logger } from '@/lib/logger';
 
-type WeeklyTrip    = { day: string; trips: number; revenue: number };
+type WeeklySessions = { day: string; sessions: number; revenue: number };
 type TopDriver     = { name: string; swaps: number; charges: number; activity: number };
 
 export default function ReportsPage() {
@@ -35,7 +35,7 @@ export default function ReportsPage() {
 
   const [loading, setLoading]               = useState(true);
   const [metrics, setMetrics]               = useState<DashboardMetrics | null>(null);
-  const [weeklyTrips, setWeeklyTrips]       = useState<WeeklyTrip[]>([]);
+  const [weeklySessions, setWeeklySessions] = useState<WeeklySessions[]>([]);
   const [monthlyRevenue, setMonthlyRevenue] = useState<RevenuePoint[]>([]);
   const [batteryDist, setBatteryDist]       = useState<BatteryDistribution[]>([]);
   const [costAnalysis, setCostAnalysis]     = useState<CostBreakdown[]>([]);
@@ -50,7 +50,7 @@ export default function ReportsPage() {
       // (e.g. reports/weekly-trips) degrades only its own card, not the page.
       const [mRes, wtRes, mrRes, bdRes, caRes, tdRes] = await Promise.allSettled([
         dashboardApi.getMetrics(),
-        reportsApi.getWeeklyTrips(),
+        reportsApi.getWeeklySessions(),
         reportsApi.getMonthlyRevenue(),
         reportsApi.getBatteryDistribution(),
         reportsApi.getCostAnalysis(),
@@ -59,7 +59,7 @@ export default function ReportsPage() {
       if (cancelled) return;
 
       if (mRes.status  === 'fulfilled') setMetrics(mRes.value);
-      if (wtRes.status === 'fulfilled') setWeeklyTrips(wtRes.value);
+      if (wtRes.status === 'fulfilled') setWeeklySessions(wtRes.value);
       if (mrRes.status === 'fulfilled') setMonthlyRevenue(mrRes.value);
       if (bdRes.status === 'fulfilled') setBatteryDist(bdRes.value);
       if (caRes.status === 'fulfilled') setCostAnalysis(caRes.value);
@@ -69,7 +69,7 @@ export default function ReportsPage() {
       // sees exactly what's unavailable instead of a single raw error string.
       const sections: [PromiseSettledResult<unknown>, string][] = [
         [mRes,  t('reports.sectionMetrics')],
-        [wtRes, t('reports.sectionWeeklyTrips')],
+        [wtRes, t('reports.sectionWeeklySessions')],
         [mrRes, t('reports.sectionMonthlyRevenue')],
         [bdRes, t('reports.sectionBatteryDistribution')],
         [caRes, t('reports.sectionCostAnalysis')],
@@ -131,13 +131,13 @@ export default function ReportsPage() {
           <>
             <MetricCard
               label={t('reports.sessions7d')}
-              value={weeklyTrips.reduce((s, w) => s + w.trips, 0)}
+              value={weeklySessions.reduce((s, w) => s + w.sessions, 0)}
               icon={<Repeat className="h-5 w-5" />}
               iconColor="blue"
             />
             <MetricCard
               label={t('reports.revenue7d')}
-              value={formatMoney(weeklyTrips.reduce((s, w) => s + w.revenue, 0), locale)}
+              value={formatMoney(weeklySessions.reduce((s, w) => s + w.revenue, 0), locale)}
               icon={<DollarSign className="h-5 w-5" />}
               iconColor="green"
             />
@@ -158,9 +158,9 @@ export default function ReportsPage() {
         )}
       </div>
 
-      {/* Weekly Trips + Battery Distribution */}
+      {/* Weekly sessions + Battery Distribution */}
       <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <WeeklyTripsChart data={weeklyTrips} loading={loading} />
+        <WeeklySessionsChart data={weeklySessions} loading={loading} />
         <BatteryDistributionChart data={batteryDist} loading={loading} />
       </div>
 

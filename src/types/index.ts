@@ -169,7 +169,6 @@ export interface Vehicle {
   coordinates?: { lat: number; lng: number };
   assignedDriverId?: string;
   assignedDriverName?: string;
-  lastTripAt: string;
   /** Absent when not reported — rendered "—", never 0 (FA-206). */
   totalDistanceKm?: number;
   /** Speed in the last telemetry; absent when there is none — "—", never 0. */
@@ -266,10 +265,6 @@ export interface Driver {
   /** Plate number of the assigned motorcycle, for display. */
   assignedMotorcyclePlate?: string;
   status: DriverStatus;
-  trips: number;
-  totalCost: number;
-  charges: number;
-  swaps: number;
   walletBalance: number;
   avatarUrl?: string;
   /**
@@ -339,24 +334,9 @@ export interface Zone {
   createdAt: string;
 }
 
-export interface Trip {
-  id: string;
-  vehicleId: string;
-  driverId: string;
-  startedAt: string;
-  endedAt?: string;
-  distanceKm: number;
-  durationMinutes: number;
-  startLocation: string;
-  endLocation: string;
-  cost: number;
-}
-
 export interface DashboardMetrics {
   activeFleet: number;
   availableBatteries: number;
-  totalTripsToday: number;
-  avgTripDurationMinutes: number;
   chargingBatteries: number;
   averageSoc: number;
   lowBatteryCount: number;
@@ -365,11 +345,8 @@ export interface DashboardMetrics {
   fleetTrend: number;
   driversTrend: number;
   batteriesTrend: number;
-  tripsTrend: number;
-  durationTrend: number;
   // Additional counters from GET /fleet-admin/dashboard
   totalDrivers: number;
-  activeTrips: number;
   unresolvedAlarms: number;
   onlineDevices: number;
 }
@@ -387,7 +364,8 @@ export interface BatteryHealthPoint {
 export interface RevenuePoint {
   date: string;
   revenue: number;
-  trips: number;
+  /** Sessions (swaps + charges) that month; the backend calls it `trips_count`. */
+  sessions: number;
 }
 
 export interface CostBreakdown {

@@ -130,11 +130,8 @@ interface ApiDriver {
   // Motorcycle — list returns assigned_motorcycle, show returns motorcycle
   assigned_motorcycle?: { id?: number; model_name?: string; model?: string; plate_number?: string } | null;
   motorcycle?: { id?: number; model_name?: string; model?: string; plate_number?: string } | null;
-  // Stats — not present in list/show response yet; will be 0 until backend adds them
-  trips_count?: number;
-  total_cost?: number;
-  charges_count?: number;
-  swaps_count?: number;
+  // No per-driver activity or cost: the list and show responses carry none, and
+  // the platform has no trips (FA-217). A column that always read 0 is gone.
   // Wallet balance — the show endpoint returns the money object; the list
   // response still carries a flat scalar in the fleet's own currency.
   wallet_balance?: string | number;
@@ -187,7 +184,6 @@ interface ApiMotorcycle {
   // Real API: assigned_user; legacy: driver
   assigned_user?: { id: number | string; name: string } | null;
   driver?: { id: number | string; name: string };
-  last_trip_at?: string;
   total_distance_km?: number;
   estimated_range_km?: number;
   speed_limit_kmh?: number;
@@ -500,10 +496,6 @@ function mapDriver(d: ApiDriver): Driver {
     assignedMotorcycleId:    moto?.id != null ? String(moto.id) : undefined,
     assignedMotorcyclePlate: moto?.plate_number ?? undefined,
     status:       toDriverStatus(d.status),
-    trips:        d.trips_count ?? 0,
-    totalCost:    d.total_cost ?? 0,
-    charges:      d.charges_count ?? 0,
-    swaps:        d.swaps_count ?? 0,
     walletBalance: moneyToNumber(readMoney(d.wallet, { amount: d.wallet_balance })),
     dialCode:       toDialCode(d.country_code),
     isoCountryCode: toIsoCountryCode(d.iso_country_code),
@@ -572,7 +564,6 @@ function mapMotorcycle(m: ApiMotorcycle): Vehicle {
     coordinates,
     assignedDriverId:   driver ? String(driver.id) : undefined,
     assignedDriverName: driver?.name,
-    lastTripAt:         m.last_trip_at ?? new Date().toISOString(),
     totalDistanceKm:    readNumber(m.total_distance_km),
     // The last reading, or nothing — 0 km/h is a reading, "no telemetry" is not.
     currentSpeedKmh:    readNumber(gps?.speed, iot?.speed_kmh),
@@ -1986,28 +1977,21 @@ interface ApiDashboard {
   /** Backend returns null when the fleet has no data yet */
   average_soc?: number | null;
   average_soh?: number | null;
-  total_trips_today?: number;
-  avg_trip_duration_minutes?: number;
-  /** Backend returns null when no trips have occurred */
+  // No trip counters: the platform has no trips (FA-217).
   success_rate?: number | null;
   /** Money: a scalar on older responses, a currency-aware object on current ones. */
   average_cost_per_motorcycle?: number | string | ApiMoneyFields | null;
   // Confirmed new counters
   total_drivers?: number;
-  active_trips?: number;
   unresolved_alarms?: number;
   online_devices?: number;
   // Real trend field names returned by the backend
   fleet_trend?: number;
   drivers_trend?: number;
   batteries_trend?: number;
-  trips_trend?: number;
-  duration_trend?: number;
   // Legacy names (kept as fallback in case API version changes)
   total_motorcycles_trend?: number;
   available_batteries_trend?: number;
-  total_trips_today_trend?: number;
-  avg_trip_duration_minutes_trend?: number;
 }
 
 interface ApiUsageBucket {
@@ -2047,8 +2031,6 @@ export const dashboardApi = {
       chargingBatteries:       res.charging_batteries ?? 0,
       lowBatteryCount:         res.low_battery_count ?? 0,
       averageSoc:              res.average_soc ?? 0,
-      totalTripsToday:         res.total_trips_today ?? 0,
-      avgTripDurationMinutes:  res.avg_trip_duration_minutes ?? 0,
       successRate:             res.success_rate ?? 0,
       averageCostPerVehicle:   moneyToNumber(avgCost),
       // Trend fields — backend uses short names (fleet_trend, batteries_trend…)
@@ -2056,11 +2038,8 @@ export const dashboardApi = {
       fleetTrend:              res.fleet_trend     ?? res.total_motorcycles_trend         ?? 0,
       driversTrend:            res.drivers_trend ?? 0,
       batteriesTrend:          res.batteries_trend ?? res.available_batteries_trend       ?? 0,
-      tripsTrend:              res.trips_trend     ?? res.total_trips_today_trend         ?? 0,
-      durationTrend:           res.duration_trend  ?? res.avg_trip_duration_minutes_trend ?? 0,
       // New counters from the dashboard endpoint
       totalDrivers:            res.total_drivers ?? 0,
-      activeTrips:             res.active_trips ?? 0,
       unresolvedAlarms:        res.unresolved_alarms ?? 0,
       onlineDevices:           res.online_devices ?? 0,
     };
@@ -2091,7 +2070,12 @@ export const dashboardApi = {
 // Reports API
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface ApiWeeklyTrip {
+/**
+ * One day of `GET /fleet-admin/reports/weekly-trips`. The route and the count
+ * field keep their old "trips" names, but the count is **sessions** (swaps +
+ * charges): the platform has no trips (FA-333).
+ */
+interface ApiWeeklySessions {
   day?: string;
   label?: string;
   trips_count?: number;
@@ -2137,8 +2121,6 @@ interface ApiTopDriver {
   driver_id?: number | string;
   user_id?: number | string;
   name?: string;
-  trips_count?: number;
-  trips?: number;
   swaps_count?: number;
   swaps?: number;
   charges_count?: number;
@@ -2149,11 +2131,11 @@ interface ApiTopDriver {
 const COST_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
 
 export const reportsApi = {
-  async getWeeklyTrips(): Promise<{ day: string; trips: number; revenue: number }[]> {
+  async getWeeklySessions(): Promise<{ day: string; sessions: number; revenue: number }[]> {
     const raw = await apiClient.get<unknown>('/fleet-admin/reports/weekly-trips');
-    return extractList<ApiWeeklyTrip>(raw).map((r) => ({
-      day:     r.label ?? r.day ?? '',
-      trips:   r.trips_count ?? r.trips ?? 0,
+    return extractList<ApiWeeklySessions>(raw).map((r) => ({
+      day:      r.label ?? r.day ?? '',
+      sessions: r.trips_count ?? r.trips ?? 0,
       revenue: moneyToNumber(readMoney({ amount: r.revenue, currency: r.currency, decimals: r.decimals })),
     }));
   },
@@ -2167,7 +2149,8 @@ export const reportsApi = {
     return extractList<ApiMonthlyRevenue>(raw).map((r) => ({
       date:    r.label ?? r.month ?? r.date ?? '',
       revenue: moneyToNumber(readMoney({ amount: r.revenue, currency: r.currency, decimals: r.decimals })),
-      trips:   r.trips_count ?? r.trips ?? 0,
+      // Sessions, under the backend's old "trips" name (FA-333).
+      sessions: r.trips_count ?? r.trips ?? 0,
     }));
   },
 

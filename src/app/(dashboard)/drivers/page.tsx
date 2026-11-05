@@ -258,10 +258,6 @@ export default function DriversPage() {
           ...updated,
           status:        d.status,
           walletBalance: d.walletBalance,
-          trips:         d.trips,
-          totalCost:     d.totalCost,
-          charges:       d.charges,
-          swaps:         d.swaps,
           documents:     docs ? { ...updated.documents, license: docs.license, plate: docs.plate } : updated.documents,
         });
       }));

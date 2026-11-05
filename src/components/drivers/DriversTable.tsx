@@ -220,8 +220,6 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
               <th className="px-5 py-4">{t('drivers.status')}</th>
               <th className="px-5 py-4">{t('drivers.documents')}</th>
               <th className="px-5 py-4">{t('drivers.walletBalance')}</th>
-              <th className="px-5 py-4">{t('drivers.trips')}</th>
-              <th className="px-5 py-4">{t('drivers.totalCost')}</th>
               <th className="px-5 py-4">{t('drivers.actions')}</th>
             </tr>
           </thead>
@@ -292,13 +290,6 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
                     )}>
                       {formatMoney(d.walletBalance, locale)}
                     </span>
-                  </td>
-
-                  <td className="px-5 py-4 font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-                    {d.trips}
-                  </td>
-                  <td className="px-5 py-4 font-semibold tabular-nums text-slate-700 dark:text-slate-200">
-                    {formatMoney(d.totalCost, locale)}
                   </td>
 
                   {/* Actions column */}

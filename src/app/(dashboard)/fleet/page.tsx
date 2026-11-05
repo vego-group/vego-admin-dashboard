@@ -21,7 +21,7 @@ import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { fleetApi, driversApi } from '@/lib/api';
 import { isForbiddenError } from '@/lib/api-errors';
 import type { Driver, Vehicle, VehicleStatus } from '@/types';
-import { ltrIsolate } from '@/lib/format';
+import { ltrIsolate, parseBackendDate } from '@/lib/format';
 import { vehicleDisplayName, vehicleMatches } from '@/lib/vehicle-label';
 import { logger } from '@/lib/logger';
 
@@ -133,11 +133,16 @@ export default function FleetPage() {
     let result = vehicles;
     if (tab !== 'all') result = result.filter((v) => v.status === tab);
     if (query) result = result.filter((v) => vehicleMatches(v, query));
-    if (sort === 'newest') {
-      result = [...result].sort((a, b) => +new Date(b.lastTripAt) - +new Date(a.lastTripAt));
-    } else {
-      result = [...result].sort((a, b) => +new Date(a.lastTripAt) - +new Date(b.lastTripAt));
-    }
+    // By when the device last reported. A vehicle that never reported has no
+    // time to sort by and goes last either way (FA-217: there are no trips).
+    const reportedAt = (v: Vehicle) => parseBackendDate(v.lastSeenAt)?.getTime();
+    result = [...result].sort((a, b) => {
+      const ta = reportedAt(a), tb = reportedAt(b);
+      if (ta === undefined || tb === undefined) {
+        return ta === tb ? 0 : ta === undefined ? 1 : -1;
+      }
+      return sort === 'newest' ? tb - ta : ta - tb;
+    });
     return result;
   }, [vehicles, tab, query, sort]);
 
@@ -237,8 +242,8 @@ export default function FleetPage() {
             value={sort}
             onChange={(e) => setSort(e.target.value)}
             options={[
-              { value: 'newest', label: t('common.newestFirst') },
-              { value: 'oldest', label: t('common.oldestFirst') },
+              { value: 'newest', label: t('fleet.sortReportedNewest') },
+              { value: 'oldest', label: t('fleet.sortReportedOldest') },
             ]}
             className="w-[200px]"
           />

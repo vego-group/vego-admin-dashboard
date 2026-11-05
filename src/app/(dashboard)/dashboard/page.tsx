@@ -29,8 +29,6 @@ import { logger } from '@/lib/logger';
 const EMPTY_METRICS: DashboardMetrics = {
   activeFleet: 0,
   availableBatteries: 0,
-  totalTripsToday: 0,
-  avgTripDurationMinutes: 0,
   chargingBatteries: 0,
   averageSoc: 0,
   lowBatteryCount: 0,
@@ -39,10 +37,7 @@ const EMPTY_METRICS: DashboardMetrics = {
   fleetTrend: 0,
   driversTrend: 0,
   batteriesTrend: 0,
-  tripsTrend: 0,
-  durationTrend: 0,
   totalDrivers: 0,
-  activeTrips: 0,
   unresolvedAlarms: 0,
   onlineDevices: 0,
 };
