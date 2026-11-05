@@ -4,7 +4,6 @@ import { Clock, RefreshCw } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { LocationLabel } from '@/components/ui/LocationLabel';
 import { useI18n } from '@/i18n/I18nProvider';
-import { cn } from '@/lib/cn';
 import type { SwappingStation } from '@/types';
 
 function CirclePercent({ value }: { value: number }) {

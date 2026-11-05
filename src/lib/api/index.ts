@@ -3421,13 +3421,58 @@ function num(v: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-type RawDevice = Record<string, any>;
+/** An id or number as the backend may send it: a JSON number or a string. */
+type RawScalar = string | number;
+
+/** A nested motorcycle reference, in any of the shapes seen on device and alarm rows. */
+interface RawMotorcycleRef {
+  id?: RawScalar | null;
+  plate_number?: string | null;
+  plate?: string | null;
+  battery_level?: RawScalar | null;
+}
+
+/**
+ * An IoT device row. Every field is optional: the shape is not confirmed, so
+ * each alias the mapper reads is listed with the type it is read as (FA-007:
+ * this was `Record<string, any>`, which let any typo through).
+ */
+interface RawDevice {
+  id?: RawScalar | null;
+  device_id?: RawScalar | null;
+  imei?: RawScalar | null;
+  serial?: RawScalar | null;
+  assigned_motorcycle?: RawMotorcycleRef | null;
+  motorcycle?: RawMotorcycleRef | null;
+  motorcycle_id?: RawScalar | null;
+  plate_number?: string | null;
+  latest_gps?: { gps_signal?: unknown; latitude?: unknown; longitude?: unknown; speed?: unknown } | null;
+  latest_battery?: { soc?: unknown; relative_soc?: unknown } | null;
+  is_online?: boolean | null;
+  status?: string | null;
+  connection_status?: string | null;
+  battery_level?: unknown;
+  battery?: unknown;
+  soc?: unknown;
+  gps_signal?: unknown;
+  signal?: unknown;
+  latitude?: unknown;
+  longitude?: unknown;
+  lat?: unknown;
+  lng?: unknown;
+  lon?: unknown;
+  speed_kmh?: unknown;
+  speed?: unknown;
+  last_seen_at?: string | null;
+  last_seen?: string | null;
+  updated_at?: string | null;
+}
 
 function mapDevice(d: RawDevice): IoTDevice {
   // Real API nests: assigned_motorcycle, latest_gps, latest_battery.
-  const moto = d.assigned_motorcycle ?? d.motorcycle ?? {};
-  const gps = d.latest_gps ?? {};
-  const battery = d.latest_battery ?? {};
+  const moto: RawMotorcycleRef = d.assigned_motorcycle ?? d.motorcycle ?? {};
+  const gps: NonNullable<RawDevice['latest_gps']> = d.latest_gps ?? {};
+  const battery: NonNullable<RawDevice['latest_battery']> = d.latest_battery ?? {};
   const isOnline =
     typeof d.is_online === 'boolean' ? d.is_online
     : (d.status ?? d.connection_status) === 'online';
@@ -3472,10 +3517,36 @@ export const iotDevicesApi = {
 // Alarms API  (defensive mapping — see docs/BACKEND_GAPS.md A3)
 // ─────────────────────────────────────────────────────────────────────────────
 
-type RawAlarm = Record<string, any>;
+/** An alarm row; every alias the mapper reads, with the type it is read as (FA-007). */
+interface RawAlarm {
+  id?: RawScalar | null;
+  type?: string | null;
+  alarm_type?: string | null;
+  code?: RawScalar | null;
+  title?: string | null;
+  name?: string | null;
+  message?: string | null;
+  description?: string | null;
+  details?: string | null;
+  severity?: string | null;
+  level?: string | null;
+  priority?: string | null;
+  status?: string | null;
+  is_resolved?: boolean | null;
+  resolved?: boolean | null;
+  resolved_at?: string | null;
+  iot_device?: { id?: RawScalar | null; assigned_motorcycle?: RawMotorcycleRef | null } | null;
+  motorcycle?: RawMotorcycleRef | null;
+  motorcycle_id?: RawScalar | null;
+  device_id?: RawScalar | null;
+  recorded_at?: string | null;
+  created_at?: string | null;
+  triggered_at?: string | null;
+  timestamp?: string | null;
+}
 
-function toAlarmSeverity(s?: string): AlarmSeverity {
-  const v = (s ?? '').toLowerCase();
+function toAlarmSeverity(s?: string | null): AlarmSeverity {
+  const v = String(s ?? '').toLowerCase();
   if (v === 'critical' || v === 'high' || v === 'error' || v === 'danger') return 'critical';
   if (v === 'warning' || v === 'medium' || v === 'warn') return 'warning';
   return 'info';
@@ -3485,7 +3556,7 @@ function mapAlarm(a: RawAlarm): Alarm {
   const resolved =
     a.status === 'resolved' || a.is_resolved === true || a.resolved === true || a.resolved_at != null;
   // Real API nests the bike under iot_device.assigned_motorcycle.
-  const moto = a.iot_device?.assigned_motorcycle ?? a.motorcycle ?? {};
+  const moto: RawMotorcycleRef = a.iot_device?.assigned_motorcycle ?? a.motorcycle ?? {};
   return {
     id:           String(a.id ?? ''),
     type:         String(a.type ?? a.alarm_type ?? a.code ?? 'unknown'),
@@ -3533,10 +3604,36 @@ export const alarmsApi = {
 // Sessions API — driver swap / charging activity (defensive; see BACKEND_GAPS A4)
 // ─────────────────────────────────────────────────────────────────────────────
 
-type RawSession = Record<string, any>;
+/** A swap or charging session row; every alias the mapper reads, typed (FA-007). */
+interface RawSession {
+  id?: RawScalar | null;
+  user?: { id?: RawScalar | null; name?: string | null } | null;
+  driver?: { id?: RawScalar | null; name?: string | null } | null;
+  station?: { name?: string | null } | null;
+  pile?: { name?: string | null } | null;
+  cabinet?: { name?: string | null } | null;
+  driver_id?: RawScalar | null;
+  driver_name?: string | null;
+  station_name?: string | null;
+  cabinet_name?: string | null;
+  status?: string | null;
+  started_at?: string | null;
+  created_at?: string | null;
+  start_time?: string | null;
+  completed_at?: string | null;
+  ended_at?: string | null;
+  end_time?: string | null;
+  pricing?: { final_price?: unknown; discount_amount?: unknown } | null;
+  swap_fee?: unknown;
+  final_amount?: unknown;
+  amount?: unknown;
+  cost?: unknown;
+  total?: unknown;
+  price?: unknown;
+}
 
-function toSessionStatus(s?: string): SessionStatus {
-  const v = (s ?? '').toLowerCase();
+function toSessionStatus(s?: string | null): SessionStatus {
+  const v = String(s ?? '').toLowerCase();
   if (v === 'completed' || v === 'success' || v === 'done' || v === 'finished') return 'completed';
   if (v === 'cancelled' || v === 'canceled') return 'cancelled';
   if (v === 'failed' || v === 'error') return 'failed';
@@ -3554,7 +3651,7 @@ function toSessionStatus(s?: string): SessionStatus {
  */
 function netSessionAmount(pricing: unknown): string | undefined {
   if (!pricing || typeof pricing !== 'object') return undefined;
-  const value: unknown = (pricing as RawSession).final_price;
+  const value: unknown = (pricing as NonNullable<RawSession['pricing']>).final_price;
   if (value == null || value === '') return undefined;
 
   if (typeof value === 'object') {
@@ -3570,7 +3667,7 @@ function netSessionAmount(pricing: unknown): string | undefined {
 /** True when `pricing.discount_amount` is a positive amount — a coupon was applied. */
 function hasCouponDiscount(pricing: unknown): boolean {
   if (!pricing || typeof pricing !== 'object') return false;
-  const value: unknown = (pricing as RawSession).discount_amount;
+  const value: unknown = (pricing as NonNullable<RawSession['pricing']>).discount_amount;
   if (value == null || value === '') return false;
   if (typeof value === 'object') return readMoney(value as ApiMoneyFields).minorUnits > 0;
   if (typeof value !== 'string' && typeof value !== 'number') return false;
@@ -3580,8 +3677,8 @@ function hasCouponDiscount(pricing: unknown): boolean {
 
 function mapSession(kind: SessionKind, s: RawSession): DriverSession {
   // Real API: driver is `user`; station is `station` (swaps) or `pile` (charging).
-  const driver = s.user ?? s.driver ?? {};
-  const station = s.station ?? s.pile ?? s.cabinet ?? {};
+  const driver: NonNullable<RawSession['user']> = s.user ?? s.driver ?? {};
+  const station: NonNullable<RawSession['station']> = s.station ?? s.pile ?? s.cabinet ?? {};
   return {
     id:          String(s.id ?? ''),
     kind,

@@ -33,7 +33,7 @@ const barColors = [
 ];
 
 export function TopDriversLeaderboard({ data, loading }: Props) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
 
   return (
     <Card className="p-5">

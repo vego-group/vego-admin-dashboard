@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Search, UserPlus, UserMinus, Loader2, Check, Bike } from 'lucide-react';
+import { Search, UserPlus, UserMinus, Check, Bike } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
