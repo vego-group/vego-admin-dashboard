@@ -23,15 +23,18 @@ interface StatusItem {
 }
 
 interface FleetStatusPanelProps {
-  metrics: DashboardMetrics;
+  /** Undefined when the metrics failed to load; `failure` says why. */
+  metrics?: DashboardMetrics;
+  /** Shown instead of the rows when the metrics failed to load (FA-312). */
+  failure?: React.ReactNode;
 }
 
-export function FleetStatusPanel({ metrics }: FleetStatusPanelProps) {
+export function FleetStatusPanel({ metrics, failure }: FleetStatusPanelProps) {
   const { t, locale } = useI18n();
   const { tv } = useVehicleTerm();
   const { formatMoney } = useFleetContext();
 
-  const items: StatusItem[] = [
+  const items: StatusItem[] = !metrics ? [] : [
     {
       icon: <Bike className="h-4 w-4" />,
       label: t('dashboard.activeFleet'),
@@ -81,6 +84,7 @@ export function FleetStatusPanel({ metrics }: FleetStatusPanelProps) {
         {t('dashboard.fleetStatus')}
       </h3>
 
+      {failure ? <div className="mt-4">{failure}</div> : (
       <ul className="mt-4 space-y-3">
         {items.map((item, i) => (
           <li
@@ -111,6 +115,7 @@ export function FleetStatusPanel({ metrics }: FleetStatusPanelProps) {
           </li>
         ))}
       </ul>
+      )}
     </Card>
   );
 }

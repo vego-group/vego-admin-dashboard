@@ -19,9 +19,11 @@ import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
 import { NoAccessState } from '@/components/ui/NoAccessState';
+import { LoadError } from '@/components/ui/LoadError';
 import { useNotificationStore } from '@/store/notifications';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
+import { failureLines } from '@/lib/api-errors';
 import { formatRelativeTime } from '@/lib/format';
 import type { Notification, NotificationType } from '@/types';
 
@@ -82,8 +84,12 @@ type FilterTab = 'all' | 'unread' | 'alert' | 'warning' | 'success';
 
 export default function NotificationsPage() {
   const { t } = useI18n();
-  const { notifications, total, truncated, unreadCount, loading, forbidden, fetchNotifications, markAsRead, markAllAsRead, remove, clearAll } =
+  const { notifications, total, truncated, unreadCount, loading, forbidden, loadError, fetchNotifications, markAsRead, markAllAsRead, remove, clearAll } =
     useNotificationStore();
+  // A failed load: the counts are unknown ("—") and the list says why, with
+  // Retry — never an empty list that reads as "no notifications" (FA-312).
+  const failed = loadError !== undefined && !loading;
+  const count = (n: number) => (failed ? '—' : n);
   const [filter, setFilter] = useState<FilterTab>('all');
   // "Clear All" deletes every notification on the server — including any past
   // the first page this list shows — with no undo, so it asks first (FA-304).
@@ -140,35 +146,35 @@ export default function NotificationsPage() {
         <StatCard
           icon={<Bell className="h-5 w-5" />}
           label={t('notifications.total')}
-          count={stats.total}
+          count={count(stats.total)}
           cardCls="bg-blue-50/70 dark:bg-blue-500/10"
           iconCls="bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400"
         />
         <StatCard
           icon={<CheckCircle2 className="h-5 w-5" />}
           label={t('notifications.success')}
-          count={stats.success}
+          count={count(stats.success)}
           cardCls="bg-emerald-50/70 dark:bg-emerald-500/10"
           iconCls="bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400"
         />
         <StatCard
           icon={<AlertTriangle className="h-5 w-5" />}
           label={t('notifications.warnings')}
-          count={stats.warning}
+          count={count(stats.warning)}
           cardCls="bg-amber-50/70 dark:bg-amber-500/10"
           iconCls="bg-amber-100 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400"
         />
         <StatCard
           icon={<AlertOctagon className="h-5 w-5" />}
           label={t('notifications.alerts')}
-          count={stats.alert}
+          count={count(stats.alert)}
           cardCls="bg-orange-50/70 dark:bg-orange-500/10"
           iconCls="bg-orange-100 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400"
         />
         <StatCard
           icon={<XCircle className="h-5 w-5" />}
           label={t('notifications.errors')}
-          count={stats.error}
+          count={count(stats.error)}
           cardCls="bg-red-50/70 dark:bg-red-500/10"
           iconCls="bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400"
         />
@@ -238,6 +244,15 @@ export default function NotificationsPage() {
       </div>
 
       {/* ── Notification list ─────────────────────── */}
+      {failed ? (
+        <LoadError
+          className="mt-4"
+          title={t('notifications.loadFailed')}
+          lines={failureLines(loadError, t)}
+          onRetry={() => { void fetchNotifications(); }}
+          retrying={loading}
+        />
+      ) : (
       <Card className="mt-4 divide-y divide-slate-100 overflow-hidden dark:divide-slate-800">
         {loading ? (
           <div className="space-y-px">
@@ -267,6 +282,7 @@ export default function NotificationsPage() {
           ))
         )}
       </Card>
+      )}
 
       <ConfirmDeleteDialog
         open={confirmClearAll}
@@ -294,7 +310,8 @@ function StatCard({
 }: {
   icon: React.ReactNode;
   label: string;
-  count: number;
+  /** A number, or "—" when the list failed to load. */
+  count: number | string;
   cardCls: string;
   iconCls: string;
 }) {

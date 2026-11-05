@@ -22,9 +22,11 @@ import { useI18n } from '@/i18n/I18nProvider';
 interface Props {
   data: { day: string; sessions: number; revenue: number }[];
   loading?: boolean;
+  /** Shown instead of the chart when its data failed to load (FA-312). */
+  failure?: React.ReactNode;
 }
 
-export function WeeklySessionsChart({ data, loading }: Props) {
+export function WeeklySessionsChart({ data, loading, failure }: Props) {
   const { t } = useI18n();
 
   return (
@@ -44,6 +46,8 @@ export function WeeklySessionsChart({ data, loading }: Props) {
       <div className="mt-5 h-[240px]">
         {loading ? (
           <Skeleton className="h-full w-full" />
+        ) : failure ? (
+          failure
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data} margin={{ top: 10, right: 4, left: -22, bottom: 0 }}>

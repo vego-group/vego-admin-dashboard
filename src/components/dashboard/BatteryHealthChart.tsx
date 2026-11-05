@@ -17,9 +17,11 @@ import type { BatteryHealthPoint } from '@/types';
 interface BatteryHealthChartProps {
   data: BatteryHealthPoint[];
   loading?: boolean;
+  /** Shown instead of the chart when its data failed to load (FA-312). */
+  failure?: React.ReactNode;
 }
 
-export function BatteryHealthChart({ data, loading }: BatteryHealthChartProps) {
+export function BatteryHealthChart({ data, loading, failure }: BatteryHealthChartProps) {
   const { t } = useI18n();
 
   return (
@@ -31,8 +33,10 @@ export function BatteryHealthChart({ data, loading }: BatteryHealthChartProps) {
       <div className="mt-5 h-[220px]">
         {loading ? (
           <Skeleton className="h-full w-full rounded-xl" />
-        ) : null}
-        <ResponsiveContainer width="100%" height="100%" style={loading ? { display: 'none' } : undefined}>
+        ) : failure ? (
+          failure
+        ) : (
+        <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 10, right: 4, left: -22, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
             <XAxis
@@ -65,6 +69,7 @@ export function BatteryHealthChart({ data, loading }: BatteryHealthChartProps) {
             />
           </LineChart>
         </ResponsiveContainer>
+        )}
       </div>
     </Card>
   );

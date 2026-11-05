@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { notificationsApi } from '@/lib/api';
 import { isForbiddenError } from '@/lib/api-errors';
+import { logger } from '@/lib/logger';
 import { onAccountChange } from '@/store/auth';
 import type { Notification } from '@/types';
 
@@ -16,6 +17,11 @@ interface NotificationStore {
   loading: boolean;
   /** The last list fetch was refused with a 403 — "no access", not "no notifications". */
   forbidden: boolean;
+  /**
+   * Why the last list fetch failed (other than a 403), or undefined. A failure
+   * used to leave the list empty, which read as "no notifications" (FA-312).
+   */
+  loadError: unknown;
   /** Fetch (or re-fetch) all notifications from the backend. */
   fetchNotifications: () => Promise<void>;
   /** Lightweight poll — only fetches the unread count (for sidebar badge). */
@@ -35,6 +41,7 @@ const initialState = {
   unreadCount: 0,
   loading: false,
   forbidden: false,
+  loadError: undefined as unknown,
 };
 
 /**
@@ -48,7 +55,7 @@ export const useNotificationStore = create<NotificationStore>((set, get) => ({
 
   fetchNotifications: async () => {
     const requestedIn = generation;
-    set({ loading: true, forbidden: false });
+    set({ loading: true, forbidden: false, loadError: undefined });
     try {
       const page = await notificationsApi.list();
       if (requestedIn !== generation) return;
@@ -65,11 +72,14 @@ export const useNotificationStore = create<NotificationStore>((set, get) => ({
         ...(truncated ? {} : { unreadCount: notifications.filter((n) => !n.read).length }),
         loading: false,
         forbidden: false,
+        loadError: undefined,
       });
       if (truncated) void get().fetchUnreadCount();
     } catch (err) {
       if (requestedIn !== generation) return;
-      set({ loading: false, forbidden: isForbiddenError(err) });
+      logger.error('[Notifications] Failed to load notifications:', err);
+      const forbidden = isForbiddenError(err);
+      set({ loading: false, forbidden, loadError: forbidden ? undefined : err });
     }
   },
 

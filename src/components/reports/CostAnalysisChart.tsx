@@ -11,9 +11,11 @@ import type { CostBreakdown } from '@/types';
 interface Props {
   data: CostBreakdown[];
   loading?: boolean;
+  /** Shown instead of the chart when its data failed to load (FA-312). */
+  failure?: React.ReactNode;
 }
 
-export function CostAnalysisChart({ data, loading }: Props) {
+export function CostAnalysisChart({ data, loading, failure }: Props) {
   const { t, locale } = useI18n();
   const { formatMoney } = useFleetContext();
   // Summed in integer minor units, formatted once (FA-317).
@@ -38,6 +40,8 @@ export function CostAnalysisChart({ data, loading }: Props) {
 
       {loading ? (
         <Skeleton className="mt-4 h-[220px] w-full" />
+      ) : failure ? (
+        <div className="mt-4">{failure}</div>
       ) : (
         <>
           <div className="relative mt-3 mx-auto h-[180px] w-[180px]">

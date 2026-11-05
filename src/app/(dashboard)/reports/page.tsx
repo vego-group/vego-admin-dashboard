@@ -1,12 +1,12 @@
 'use client';
 
-import { useState } from 'react';
 import { Repeat, DollarSign, Battery, Cpu } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { NoAccessState } from '@/components/ui/NoAccessState';
+import { SectionLoadError } from '@/components/ui/LoadError';
 import { WeeklySessionsChart } from '@/components/reports/WeeklySessionsChart';
 import { BatteryDistributionChart } from '@/components/reports/BatteryDistributionChart';
 import { MonthlyRevenueChart } from '@/components/reports/MonthlyRevenueChart';
@@ -15,7 +15,7 @@ import { TopDriversLeaderboard } from '@/components/reports/TopDriversLeaderboar
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { useFleetContext } from '@/hooks/useFleetContext';
-import { useSection } from '@/hooks/useSection';
+import { useSection, type Section } from '@/hooks/useSection';
 import { reportsApi, dashboardApi } from '@/lib/api';
 import { isForbiddenError } from '@/lib/api-errors';
 import { sumMoney } from '@/lib/money';
@@ -45,24 +45,16 @@ export default function ReportsPage() {
   const battery = useSection('[Reports] battery distribution', () => reportsApi.getBatteryDistribution());
   const cost    = useSection('[Reports] cost analysis',        () => reportsApi.getCostAnalysis());
   const top     = useSection('[Reports] top drivers',          () => reportsApi.getTopDrivers());
-  const [bannerDismissed, setBannerDismissed] = useState(false);
 
-  const sections: [{ error: unknown; loading: boolean }, string][] = [
-    [metrics, t('reports.sectionMetrics')],
-    [weekly,  t('reports.sectionWeeklySessions')],
-    [monthly, t('reports.sectionMonthlyRevenue')],
-    [battery, t('reports.sectionBatteryDistribution')],
-    [cost,    t('reports.sectionCostAnalysis')],
-    [top,     t('reports.sectionTopDrivers')],
-  ];
   // Every section refused with a 403 is "no access", not six empty charts. A
-  // single refused section is still just a failed section, listed below.
-  const forbidden = sections.every(([s]) => s.error !== undefined && isForbiddenError(s.error));
-  const failedSections = bannerDismissed
-    ? []
-    : sections.filter(([s]) => s.error !== undefined).map(([, label]) => label);
+  // single refused section is still just a failed section, shown in its card.
+  const forbidden = [metrics, weekly, monthly, battery, cost, top]
+    .every((s) => s.error !== undefined && isForbiddenError(s.error));
 
-  const weeklySessions = weekly.data ?? [];
+  // A failed chart says so in its own card, with Retry, instead of drawing an
+  // empty chart under a page-wide list of what failed (FA-312).
+  const failureOf = (s: Section<unknown>) =>
+    s.error !== undefined ? <SectionLoadError section={s} /> : undefined;
 
   if (forbidden) {
     return (
@@ -74,23 +66,6 @@ export default function ReportsPage() {
 
   return (
     <DashboardShell title={t('reports.title')} subtitle={tv('reports.subtitle')}>
-      {failedSections.length > 0 && (
-        <div className="mb-3 flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-          <span>
-            {t('reports.partialLoad')}{' '}
-            <span className="font-semibold">{failedSections.join('، ')}</span>
-          </span>
-          <button
-            type="button"
-            onClick={() => setBannerDismissed(true)}
-            className="shrink-0 text-amber-400 hover:text-amber-600"
-            aria-label="Dismiss"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
       {/* Top metrics — each card waits on, and fails with, its own source:
           Sessions 7d and Revenue 7d on the weekly report, the other two on
           /fleet-admin/dashboard. A failed source reads "—", not a skeleton
@@ -137,23 +112,28 @@ export default function ReportsPage() {
           </>
         )}
       </div>
+      {/* The weekly report's failure is told in its chart below; the dashboard
+          metrics have no card of their own, so theirs is told here. */}
+      {!metrics.data && (
+        <SectionLoadError className="mt-4" section={metrics} title={t('dashboard.metricsLoadFailed')} />
+      )}
 
       {/* Weekly sessions + Battery Distribution */}
       <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <WeeklySessionsChart data={weeklySessions} loading={weekly.loading} />
-        <BatteryDistributionChart data={battery.data ?? []} loading={battery.loading} />
+        <WeeklySessionsChart data={weekly.data ?? []} loading={weekly.loading} failure={failureOf(weekly)} />
+        <BatteryDistributionChart data={battery.data ?? []} loading={battery.loading} failure={failureOf(battery)} />
       </div>
 
       {/* Monthly Revenue full-width */}
       <div className="mt-5">
-        <MonthlyRevenueChart data={monthly.data ?? []} loading={monthly.loading} />
+        <MonthlyRevenueChart data={monthly.data ?? []} loading={monthly.loading} failure={failureOf(monthly)} />
       </div>
 
       {/* Cost Analysis + Top Drivers */}
       <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <CostAnalysisChart data={cost.data ?? []} loading={cost.loading} />
+        <CostAnalysisChart data={cost.data ?? []} loading={cost.loading} failure={failureOf(cost)} />
         <div className="lg:col-span-2">
-          <TopDriversLeaderboard data={top.data ?? []} loading={top.loading} />
+          <TopDriversLeaderboard data={top.data ?? []} loading={top.loading} failure={failureOf(top)} />
         </div>
       </div>
 

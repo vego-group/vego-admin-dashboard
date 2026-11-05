@@ -2,6 +2,8 @@
 
 import { AlertTriangle, RotateCw } from 'lucide-react';
 import { useI18n } from '@/i18n/I18nProvider';
+import type { Section } from '@/hooks/useSection';
+import { failureLines } from '@/lib/api-errors';
 import { cn } from '@/lib/cn';
 
 /**
@@ -53,5 +55,33 @@ export function LoadError({
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * A failed {@link Section} as a {@link LoadError}: its reasons from
+ * `failureLines()` and a Retry that asks again. Nothing when it did not fail.
+ * `title` defaults to "This section couldn't be loaded." — for a part that
+ * sits under its own heading, such as a chart card.
+ */
+export function SectionLoadError({
+  section,
+  title,
+  className,
+}: {
+  section: Pick<Section<unknown>, 'error' | 'loading' | 'retry'>;
+  title?: string;
+  className?: string;
+}) {
+  const { t } = useI18n();
+  if (section.error === undefined) return null;
+  return (
+    <LoadError
+      className={className}
+      title={title ?? t('common.sectionLoadFailed')}
+      lines={failureLines(section.error, t)}
+      onRetry={section.retry}
+      retrying={section.loading}
+    />
   );
 }

@@ -13,9 +13,10 @@ import { LocationLabel } from '@/components/ui/LocationLabel';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Pagination } from '@/components/ui/Pagination';
+import { LoadError } from '@/components/ui/LoadError';
 import { useI18n } from '@/i18n/I18nProvider';
 import { fastChargingApi } from '@/lib/api';
-import { isForbiddenError } from '@/lib/api-errors';
+import { failureLines, isForbiddenError } from '@/lib/api-errors';
 import { cn } from '@/lib/cn';
 import { sharePercent } from '@/lib/format';
 import type { FastChargingCabinet, BatteryStation, FastChargingStatus } from '@/types';
@@ -35,15 +36,23 @@ export default function FastChargingPage() {
   const [tab, setTab] = useState<FilterTab>('all');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
-  const [apiError, setApiError] = useState<string | null>(null);
+  // Why the last load failed, said with the backend's words and a Retry. It
+  // was the raw English `err.message` over a row of 0 KPIs (FA-312).
+  const [loadError, setLoadError] = useState<unknown>(undefined);
+  /** The piles have loaded at least once; until then the counts are unknown. */
+  const [loaded, setLoaded] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [forbidden, setForbidden] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setLoading(true);
       try {
         const fcData = await fastChargingApi.list();
         if (!cancelled) {
+          setLoadError(undefined);
+          setLoaded(true);
           setCabinets(fcData);
           // Convert piles → BatteryStation shape for the map
           setMapStations(fcData.map((c) => ({
@@ -63,14 +72,15 @@ export default function FastChargingPage() {
         }
       } catch (err) {
         logger.error('[FastCharging] Failed to load data:', err);
+        if (cancelled) return;
         if (isForbiddenError(err)) setForbidden(true);
-        else setApiError(err instanceof Error ? err.message : 'Failed to load fast charging data');
+        else setLoadError(err);
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [reloadKey]);
 
   const totals = useMemo(() => ({
     available: cabinets.reduce((s, x) => s + x.availablePorts, 0),
@@ -104,11 +114,13 @@ export default function FastChargingPage() {
     : s === 'high_demand' ? 'text-amber-600 dark:text-amber-400'
     : 'text-emerald-600 dark:text-emerald-400';
 
+  // Counts only once the piles have loaded: "(0)" after a failure is a claim.
+  const counted = (label: string, n: number) => (loaded ? `${label} (${n})` : label);
   const TABS: { value: FilterTab; label: string }[] = [
-    { value: 'all',       label: `${t('fastCharging.all')} (${totals.total})` },
-    { value: 'available', label: `${t('fastCharging.available')} (${totals.available})` },
-    { value: 'charging',  label: `${t('fastCharging.charging')} (${totals.charging})` },
-    { value: 'error',     label: `${t('fastCharging.error')} (${totals.error})` },
+    { value: 'all',       label: counted(t('fastCharging.all'),       totals.total) },
+    { value: 'available', label: counted(t('fastCharging.available'), totals.available) },
+    { value: 'charging',  label: counted(t('fastCharging.charging'),  totals.charging) },
+    { value: 'error',     label: counted(t('fastCharging.error'),     totals.error) },
   ];
 
   if (forbidden) {
@@ -121,26 +133,22 @@ export default function FastChargingPage() {
 
   return (
     <DashboardShell title={t('fastCharging.title')} subtitle={t('fastCharging.subtitle')}>
-      {apiError && (
-        <div className="mb-3 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
-          <span>{apiError}</span>
-          <button
-            type="button"
-            onClick={() => setApiError(null)}
-            className="ms-3 shrink-0 text-rose-400 hover:text-rose-600"
-            aria-label="Dismiss"
-          >
-            ✕
-          </button>
-        </div>
+      {loadError !== undefined && (
+        <LoadError
+          className="mb-4"
+          title={t('fastCharging.loadFailed')}
+          lines={failureLines(loadError, t)}
+          onRetry={() => setReloadKey((k) => k + 1)}
+          retrying={loading}
+        />
       )}
 
-      {/* KPI cards */}
+      {/* KPI cards — "—" until the piles have loaded, not 0 */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <MetricCard label={t('fastCharging.availablePorts')} value={totals.available} icon={<Zap className="h-5 w-5" />}           iconColor="green"  />
-        <MetricCard label={t('fastCharging.charging')}       value={totals.charging}  icon={<Zap className="h-5 w-5" />}           iconColor="sky"    />
-        <MetricCard label={t('fastCharging.error')}          value={totals.error}     icon={<AlertTriangle className="h-5 w-5" />} iconColor="orange" />
-        <MetricCard label={t('fastCharging.totalPorts')}     value={totals.total}     icon={<Server className="h-5 w-5" />}        iconColor="indigo" unit={`${cabinets.length} cabinets`} />
+        <MetricCard label={t('fastCharging.availablePorts')} value={loaded ? totals.available : '—'} icon={<Zap className="h-5 w-5" />}           iconColor="green"  />
+        <MetricCard label={t('fastCharging.charging')}       value={loaded ? totals.charging : '—'}  icon={<Zap className="h-5 w-5" />}           iconColor="sky"    />
+        <MetricCard label={t('fastCharging.error')}          value={loaded ? totals.error : '—'}     icon={<AlertTriangle className="h-5 w-5" />} iconColor="orange" />
+        <MetricCard label={t('fastCharging.totalPorts')}     value={loaded ? totals.total : '—'}     icon={<Server className="h-5 w-5" />}        iconColor="indigo" unit={loaded ? `${cabinets.length} cabinets` : undefined} />
       </div>
 
       {/* Toolbar */}
@@ -190,11 +198,11 @@ export default function FastChargingPage() {
 
       {/* Content */}
       <div className="mt-5">
-        {loading ? (
+        {loading && !loaded ? (
           <Card className="p-5">
             <Skeleton className="h-[420px] w-full rounded-xl" />
           </Card>
-        ) : view === 'map' ? (
+        ) : !loaded ? null : view === 'map' ? (
           <>
             <Card className="p-5">
               <LiveFleetMap height={400} stations={mapStations} />

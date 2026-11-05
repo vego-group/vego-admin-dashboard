@@ -16,6 +16,8 @@ interface TopDriver {
 interface Props {
   data: TopDriver[];
   loading?: boolean;
+  /** Shown instead of the list when its data failed to load (FA-312). */
+  failure?: React.ReactNode;
 }
 
 const rankColors = [
@@ -32,7 +34,7 @@ const barColors = [
   'bg-emerald-500',
 ];
 
-export function TopDriversLeaderboard({ data, loading }: Props) {
+export function TopDriversLeaderboard({ data, loading, failure }: Props) {
   const { t } = useI18n();
 
   return (
@@ -47,6 +49,8 @@ export function TopDriversLeaderboard({ data, loading }: Props) {
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
+      ) : failure ? (
+        <div className="mt-4">{failure}</div>
       ) : data.length === 0 ? (
         <p className="mt-6 py-6 text-center text-sm text-slate-400">{t('common.noData')}</p>
       ) : (
