@@ -145,8 +145,8 @@ export default function ReportsPage() {
             />
             <MetricCard
               label={t('reports.averageBattery')}
-              value={metrics.averageSoc}
-              unit="%"
+              value={metrics.averageSoc ?? '—'}
+              unit={metrics.averageSoc !== undefined ? '%' : undefined}
               icon={<Battery className="h-5 w-5" />}
               iconColor="violet"
             />

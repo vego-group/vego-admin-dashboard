@@ -47,7 +47,7 @@ export function FleetStatusPanel({ metrics }: FleetStatusPanelProps) {
     {
       icon: <Gauge className="h-4 w-4" />,
       label: t('dashboard.averageSoc'),
-      value: `${metrics.averageSoc}%`,
+      value: metrics.averageSoc !== undefined ? `${metrics.averageSoc}%` : '—',
       iconColor: 'bg-gradient-to-br from-orange-400 to-amber-500',
     },
     {
@@ -61,13 +61,16 @@ export function FleetStatusPanel({ metrics }: FleetStatusPanelProps) {
       label: tv('dashboard.averageCostVehicle'),
       // Money, and it used to render as a bare number with no unit at all — which
       // reads as riyals to a Saudi operator and as dinars to a Jordanian one.
-      value: formatMoney(metrics.averageCostPerVehicle, locale),
+      // Not sent: "—", not "0.00" (FA-319).
+      value: metrics.averageCostPerVehicle !== undefined
+        ? formatMoney(metrics.averageCostPerVehicle, locale)
+        : '—',
       iconColor: 'bg-gradient-to-br from-violet-500 to-purple-600',
     },
     {
       icon: <CheckCircle2 className="h-4 w-4" />,
       label: t('dashboard.successRate'),
-      value: `${metrics.successRate}%`,
+      value: metrics.successRate !== undefined ? `${metrics.successRate}%` : '—',
       iconColor: 'bg-gradient-to-br from-emerald-400 to-teal-500',
     },
   ];

@@ -338,10 +338,16 @@ export interface DashboardMetrics {
   activeFleet: number;
   availableBatteries: number;
   chargingBatteries: number;
-  averageSoc: number;
+  /** Absent when the backend sends null or nothing (no data yet): shown "—", never "0%" (FA-319). */
+  averageSoc?: number;
   lowBatteryCount: number;
-  averageCostPerVehicle: number;
-  successRate: number;
+  /**
+   * Fixed-precision decimal string in the fleet's currency, or absent when the
+   * backend omits or nulls it: shown "—", never a fabricated "0.00" (FA-319).
+   */
+  averageCostPerVehicle?: string;
+  /** Absent when the backend omits or nulls it (trip-era field): shown "—" (FA-319). */
+  successRate?: number;
   fleetTrend: number;
   driversTrend: number;
   batteriesTrend: number;

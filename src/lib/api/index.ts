@@ -2163,22 +2163,27 @@ export const dashboardApi = {
 
     // Average cost per vehicle is money. It arrives either as a bare scalar or as
     // the currency-aware object, and rendering the object would print
-    // "[object Object]" — resolve both through integer minor units.
+    // "[object Object]" — resolve both through integer minor units. Null, absent
+    // or an object with no amount is *unknown*, not 0 (FA-319): the backend has
+    // no trips, and this trip-era figure may simply not be sent.
     const rawAvgCost = res.average_cost_per_motorcycle;
-    const avgCost = readMoney(
-      rawAvgCost !== null && typeof rawAvgCost === 'object'
-        ? rawAvgCost
-        : { amount: rawAvgCost ?? 0 },
-    );
+    const avgCostObject = rawAvgCost !== null && typeof rawAvgCost === 'object' ? rawAvgCost : null;
+    const avgCostKnown = avgCostObject
+      ? (avgCostObject.amount ?? avgCostObject.balance ?? null) !== null || typeof avgCostObject.minor_units === 'number'
+      : rawAvgCost !== null && rawAvgCost !== undefined && rawAvgCost !== '';
+    const avgCost = avgCostKnown
+      ? readMoney(avgCostObject ?? { amount: rawAvgCost as string | number })
+      : undefined;
 
     return {
       activeFleet:             res.total_motorcycles ?? 0,
       availableBatteries:      res.available_batteries ?? 0,
       chargingBatteries:       res.charging_batteries ?? 0,
       lowBatteryCount:         res.low_battery_count ?? 0,
-      averageSoc:              res.average_soc ?? 0,
-      successRate:             res.success_rate ?? 0,
-      averageCostPerVehicle:   moneyToNumber(avgCost),
+      // Null or absent stays absent: "—", never "0%" (FA-319).
+      averageSoc:              readNumber(res.average_soc),
+      successRate:             readNumber(res.success_rate),
+      averageCostPerVehicle:   avgCost?.amount,
       // Trend fields — backend uses short names (fleet_trend, batteries_trend…)
       // Fall back to legacy long names in case the API version changes
       fleetTrend:              res.fleet_trend     ?? res.total_motorcycles_trend         ?? 0,
