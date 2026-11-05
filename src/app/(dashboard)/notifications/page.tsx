@@ -21,6 +21,7 @@ import { NoAccessState } from '@/components/ui/NoAccessState';
 import { useNotificationStore } from '@/store/notifications';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
+import { formatRelativeTime } from '@/lib/format';
 import type { Notification, NotificationType } from '@/types';
 
 /* ── Type config ─────────────────────────────────── */
@@ -71,18 +72,6 @@ const TYPE_CFG: Record<
     labelKey: 'typeError',
   },
 };
-
-/* ── Time helper ─────────────────────────────────── */
-
-function timeAgo(dateStr: string): string {
-  const mins = Math.floor((Date.now() - new Date(dateStr).getTime()) / 60_000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins} minute${mins !== 1 ? 's' : ''} ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
-  const days = Math.floor(hours / 24);
-  return `${days} day${days !== 1 ? 's' : ''} ago`;
-}
 
 /* ── Filter tabs ─────────────────────────────────── */
 
@@ -305,7 +294,7 @@ function NotificationItem({
   onMarkRead: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const cfg = TYPE_CFG[notification.type];
   const { Icon } = cfg;
 
@@ -333,7 +322,9 @@ function NotificationItem({
             {notification.title}
           </h3>
           <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">
-            {timeAgo(notification.createdAt)}
+            {/* Was an English-only "N minutes ago" that read "NaN days ago" for
+                an unreadable date; now the shared, guarded formatter. */}
+            {formatRelativeTime(notification.createdAt, locale)}
           </span>
         </div>
 

@@ -167,10 +167,45 @@ export function formatPercent(value: number, locale: Locale = 'en'): string {
   }).format(value / 100);
 }
 
-/** "5 min ago" / "منذ 5 دقائق" */
-export function formatRelativeTime(iso: string, locale: Locale = 'en'): string {
+/**
+ * A backend timestamp as a Date, or **null** when it cannot be read.
+ *
+ * A date-time with no zone — `"2026-10-20 12:00:00"`, Laravel's plain
+ * serialisation — is read as **UTC**. `new Date()` would take it as the
+ * browser's local time, and every timestamp would shift by the viewer's
+ * offset (three hours in Riyadh and Amman). Anything with a `Z` or an offset
+ * is read as written. ⏳ The backend is confirming its exact format (D1.2);
+ * ISO-8601 with an offset everywhere is what we asked for.
+ */
+export function parseBackendDate(value: string | null | undefined): Date | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (!text) return null;
+  const zoneless = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/.exec(text);
+  const date = new Date(zoneless ? `${zoneless[1]}T${zoneless[2]}Z` : text);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+const warnedUnreadableDates = new Set<string>();
+
+/**
+ * "5 min ago" / "منذ 5 دقائق", or **"—"** for a missing or unreadable date.
+ *
+ * `Intl.RelativeTimeFormat` throws a RangeError on NaN, and one bad
+ * timestamp used to take the whole page down into the error boundary
+ * (alarms, sessions, IoT devices, recent swaps — FA-301).
+ */
+export function formatRelativeTime(iso: string | null | undefined, locale: Locale = 'en'): string {
+  const date = parseBackendDate(iso);
+  if (!date) {
+    if (iso && !warnedUnreadableDates.has(iso)) {
+      warnedUnreadableDates.add(iso);
+      logger.warn(`[format] Unreadable date from the backend: "${iso}". Showing "—".`);
+    }
+    return '—';
+  }
   const rtf = new Intl.RelativeTimeFormat(localeMap[locale], { numeric: 'auto' });
-  const diffMs = new Date(iso).getTime() - Date.now();
+  const diffMs = date.getTime() - Date.now();
   const diffMin = Math.round(diffMs / 60_000);
   const diffHour = Math.round(diffMin / 60);
   const diffDay = Math.round(diffHour / 24);

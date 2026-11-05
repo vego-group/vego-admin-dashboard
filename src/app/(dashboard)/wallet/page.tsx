@@ -18,7 +18,7 @@ import { brandLabel } from '@/components/wallet/SavedCardsList';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import { useFleetContext } from '@/hooks/useFleetContext';
-import { bidiIsolate } from '@/lib/format';
+import { bidiIsolate, parseBackendDate } from '@/lib/format';
 import { apiTransactionType, driversApi, walletApi, walletFilterErrorFrom } from '@/lib/api';
 import { isForbiddenError } from '@/lib/api-errors';
 import { fractionDigitsOf, fromMinorUnits, toMinorUnits } from '@/lib/money';
@@ -159,8 +159,9 @@ function isoDate(d: Date): string {
  * value in the CSV.
  */
 function formatDT(iso: string, fallback = '—'): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return fallback;
+  // Read as the backend means it: a zoneless date-time is UTC (FA-301).
+  const date = parseBackendDate(iso);
+  if (!date) return fallback;
   return new Intl.DateTimeFormat('en-GB', {
     day:    '2-digit',
     month:  'short',
