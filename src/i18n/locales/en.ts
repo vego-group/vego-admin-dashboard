@@ -941,6 +941,9 @@ const en = {
     notCompletedTitle: 'Payment not completed',
     notCompletedBody: "This payment didn't go through, so no money was taken. You can start the top-up again.",
     notCompletedExpiredBody: 'The payment session expired before the card was charged, so no money was taken. You can start the top-up again.',
+    // HyperPay: ask again about a pending payment (FA-409).
+    checkAgain: 'Check again',
+    stillPending: 'Still not confirmed. Try again in a minute.',
   },
 };
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, XCircle, Clock, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { brandLabel } from '@/components/wallet/SavedCardsList';
@@ -44,7 +44,11 @@ function hyperPayStatus(raw: string | null): Exclude<Status, 'loading'> {
  * HyperPay allows a single status check per payment. The backend already
  * guarantees that (a repeat verify returns its stored result), but this page
  * still asks only once: React's development double-mount reuses the promise,
- * and a refresh after the answer is caught by the `settled=1` marker below.
+ * and a refresh after a final answer is caught by the `settled=1` marker below.
+ * A pending answer is not final (FA-409): it is never marked, so a refresh asks
+ * again, and "Check again" drops the cached promise and asks again — the
+ * backend answers with its stored status, or the one a webhook or
+ * reconciliation has since recorded.
  */
 const hyperPayVerifications = new Map<string, Promise<HyperPayVerifyResult>>();
 
@@ -94,6 +98,88 @@ export default function PaymentCallbackPage() {
   const [uncertain, setUncertain] = useState(false);
   // `notCompleted` because the checkout ran out, rather than a refusal.
   const [expired, setExpired]   = useState(false);
+  // HyperPay: the checkout a pending answer can be asked about again (FA-409),
+  // whether "Check again" is running, and whether it answered pending again.
+  const [recheckId, setRecheckId] = useState<string | null>(null);
+  const [checking, setChecking]   = useState(false);
+  const [stillPending, setStillPending] = useState(false);
+
+  const showHyperPay = useCallback((s: Exclude<Status, 'loading'>, r: {
+    amount?: string | null; balance?: string | null;
+    brand?: string | null; last4?: string | null; message?: string | null;
+    rawStatus?: string | null;
+  }) => {
+    setAmount(r.amount ?? null);
+    setBalance(r.balance ?? null);
+    setCard(s === 'success' && r.brand && r.last4 ? { brand: r.brand, last4: r.last4 } : null);
+    setGatewayMsg(s === 'failed' ? r.message ?? null : null);
+    setExpired(s === 'notCompleted' && r.rawStatus === 'expired');
+    setStatus(s);
+  }, []);
+
+  /**
+   * Verify a HyperPay checkout and show the answer. `fresh` asks again even if
+   * this tab already has an answer — "Check again" on a pending result.
+   * Resolves whatever happens; failures are shown, not thrown.
+   */
+  const verifyHyperPay = useCallback((checkoutId: string, fresh: boolean): Promise<void> => {
+    if (fresh) hyperPayVerifications.delete(checkoutId);
+    let verification = hyperPayVerifications.get(checkoutId);
+    if (!verification) {
+      // Send only the id; the backend builds HyperPay's status URL itself.
+      verification = walletApi.verifyHyperPayTopUp(checkoutId);
+      hyperPayVerifications.set(checkoutId, verification);
+    }
+    setRecheckId(checkoutId);
+
+    return verification
+      .then((result) => {
+        const s = hyperPayStatus(result.status);
+        if (s === 'pending' && result.status !== 'pending') {
+          logger.warn(`[payment-callback] HyperPay verify returned status "${result.status}"; showing pending.`);
+        }
+        const shown = {
+          amount:  result.amount,
+          balance: result.balance,
+          brand:   result.cardBrand ? brandLabel(result.cardBrand) : null,
+          last4:   result.cardLast4,
+          message: result.resultDescription,
+        };
+        setUncertain(false);
+        setStillPending(fresh && s === 'pending');
+        showHyperPay(s, { ...shown, rawStatus: result.status });
+
+        // A final answer marks the URL, like the saved-card `settled=1`
+        // hand-off, so a refresh shows it rather than asking again. A
+        // not-completed answer keeps its own status, so a refresh can still
+        // tell "expired" from "declined". Pending is not final and is never
+        // marked (FA-409): a refresh, or "Check again", asks again.
+        if (s !== 'pending') {
+          const marked = new URLSearchParams(window.location.search);
+          marked.set('settled', '1');
+          marked.set('status', result.status);
+          for (const [key, value] of Object.entries(shown)) {
+            if (value) marked.set(key, value); else marked.delete(key);
+          }
+          window.history.replaceState(null, '', `${window.location.pathname}?${marked.toString()}`);
+        }
+        clearHyperPayCheckout(checkoutId);
+      })
+      .catch((err) => {
+        logger.error('[payment-callback] HyperPay verify error:', err);
+        hyperPayVerifications.delete(checkoutId);
+        setStillPending(false);
+        // See isRefusal. The URL stays unmarked so a refresh asks again.
+        if (isRefusal(err)) showHyperPay('failed', { message: refusalMessage(err) });
+        else { setUncertain(true); showHyperPay('pending', {}); }
+      });
+  }, [showHyperPay]);
+
+  const checkAgain = () => {
+    if (!recheckId || checking) return;
+    setChecking(true);
+    void verifyHyperPay(recheckId, true).finally(() => setChecking(false));
+  };
 
   useEffect(() => {
     const params    = new URLSearchParams(window.location.search);
@@ -105,25 +191,13 @@ export default function PaymentCallbackPage() {
     if (params.get('gateway') === 'hyperpay' || params.has('resourcePath')) {
       setIsHyperPay(true);
 
-      const show = (s: Status, r: {
-        amount?: string | null; balance?: string | null;
-        brand?: string | null; last4?: string | null; message?: string | null;
-        rawStatus?: string | null;
-      }) => {
-        setAmount(r.amount ?? null);
-        setBalance(r.balance ?? null);
-        setCard(s === 'success' && r.brand && r.last4 ? { brand: r.brand, last4: r.last4 } : null);
-        setGatewayMsg(s === 'failed' ? r.message ?? null : null);
-        setExpired(s === 'notCompleted' && r.rawStatus === 'expired');
-        setStatus(s);
-      };
-
-      // Already verified in this tab — a refresh shows the answer again rather
-      // than asking a second time.
-      if (params.get('settled') === '1') {
-        const s = params.get('status');
-        show(hyperPayStatus(s), {
-          rawStatus: s,
+      // Already given a final answer in this tab — a refresh shows it again
+      // rather than asking a second time. A `status=pending` marker (written
+      // before FA-409) is not final, so that page asks again.
+      const settledStatus = params.get('settled') === '1' ? hyperPayStatus(params.get('status')) : null;
+      if (settledStatus && settledStatus !== 'pending') {
+        showHyperPay(settledStatus, {
+          rawStatus: params.get('status'),
           amount:  params.get('amount'),
           balance: params.get('balance'),
           brand:   params.get('brand'),
@@ -139,47 +213,7 @@ export default function PaymentCallbackPage() {
         return;
       }
 
-      let verification = hyperPayVerifications.get(checkoutId);
-      if (!verification) {
-        // Send only the id; the backend builds HyperPay's status URL itself.
-        verification = walletApi.verifyHyperPayTopUp(checkoutId);
-        hyperPayVerifications.set(checkoutId, verification);
-      }
-
-      verification
-        .then((result) => {
-          const s = hyperPayStatus(result.status);
-          if (s === 'pending' && result.status !== 'pending') {
-            logger.warn(`[payment-callback] HyperPay verify returned status "${result.status}"; showing pending.`);
-          }
-          const shown = {
-            amount:  result.amount,
-            balance: result.balance,
-            brand:   result.cardBrand ? brandLabel(result.cardBrand) : null,
-            last4:   result.cardLast4,
-            message: result.resultDescription,
-          };
-          show(s, { ...shown, rawStatus: result.status });
-
-          // Mark the URL as answered, like the saved-card `settled=1` hand-off.
-          // A not-completed answer keeps its own status, so a refresh can still
-          // tell "expired" from "declined".
-          const marked = new URLSearchParams(params);
-          marked.set('settled', '1');
-          marked.set('status', s === 'pending' ? 'pending' : result.status);
-          for (const [key, value] of Object.entries(shown)) {
-            if (value) marked.set(key, value); else marked.delete(key);
-          }
-          window.history.replaceState(null, '', `${window.location.pathname}?${marked.toString()}`);
-          clearHyperPayCheckout(checkoutId);
-        })
-        .catch((err) => {
-          logger.error('[payment-callback] HyperPay verify error:', err);
-          hyperPayVerifications.delete(checkoutId);
-          // See isRefusal. The URL stays unmarked so a refresh asks again.
-          if (isRefusal(err)) show('failed', { message: refusalMessage(err) });
-          else { setUncertain(true); show('pending', {}); }
-        });
+      void verifyHyperPay(checkoutId, false);
       return;
     }
 
@@ -281,7 +315,7 @@ export default function PaymentCallbackPage() {
           setStatus('pending');
         }
       });
-  }, []);
+  }, [showHyperPay, verifyHyperPay]);
 
   const goToDrivers = () => { window.location.href = '/drivers'; };
   const goToLedger  = () => { window.location.href = '/wallet'; };
@@ -368,7 +402,19 @@ export default function PaymentCallbackPage() {
             <p className="mt-2 text-sm font-medium text-amber-700 dark:text-amber-400">
               {t('paymentCallback.checkLedgerFirst')}
             </p>
+            {stillPending && !checking && (
+              <p role="status" className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                {t('paymentCallback.stillPending')}
+              </p>
+            )}
             <Button variant="primary" className="mt-6 w-full" onClick={goToDrivers}>{t('paymentCallback.backToDrivers')}</Button>
+            {/* HyperPay: ask the backend again — it may have the webhook's or
+                reconciliation's answer by now (FA-409). */}
+            {isHyperPay && recheckId && (
+              <Button variant="secondary" className="mt-2 w-full" onClick={checkAgain} isLoading={checking}>
+                {t('paymentCallback.checkAgain')}
+              </Button>
+            )}
             <Button variant="secondary" className="mt-2 w-full" onClick={goToLedger}>{t('paymentCallback.openLedger')}</Button>
           </>
         )}
