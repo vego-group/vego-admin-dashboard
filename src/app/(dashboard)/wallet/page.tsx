@@ -13,6 +13,7 @@ import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Pagination } from '@/components/ui/Pagination';
 import { NoAccessState } from '@/components/ui/NoAccessState';
+import { LoadError } from '@/components/ui/LoadError';
 import { PaymentSettings } from '@/components/wallet/PaymentSettings';
 import { brandLabel } from '@/components/wallet/SavedCardsList';
 import { useI18n } from '@/i18n/I18nProvider';
@@ -20,7 +21,7 @@ import { cn } from '@/lib/cn';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { bidiIsolate, parseBackendDate } from '@/lib/format';
 import { apiTransactionType, driversApi, walletApi, walletFilterErrorFrom } from '@/lib/api';
-import { isForbiddenError } from '@/lib/api-errors';
+import { failureLines, isForbiddenError } from '@/lib/api-errors';
 import { fractionDigitsOf, fromMinorUnits, toMinorUnits } from '@/lib/money';
 import type {
   CurrencyCode, Driver, TransactionType, TransactionStatus, WalletTransaction, WalletStats,
@@ -340,6 +341,11 @@ export default function WalletPage() {
   const [filterError, setFilterError] = useState<string | null>(null);
   // The ledger refused with a 403: this account may not see it at all.
   const [forbidden, setForbidden] = useState(false);
+  // The page of transactions could not be loaded (network, timeout, 5xx): said
+  // as such, with Retry — never "No transactions found" (FA-413). Held as the
+  // error itself so its lines follow the UI language.
+  const [loadError, setLoadError] = useState<unknown>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   // Filters
   const [fromDate, setFromDate] = useState(defaultFrom);
@@ -388,7 +394,7 @@ export default function WalletPage() {
 
   // Anything that changes what should be on screen puts the table back into
   // loading; the fetch effect clears it. Declared first so it runs before it.
-  useEffect(() => { setDataLoading(true); }, [query, page]);
+  useEffect(() => { setDataLoading(true); }, [query, page, reloadKey]);
 
   // One page per request, totals from the paginator — the server's filter is
   // exactly ours for every category, so nothing is refined here.
@@ -401,20 +407,24 @@ export default function WalletPage() {
         setServed({ rows: res.rows, total: res.page.total, lastPage: Math.max(1, res.page.lastPage) });
         setTruncated(false);
         setFilterError(null);
+        setLoadError(null);
       } catch (err) {
         if (cancelled) return;
         logger.error('[Wallet] Failed to load transactions:', err);
         if (isForbiddenError(err)) setForbidden(true);
         // A refused filter says which parameter it refused — show that, not an
         // empty table that looks like an answer.
-        setFilterError(walletFilterErrorFrom(err)?.message ?? null);
+        const refused = walletFilterErrorFrom(err);
+        setFilterError(refused?.message ?? null);
+        // Anything else is a failed load, not an empty ledger.
+        setLoadError(refused || isForbiddenError(err) ? null : err);
         setServed({ rows: [], total: 0, lastPage: 1 });
       } finally {
         if (!cancelled) setDataLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [query, page]);
+  }, [query, page, reloadKey]);
 
   // Straight from the paginator: no local slice, no local filter.
   const { rows, total, lastPage: totalPages } = served;
@@ -635,6 +645,17 @@ export default function WalletPage() {
                     ))}
                   </tr>
                 ))
+              ) : loadError != null ? (
+                <tr>
+                  <td colSpan={8} className="px-5 py-8">
+                    <LoadError
+                      title={t('wallet.loadFailed')}
+                      lines={failureLines(loadError, t)}
+                      onRetry={() => setReloadKey((k) => k + 1)}
+                      retrying={dataLoading}
+                    />
+                  </td>
+                </tr>
               ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-5 py-16 text-center">

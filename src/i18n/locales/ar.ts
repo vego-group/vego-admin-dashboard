@@ -875,6 +875,7 @@ const ar: Translations = {
     helpDescription: 'فريق العمليات المالية متاح 24/7 لحل مشكلات الشحن أو تعديل أرصدة المحفظة للسائقين.',
     contactFinanceTeam: 'تواصل مع فريق المالية',
     noTransactions: 'لا توجد معاملات',
+    loadFailed: 'تعذّر تحميل معاملات المحفظة',
     noTransactionsHint: 'حاول تعديل الفلاتر أو نطاق التاريخ.',
     // إعدادات الدفع — عنوان الفوترة (الأردن / HyperPay) والبطاقات المحفوظة
     paymentSettingsTitle: 'إعدادات الدفع',

@@ -872,6 +872,7 @@ const en = {
     helpDescription: 'Our financial operations team is available 24/7 to resolve top-up issues or adjust wallet balances for your drivers.',
     contactFinanceTeam: 'Contact Finance Team',
     noTransactions: 'No transactions found',
+    loadFailed: "Couldn't load wallet transactions",
     noTransactionsHint: 'Try adjusting your filters or date range.',
     // Payment settings — billing address (Jordan / HyperPay) and saved cards
     paymentSettingsTitle: 'Payment settings',
