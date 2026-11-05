@@ -923,7 +923,10 @@ const ar: Translations = {
     processingTitle: 'جارٍ معالجة الدفع',
     processingBody: 'جارٍ معالجة دفعتك. سيتم تحديث رصيد المحفظة قريبًا.',
     confirmingBody: 'جارٍ تأكيد دفعتك. سيتم تحديث رصيد المحفظة قريبًا.',
+    uncertainBody: 'تعذّر علينا تأكيد هذه الدفعة. ربما تمّت بالفعل.',
     paidWithCard: 'تم الدفع ببطاقة {{card}}',
+    checkLedgerFirst: 'راجع معاملات المحفظة قبل المحاولة مرة أخرى.',
+    openLedger: 'فتح معاملات المحفظة',
   },
 };
 

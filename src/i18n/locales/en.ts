@@ -917,7 +917,10 @@ const en = {
     processingTitle: 'Payment Processing',
     processingBody: 'Your payment is being processed. The wallet balance will update shortly.',
     confirmingBody: 'Your payment is being confirmed. The wallet balance will update shortly.',
+    uncertainBody: "We couldn't confirm this payment. It may still have gone through.",
     paidWithCard: 'Paid with {{card}}',
+    checkLedgerFirst: 'Check Wallet Transactions before trying again.',
+    openLedger: 'Open Wallet Transactions',
   },
 };
 

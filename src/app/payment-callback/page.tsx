@@ -5,7 +5,7 @@ import { CheckCircle2, XCircle, Clock, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { brandLabel } from '@/components/wallet/SavedCardsList';
 import { walletApi, type HyperPayVerifyResult } from '@/lib/api';
-import { ApiError } from '@/lib/api/client';
+import { ApiError, isIndeterminateFailure } from '@/lib/api/client';
 import { ltrIsolate } from '@/lib/format';
 import { clearHyperPayCheckout } from '@/lib/hyperpay';
 import { useFleetContext } from '@/hooks/useFleetContext';
@@ -23,6 +23,22 @@ type Status = 'loading' | 'success' | 'failed' | 'pending';
  * and a refresh after the answer is caught by the `settled=1` marker below.
  */
 const hyperPayVerifications = new Map<string, Promise<HyperPayVerifyResult>>();
+
+/**
+ * A failed verify call that is a refusal of the request itself (unknown
+ * payment, bad input): the payment failed. Anything else — the network, a
+ * timeout, a 5xx, an expired session, an unreadable answer — says nothing about
+ * the payment, which the webhook and reconciliation still settle; claiming
+ * "failed" there invites the admin to pay twice. Both gateways use this rule.
+ */
+function isRefusal(err: unknown): err is ApiError {
+  return err instanceof ApiError && err.status >= 400 && err.status < 500 && !isIndeterminateFailure(err);
+}
+
+/** The backend's own words for a refusal, unless it is a bare "HTTP 422". */
+function refusalMessage(err: ApiError): string | null {
+  return err.message && !/^HTTP \d{3}$/.test(err.message) ? err.message : null;
+}
 
 /** The checkout id from `?id=`, or out of `resourcePath=/v1/checkouts/<id>/payment`. */
 function hyperPayCheckoutId(params: URLSearchParams): string | null {
@@ -46,6 +62,9 @@ export default function PaymentCallbackPage() {
   // HyperPay only: the card that paid, and the "being confirmed" wording.
   const [card, setCard]         = useState<{ brand: string; last4: string } | null>(null);
   const [isHyperPay, setIsHyperPay] = useState(false);
+  // Pending because the verify call got no usable answer (network, timeout,
+  // 5xx, no status) — not because the gateway said "pending".
+  const [uncertain, setUncertain] = useState(false);
 
   useEffect(() => {
     const params    = new URLSearchParams(window.location.search);
@@ -126,15 +145,9 @@ export default function PaymentCallbackPage() {
         .catch((err) => {
           logger.error('[payment-callback] HyperPay verify error:', err);
           hyperPayVerifications.delete(checkoutId);
-          // A refusal of the request itself (unknown checkout, bad input) is a
-          // failure. Anything else — the network, a 5xx, an expired session —
-          // says nothing about the payment, which the webhook and the
-          // reconciliation job still settle; claiming "failed" there invites
-          // the admin to pay twice. The URL stays unmarked so a refresh asks again.
-          const refused = err instanceof ApiError && err.status >= 400 && err.status < 500
-            && err.status !== 401 && err.status !== 408 && err.status !== 429;
-          if (refused) show('failed', { message: err.message && !/^HTTP \d{3}$/.test(err.message) ? err.message : null });
-          else show('pending', {});
+          // See isRefusal. The URL stays unmarked so a refresh asks again.
+          if (isRefusal(err)) show('failed', { message: refusalMessage(err) });
+          else { setUncertain(true); show('pending', {}); }
         });
       return;
     }
@@ -167,7 +180,7 @@ export default function PaymentCallbackPage() {
     // Verify with the backend — `metadata.transaction_id` links to the wallet transaction
     walletApi.verifyTopUp(paymentId)
       .then((result) => {
-        const s = (result.status ?? '').toLowerCase();
+        const s = result.status ?? '';
         if (s === 'completed' || s === 'paid' || s === 'captured') {
           setAmount(result.amount  != null ? String(result.amount)  : null);
           setBalance(result.balance != null ? String(result.balance) : null);
@@ -175,16 +188,31 @@ export default function PaymentCallbackPage() {
         } else if (s === 'failed') {
           setStatus('failed');
         } else {
+          // `pending`, `initiated`, `authorized`… or no status at all: not a
+          // final answer, so never "failed" (FA-402).
+          if (!result.status) {
+            logger.warn('[payment-callback] Moyasar verify answered without a status; showing pending.');
+            setUncertain(true);
+          }
           setStatus('pending');
         }
       })
       .catch((err) => {
         logger.error('[payment-callback] verifyTopUp error:', err);
-        setStatus('failed');
+        // Same rule as HyperPay (isRefusal): only a refusal of the request is
+        // "failed"; the network, a timeout or a 5xx is "check the ledger".
+        if (isRefusal(err)) {
+          setGatewayMsg(refusalMessage(err));
+          setStatus('failed');
+        } else {
+          setUncertain(true);
+          setStatus('pending');
+        }
       });
   }, []);
 
   const goToDrivers = () => { window.location.href = '/drivers'; };
+  const goToLedger  = () => { window.location.href = '/wallet'; };
 
   return (
     <div dir={dir} className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
@@ -247,9 +275,16 @@ export default function PaymentCallbackPage() {
             </div>
             <h2 className="mt-4 text-xl font-bold text-slate-900 dark:text-slate-50">{t('paymentCallback.processingTitle')}</h2>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              {isHyperPay ? t('paymentCallback.confirmingBody') : t('paymentCallback.processingBody')}
+              {uncertain
+                ? t('paymentCallback.uncertainBody')
+                : isHyperPay ? t('paymentCallback.confirmingBody') : t('paymentCallback.processingBody')}
+            </p>
+            {/* Never "try again" before the ledger says the money did not move. */}
+            <p className="mt-2 text-sm font-medium text-amber-700 dark:text-amber-400">
+              {t('paymentCallback.checkLedgerFirst')}
             </p>
             <Button variant="primary" className="mt-6 w-full" onClick={goToDrivers}>{t('paymentCallback.backToDrivers')}</Button>
+            <Button variant="secondary" className="mt-2 w-full" onClick={goToLedger}>{t('paymentCallback.openLedger')}</Button>
           </>
         )}
 

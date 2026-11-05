@@ -2998,19 +2998,28 @@ export const walletApi = {
     };
   },
 
-  /** Step 2 — Verify payment after Moyasar 3DS redirect. */
+  /**
+   * Step 2 — Verify payment after Moyasar 3DS redirect.
+   *
+   * `status` is lower-cased, or **null** when the answer carries none — which
+   * is not a failure (FA-402): the caller shows "pending, check the ledger".
+   * `success: false` throws, like the HyperPay verify.
+   */
   async verifyTopUp(paymentId: string): Promise<{
-    status:   string;
+    status:   string | null;
     amount?:  number;
     balance?: number;
   }> {
     const res = await apiClient.post<{
       success?: boolean;
+      message?: string;
       data?: { status?: string; amount?: number; balance?: number };
     }>('/fleet-admin/wallet/top-up/verify', { payment_id: paymentId }, { timeoutMs: PAYMENT_TIMEOUT_MS });
 
+    if (res.success === false) throw new Error(res.message ?? 'Payment verification failed');
+
     return {
-      status:  res.data?.status  ?? 'failed',
+      status:  optionalString(res.data?.status)?.toLowerCase() ?? null,
       amount:  res.data?.amount,
       balance: res.data?.balance,
     };
