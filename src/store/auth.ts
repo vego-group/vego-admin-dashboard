@@ -56,8 +56,13 @@ export interface AuthResult {
  *   (e.g. a superadmin) in, and `/fleet-admin/me` answered 403.
  * - `session_expired` — an authenticated request answered 401: the token
  *   expired or was revoked.
+ * - `revoke_unconfirmed` — the operator signed out, but the server did not
+ *   confirm it revoked the token (network error, timeout or a non-2xx answer).
+ *   The session ended in this browser only, and the login page says so (FA-004).
  */
-export type SignOutReason = 'not_fleet_admin' | 'session_expired';
+export type SignOutReason = 'not_fleet_admin' | 'session_expired' | 'revoke_unconfirmed';
+
+const SIGN_OUT_REASONS: readonly SignOutReason[] = ['not_fleet_admin', 'session_expired', 'revoke_unconfirmed'];
 
 /**
  * The store's `error` when an auth request never reached the server. It is the
@@ -95,10 +100,39 @@ function takeStoredSignOutReason(): SignOutReason | null {
   try {
     const stored = sessionStorage.getItem(SIGN_OUT_REASON_KEY);
     sessionStorage.removeItem(SIGN_OUT_REASON_KEY);
-    return stored === 'not_fleet_admin' || stored === 'session_expired' ? stored : null;
+    return SIGN_OUT_REASONS.find((reason) => reason === stored) ?? null;
   } catch {
     return null;
   }
+}
+
+// ── State that belongs to the signed-in account ─────────────────────────────
+//
+// Other stores hold data fetched for the account that is signed in: the fleet
+// profile (country, currency, decimals, vehicle term) and the notifications.
+// None of it may survive into the next account in the same tab, or a Saudi
+// fleet signing in after a Jordanian one would see JOD amounts with three
+// decimals (FA-001). So each of those stores registers its reset here, and the
+// session boundary runs them all: `signOut()` always, and a successful sign-in
+// as well, in case a session ended without passing through `signOut()`.
+//
+// Registered rather than imported, because those stores import this one.
+
+const accountResets = new Set<() => void>();
+
+/** Register a reset to run whenever the signed-in account ends or changes. */
+export function onAccountChange(reset: () => void): void {
+  accountResets.add(reset);
+}
+
+function resetAccountState(): void {
+  accountResets.forEach((reset) => {
+    try {
+      reset();
+    } catch (err) {
+      logger.warn('[auth] A store failed to reset at the session boundary:', err);
+    }
+  });
 }
 
 interface AuthState {
@@ -182,14 +216,18 @@ const LOGOUT_TIMEOUT_MS = 5_000;
 /**
  * Revoke the token on the server: `POST /super-admin/logout`, the shared staff
  * auth this app signs in through (`/super-admin/login`, `/super-admin/verify-otp`).
+ * The backend serves it under `auth:sanctum` with no role check, so it takes a
+ * fleet-admin token.
  *
- * Best effort. A failure, a timeout or a 401 (the token had already expired)
- * is logged and the caller signs out locally regardless — the operator asked
- * to leave, and nothing here may keep them signed in. It runs outside the
- * shared apiClient so that a 401 here does not read as "your session expired".
+ * Best effort: the caller signs out locally regardless — the operator asked to
+ * leave, and nothing here may keep them signed in. Returns whether the server
+ * confirmed the token is no longer valid: a 2xx, or a 401 (it had already
+ * expired). Anything else — a 403, a 5xx, the network, the timeout — is
+ * reported to the operator as "signed out on this device only". It runs outside
+ * the shared apiClient so that a 401 here does not read as "your session expired".
  */
-async function revokeToken(token: string): Promise<void> {
-  if (!BASE_URL) return;
+async function revokeToken(token: string): Promise<boolean> {
+  if (!BASE_URL) return false;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LOGOUT_TIMEOUT_MS);
   try {
@@ -202,9 +240,12 @@ async function revokeToken(token: string): Promise<void> {
       },
       signal: controller.signal,
     });
-    if (!res.ok) logger.warn(`[auth] Server logout answered ${res.status}; signing out locally anyway.`);
+    if (res.ok || res.status === 401) return true;
+    logger.warn(`[auth] Server logout answered ${res.status}; signing out locally anyway.`);
+    return false;
   } catch (err) {
     logger.warn('[auth] Server logout failed; signing out locally anyway:', err);
+    return false;
   } finally {
     clearTimeout(timer);
   }
@@ -288,13 +329,18 @@ export const useAuthStore = create<AuthState>()(
             code: otp,
           });
 
+          // The server's own id and name, or empty: never a made-up person.
+          // These were 'admin' / 'Fleet Admin' when the answer had no user,
+          // shown in English in the top bar (FA-005).
           const user: User = {
-            id: String(res.user?.id ?? 'admin'),
-            name: res.user?.name ?? 'Fleet Admin',
+            id: res.user?.id != null ? String(res.user.id) : '',
+            name: res.user?.name?.trim() ?? '',
             email: res.user?.email ?? '',
             role: 'admin',
           };
 
+          // Nothing fetched for an earlier account may reach this one.
+          resetAccountState();
           set({
             token: res.token,
             user,
@@ -312,18 +358,21 @@ export const useAuthStore = create<AuthState>()(
 
       logout: async () => {
         const { token } = get();
-        if (token) await revokeToken(token);
-        get().signOut();
+        const revoked = token ? await revokeToken(token) : true;
+        get().signOut(revoked ? undefined : 'revoke_unconfirmed');
       },
 
       // The country choice survives sign-out on purpose: it is a preference, not
-      // a credential, and re-login should not ask for it again.
+      // a credential, and re-login should not ask for it again. Everything that
+      // was fetched for this account does not (FA-001): the session ends first,
+      // so nothing reloads it for the old token, and then the stores reset.
       signOut: (reason) => {
         set({
           user: null, token: null, isAuthenticated: false, error: null, pendingPhone: null,
           signOutReason: reason ?? null,
         });
         storeSignOutReason(reason ?? null);
+        resetAccountState();
       },
 
       takeSignOutReason: () => {
@@ -335,6 +384,17 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'myvego.auth',
+      // v1 (FA-005): a session stored by v0 with no user in the OTP answer has
+      // the invented id 'admin' and name 'Fleet Admin'; blank them so the top
+      // bar shows no placeholder person. Everything else is kept as it was.
+      version: 1,
+      migrate: (persisted, version) => {
+        const state = (persisted ?? {}) as Partial<AuthState>;
+        if (version < 1 && state.user?.id === 'admin' && state.user.name === 'Fleet Admin') {
+          return { ...state, user: { ...state.user, id: '', name: '' } } as AuthState;
+        }
+        return state as AuthState;
+      },
       partialize: (state) => ({
         user: state.user,
         token: state.token,

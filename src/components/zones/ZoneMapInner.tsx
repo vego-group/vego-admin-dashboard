@@ -6,6 +6,7 @@ import { AlertTriangle, Sparkles } from 'lucide-react';
 import { ZONE_TYPES, ZONE_TYPE_LIST, zoneSpeedLimitText } from '@/lib/zone-types';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useBasemap } from '@/hooks/useBasemap';
+import { useCountryViewport } from '@/hooks/useCountryViewport';
 import { cn } from '@/lib/cn';
 import { fitToPoints, type LatLngTuple } from '@/lib/map-fit';
 import { html, trustedHtml, type TrustedHtml } from '@/lib/html';
@@ -111,6 +112,9 @@ export default function ZoneMapInner({
   // Fit the viewport to real geometry exactly once — refitting mid-draw would
   // move the map under the operator's cursor.
   const hasFittedRef  = useRef(false);
+  // An empty map opens on the fleet's country, so a first zone is drawn there
+  // (FA-314). Never moved while the operator is drawing.
+  const viewRef = useCountryViewport(mapRef, mapReady, hasFittedRef, 12, drawingMode);
 
   // Stable callback refs (avoid stale closures in Leaflet handlers)
   const onZoneClickRef          = useRef(onZoneClick);
@@ -131,11 +135,12 @@ export default function ZoneMapInner({
       const L = (await import('leaflet')) as any;
       if (cancelled || !containerRef.current) return;
 
-      // Placeholder viewport only — replaced by fitToPoints() over the real
-      // zone polygons (and vehicle pins) as soon as any arrive.
+      // Placeholder viewport only — the fleet's country (FA-314), replaced by
+      // fitToPoints() over the real zone polygons (and vehicle pins) as soon as
+      // any arrive.
       const map = L.map(containerRef.current, {
-        center: [24.74, 46.69],
-        zoom: 13,
+        center: viewRef.current.center,
+        zoom: viewRef.current.zoom,
         zoomControl: true,
       });
 
@@ -152,7 +157,7 @@ export default function ZoneMapInner({
       hasFittedRef.current = false;
       setMapReady(false);
     };
-  }, [addBasemap]);
+  }, [addBasemap, viewRef]);
 
   /* 2 ── Draw zone polygons + labels */
   useEffect(() => {
@@ -342,14 +347,13 @@ export default function ZoneMapInner({
       )}
       style={{ borderColor: 'rgb(var(--border))', minHeight: 500 }}
     >
-      {/* Live badge. Top-right in both directions: Leaflet keeps its zoom
-          control top-left in Arabic too, so `end-4` would cover it there. */}
+      {/* Vehicle pins are positions as last reported; this said "Live
+          Updates" and nothing polls (FA-315). Top-right in both directions:
+          Leaflet keeps its zoom control top-left in Arabic too, so `end-4`
+          would cover it there. */}
       <div className="pointer-events-none absolute right-4 top-4 z-[1001] inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm backdrop-blur dark:bg-slate-900/90 dark:text-slate-200">
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-        </span>
-        {t('common.liveUpdates')}
+        <span className="inline-flex h-2 w-2 rounded-full bg-slate-400" />
+        {t('common.lastKnownPositions')}
       </div>
 
       {/* Drawing hint. `left-1/2` with `-translate-x-1/2` centres it in both

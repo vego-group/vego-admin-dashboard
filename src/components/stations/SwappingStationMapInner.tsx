@@ -4,9 +4,11 @@ import 'leaflet/dist/leaflet.css';
 import { useEffect, useRef, useState } from 'react';
 import type { Map as LeafletMap, Marker as LeafletMarker } from 'leaflet';
 import { fitToPoints, type LatLngTuple } from '@/lib/map-fit';
-import { clampPercent, html, trustedHtml, type TrustedHtml } from '@/lib/html';
+import { html, trustedHtml, type TrustedHtml } from '@/lib/html';
+import { sharePercent } from '@/lib/format';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useBasemap } from '@/hooks/useBasemap';
+import { useCountryViewport } from '@/hooks/useCountryViewport';
 import type { SwappingStation } from '@/types';
 
 export interface SwappingStationMapProps {
@@ -26,11 +28,13 @@ function pinHtml(size: number, grad: string, ring: string): TrustedHtml {
 /**
  * The cabinet popup. Every API value goes through the html`` tag, which escapes
  * it (see @/lib/html); the card paints its own light and dark panels, so it
- * reads the same in both themes.
+ * reads the same in both themes. It had a "View Full Diagnostics" button that
+ * did nothing; there is no cabinet detail view to open yet (FA-322).
  */
 function stationPopup(s: SwappingStation, t: Translate): TrustedHtml {
-  const avail = s.totalCapacity > 0 ? Math.round(clampPercent((s.readyBatteries / s.totalCapacity) * 100)) : 0;
-  const barColor = avail >= 60 ? '#10b981' : avail >= 35 ? '#f59e0b' : '#ef4444';
+  // No capacity, no share: "—" and an empty bar, not a red 0 % (FA-308).
+  const avail = sharePercent(s.readyBatteries, s.totalCapacity);
+  const barColor = avail === undefined ? '#94a3b8' : avail >= 60 ? '#10b981' : avail >= 35 ? '#f59e0b' : '#ef4444';
   return html`<div style="font-family:system-ui,sans-serif;width:250px;border-radius:12px;overflow:hidden">
   <div style="background:#1e293b;padding:12px 16px">
     <div style="font-size:13px;font-weight:700;color:#f8fafc;margin-bottom:2px">${s.name}</div>
@@ -58,17 +62,16 @@ function stationPopup(s: SwappingStation, t: Translate): TrustedHtml {
     <div style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
         <span style="color:#64748b">${t('dashboard.availability')}</span>
-        <span style="font-weight:700;color:${barColor}">${avail}%</span>
+        <span style="font-weight:700;color:${barColor}">${avail === undefined ? '—' : `${avail}%`}</span>
       </div>
       <div style="height:6px;background:#f1f5f9;border-radius:999px;overflow:hidden">
-        <div style="height:100%;background:${barColor};width:${avail}%;border-radius:999px"></div>
+        <div style="height:100%;background:${barColor};width:${avail ?? 0}%;border-radius:999px"></div>
       </div>
     </div>
-    <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#64748b;margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#64748b">
       <span>&#9201; ${t('mapPopup.avgWait', { minutes: s.avgWaitTimeMinutes })}</span>
       <span>${t('mapPopup.todaySwaps', { count: s.todaySwaps })}</span>
     </div>
-    <button style="width:100%;background:#1e293b;color:#f8fafc;border:none;padding:9px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:0.01em">${t('batterySwapping.viewDiagnostics')}</button>
   </div>
 </div>`;
 }
@@ -81,6 +84,7 @@ export default function SwappingStationMapInner({ stations, height = 420 }: Swap
   const markersRef   = useRef<LeafletMarker[]>([]);
   const hasFittedRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
+  const viewRef = useCountryViewport(mapRef, mapReady, hasFittedRef, 12);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -94,8 +98,8 @@ export default function SwappingStationMapInner({ stations, height = 420 }: Swap
       // Placeholder viewport only — replaced by fitToPoints() over the real
       // markers as soon as any arrive. Never used to place a marker.
       const map: LeafletMap = L.map(containerRef.current, {
-        center: [24.74, 46.672],
-        zoom: 12,
+        center: viewRef.current.center,
+        zoom: viewRef.current.zoom,
         zoomControl: true,
       });
 
@@ -112,7 +116,7 @@ export default function SwappingStationMapInner({ stations, height = 420 }: Swap
       hasFittedRef.current = false;
       setMapReady(false);
     };
-  }, [addBasemap]);
+  }, [addBasemap, viewRef]);
 
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
@@ -130,9 +134,12 @@ export default function SwappingStationMapInner({ stations, height = 420 }: Swap
       // list labels it "location unknown" instead of pinning it to a guess.
       for (const s of stations) {
         if (!s.coordinates) continue;
-        const avail = s.totalCapacity > 0 ? (s.readyBatteries / s.totalCapacity) * 100 : 0;
+        // Unknown availability is grey, not the red of an empty cabinet.
+        const avail = sharePercent(s.readyBatteries, s.totalCapacity);
         const [grad, ring] =
-          avail >= 60
+          avail === undefined
+            ? ['#94a3b8,#64748b', 'rgba(148,163,184,0.25)']
+            : avail >= 60
             ? ['#10b981,#059669', 'rgba(16,185,129,0.25)']
             : avail >= 35
             ? ['#f59e0b,#d97706', 'rgba(245,158,11,0.25)']
@@ -179,11 +186,9 @@ export default function SwappingStationMapInner({ stations, height = 420 }: Swap
       {/* Top-right in both directions: Leaflet keeps its zoom control top-left
           in Arabic too, so `end-4` would cover it there. */}
       <div className="pointer-events-none absolute right-4 top-4 z-[1001] inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm backdrop-blur dark:bg-slate-900/90 dark:text-slate-200">
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-        </span>
-        {t('mapPopup.liveUpdatesActive')}
+        {/* "Live Updates: Active" claimed polling that does not exist (FA-315). */}
+        <span className="inline-flex h-2 w-2 rounded-full bg-slate-400" />
+        {t('mapPopup.lastKnownStatus')}
       </div>
       <div ref={containerRef} className="h-full w-full" />
     </div>

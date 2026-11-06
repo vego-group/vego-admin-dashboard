@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronDown, Clock, Phone, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { ChevronDown, Clock, Info, Phone, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { AUTH_NETWORK_ERROR, useAuthStore } from '@/store/auth';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useCountries } from '@/hooks/useCountries';
@@ -11,6 +11,7 @@ import { LanguageSwitcher } from '@/components/layout/LanguageSwitcher';
 import { flagEmoji, matchesPhoneRegex, toNationalNumber } from '@/lib/country';
 import { cn } from '@/lib/cn';
 import { bidiIsolate, ltrIsolate } from '@/lib/format';
+import { LEGAL_LINKS } from '@/lib/legal-links';
 import type { Country } from '@/types';
 
 export default function LoginPage() {
@@ -146,6 +147,18 @@ export default function LoginPage() {
               </div>
             )}
 
+            {/* The operator signed out, but the server did not confirm it revoked
+                the token: the session ended in this browser only. */}
+            {signOutReason === 'revoke_unconfirmed' && (
+              <div
+                role="status"
+                className="mt-6 flex items-start gap-2 rounded-lg bg-slate-100 px-3 py-2.5 text-xs font-medium text-slate-600"
+              >
+                <Info className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{t('auth.signedOutThisDeviceOnly')}</span>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="mt-8">
               {/* Country */}
               <label htmlFor="login-country" className="mb-2 block text-sm font-semibold text-slate-700">
@@ -272,9 +285,9 @@ export default function LoginPage() {
       {/* Footer — outside both cards */}
       <p className="mt-5 text-center text-sm text-slate-400">
         {t('auth.agreePrefix')}{' '}
-        <a href="https://www.vego.sa/en/terms-and-conditions" target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">{t('auth.termsOfService')}</a>
+        <a href={LEGAL_LINKS[locale].terms} target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">{t('auth.termsOfService')}</a>
         {t('auth.agreeJoin')}
-        <a href="https://www.vego.sa/en/privacy-policy" target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">{t('auth.privacyPolicy')}</a>
+        <a href={LEGAL_LINKS[locale].privacy} target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">{t('auth.privacyPolicy')}</a>
       </p>
     </div>
   );

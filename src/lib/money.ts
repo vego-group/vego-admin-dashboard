@@ -64,28 +64,63 @@ export function fractionDigitsOf(raw: string | number | null | undefined): numbe
 }
 
 /**
- * Exact integer minor units for a fixed-precision amount.
+ * A finite number as a plain decimal string: its shortest round-trip form
+ * (`String(1.005)` is "1.005"), with exponent notation ("1e-7") written out.
+ */
+function plainDecimal(value: number): string {
+  if (!Number.isFinite(value)) return '0';
+  const text = String(value);
+  const exp = /^(-?)(\d+)(?:\.(\d+))?e([+-]\d+)$/.exec(text);
+  if (!exp) return text;
+  const [, sign, int, frac = '', power] = exp;
+  const digits = int + frac;
+  const point  = int.length + Number(power);
+  if (point <= 0) return `${sign}0.${'0'.repeat(-point)}${digits}`;
+  if (point >= digits.length) return `${sign}${digits}${'0'.repeat(point - digits.length)}`;
+  return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
+}
+
+/**
+ * Exact integer minor units for a fixed-precision amount, **rounded half-up**
+ * (half away from zero) to `decimals` — the one rounding rule (FA-423).
  *
  * Strings are split on the decimal point and recombined as digits, so no binary
- * float ever holds the value. Numbers are normalised through `toFixed` first —
- * they have already lost precision, but at least they round predictably.
+ * float ever holds the value. A number is first written as its shortest decimal
+ * form and then rounded the same way: `toFixed` would round the binary value
+ * instead (`1.005.toFixed(2)` is "1.00"), and extra string digits used to be
+ * truncated, so "10.555" and 10.555 gave different answers.
+ *
+ * The backend sends exactly `decimals` fraction digits, so its amounts are
+ * never rounded here. An amount someone types must not be rounded either: it
+ * is refused first — see {@link exceedsDecimals}.
  */
 export function toMinorUnits(raw: string | number, decimals: number): number {
-  const text = typeof raw === 'number'
-    ? (Number.isFinite(raw) ? raw.toFixed(decimals) : '0')
-    : String(raw).trim();
+  const text = typeof raw === 'number' ? plainDecimal(raw) : String(raw).trim();
 
   const match = /^([+-]?)(\d*)(?:[.,](\d*))?$/.exec(text);
   if (!match || (!match[2] && !match[3])) return 0;
 
-  const sign  = match[1] === '-' ? -1 : 1;
-  const whole = match[2] || '0';
-  // The backend sends exactly `decimals` fraction digits, so truncating any
-  // extras is lossless in practice and never rounds a total upward.
-  const frac  = (match[3] ?? '').slice(0, decimals).padEnd(decimals, '0');
+  const sign   = match[1] === '-' ? -1 : 1;
+  const whole  = match[2] || '0';
+  const digits = match[3] ?? '';
+  const kept   = digits.slice(0, decimals).padEnd(decimals, '0');
+  // Half-up: the first dropped digit decides, 5 and above rounds the magnitude up.
+  const next   = digits.charAt(decimals);
+  const roundUp = next !== '' && next >= '5';
 
-  const combined = Number(`${whole}${frac}`);
+  const combined = Number(`${whole}${kept}`) + (roundUp ? 1 : 0);
   return Number.isFinite(combined) ? sign * combined : 0;
+}
+
+/**
+ * True when `raw` has more significant fraction digits than `decimals` allows —
+ * "10.555" for SAR (2), "7.0005" for JOD (3). Trailing zeros don't count:
+ * "10.500" is a valid SAR amount. Use it to refuse typed input rather than let
+ * {@link toMinorUnits} round it (FA-423).
+ */
+export function exceedsDecimals(raw: string, decimals: number): boolean {
+  const frac = /[.,](\d*)$/.exec(raw.trim())?.[1] ?? '';
+  return frac.replace(/0+$/, '').length > decimals;
 }
 
 /** Render integer minor units back as an exact decimal string ("120.500"). */
@@ -147,6 +182,23 @@ export function readMoney(
     amount: fromMinorUnits(minorUnits, decimals),
     minorUnits,
     currency: (currency as CurrencyCode | null) ?? null,
+    decimals,
+  };
+}
+
+/**
+ * The exact sum of several amounts (FA-317): integer minor units added at the
+ * finest precision among them, never floats. The currency is the first one
+ * stated; the amounts are assumed to share it (one fleet, one currency). An
+ * empty list is zero.
+ */
+export function sumMoney(items: readonly Money[]): Money {
+  const decimals   = items.reduce((d, m) => Math.max(d, m.decimals), 0);
+  const minorUnits = items.reduce((s, m) => s + m.minorUnits * 10 ** (decimals - m.decimals), 0);
+  return {
+    amount: fromMinorUnits(minorUnits, decimals),
+    minorUnits,
+    currency: items.find((m) => m.currency)?.currency ?? null,
     decimals,
   };
 }

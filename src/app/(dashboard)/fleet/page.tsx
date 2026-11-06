@@ -16,12 +16,14 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Pagination } from '@/components/ui/Pagination';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { SuccessDialog } from '@/components/ui/SuccessDialog';
+import { LoadError } from '@/components/ui/LoadError';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { fleetApi, driversApi } from '@/lib/api';
-import { isForbiddenError } from '@/lib/api-errors';
+import { failureLines, isForbiddenError } from '@/lib/api-errors';
 import type { Driver, Vehicle, VehicleStatus } from '@/types';
-import { ltrIsolate } from '@/lib/format';
+import { ltrIsolate, parseBackendDate } from '@/lib/format';
+import { vehicleDisplayName, vehicleMatches } from '@/lib/vehicle-label';
 import { logger } from '@/lib/logger';
 
 type TabValue = 'all' | VehicleStatus;
@@ -39,7 +41,15 @@ export default function FleetPage() {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState('newest');
   const [page, setPage] = useState(1);
-  const [apiError, setApiError] = useState<string | null>(null);
+  /**
+   * Why the last load failed, in the backend's words, with a Retry. It was the
+   * raw English `err.message` (or "Failed to load vehicles") in a banner with
+   * an English "Dismiss" (FA-215).
+   */
+  const [loadError, setLoadError] = useState<unknown>(undefined);
+  /** The vehicles have loaded at least once; until then the counts are unknown. */
+  const [loaded, setLoaded] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [forbidden, setForbidden] = useState(false);
 
   // Driver-assignment modal + success feedback
@@ -49,6 +59,7 @@ export default function FleetPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setLoading(true);
       try {
         // Drivers power the assignment picker; a failure there shouldn't hide the fleet.
         const [vehicleData, driverData] = await Promise.all([
@@ -61,11 +72,14 @@ export default function FleetPage() {
         if (!cancelled) {
           setVehicles(vehicleData);
           setDrivers(driverData);
+          setLoadError(undefined);
+          setLoaded(true);
         }
       } catch (err) {
         logger.error('[Fleet] Failed to load vehicles:', err);
+        if (cancelled) return;
         if (isForbiddenError(err)) setForbidden(true);
-        else setApiError(err instanceof Error ? err.message : 'Failed to load vehicles');
+        else setLoadError(err);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -73,13 +87,19 @@ export default function FleetPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   // ----- Driver assignment handlers -----------------------------------------
 
-  const handleAssignDriver = async (motorcycleId: string, driverId: string): Promise<boolean> => {
-    const ok = await fleetApi.assignDriver(motorcycleId, driverId);
-    if (!ok) return false;
+  /** The vehicle's plate (or #id) for a sentence — the bare id was shown as its plate. */
+  const plateOf = (motorcycleId: string): string => {
+    const vehicle = vehicles.find((v) => v.id === motorcycleId);
+    return vehicle ? vehicleDisplayName(vehicle) : `#${motorcycleId}`;
+  };
+
+  // A refusal throws through to the picker, which shows the backend's reason.
+  const handleAssignDriver = async (motorcycleId: string, driverId: string): Promise<void> => {
+    await fleetApi.assignDriver(motorcycleId, driverId);
     const driver = drivers.find((d) => d.id === driverId);
     const driverName = driver?.name ?? driverId;
     setVehicles((prev) =>
@@ -93,14 +113,12 @@ export default function FleetPage() {
       title: t('fleet.assignSuccessTitle'),
       // `plate`, not `vehicle`: `{{vehicle}}` is the country's noun for the
       // type, bound by tv(). This names one specific machine.
-      description: tv('fleet.assignSuccessDescription', { driver: driverName, plate: ltrIsolate(motorcycleId) }),
+      description: tv('fleet.assignSuccessDescription', { driver: driverName, plate: ltrIsolate(plateOf(motorcycleId)) }),
     });
-    return true;
   };
 
-  const handleUnassignDriver = async (motorcycleId: string): Promise<boolean> => {
-    const ok = await fleetApi.unassignDriver(motorcycleId);
-    if (!ok) return false;
+  const handleUnassignDriver = async (motorcycleId: string): Promise<void> => {
+    await fleetApi.unassignDriver(motorcycleId);
     setVehicles((prev) =>
       prev.map((v) =>
         v.id === motorcycleId
@@ -110,9 +128,8 @@ export default function FleetPage() {
     );
     setSuccessDialog({
       title: t('fleet.unassignSuccessTitle'),
-      description: tv('fleet.unassignSuccessDescription', { plate: ltrIsolate(motorcycleId) }),
+      description: tv('fleet.unassignSuccessDescription', { plate: ltrIsolate(plateOf(motorcycleId)) }),
     });
-    return true;
   };
 
   const counts = useMemo(
@@ -128,25 +145,26 @@ export default function FleetPage() {
   const filtered = useMemo(() => {
     let result = vehicles;
     if (tab !== 'all') result = result.filter((v) => v.status === tab);
-    if (query) {
-      const q = query.toLowerCase();
-      result = result.filter(
-        (v) =>
-          v.id.toLowerCase().includes(q) ||
-          v.assignedDriverName?.toLowerCase().includes(q) ||
-          v.location.toLowerCase().includes(q)
-      );
-    }
-    if (sort === 'newest') {
-      result = [...result].sort((a, b) => +new Date(b.lastTripAt) - +new Date(a.lastTripAt));
-    } else {
-      result = [...result].sort((a, b) => +new Date(a.lastTripAt) - +new Date(b.lastTripAt));
-    }
+    if (query) result = result.filter((v) => vehicleMatches(v, query));
+    // By when the device last reported. A vehicle that never reported has no
+    // time to sort by and goes last either way (FA-217: there are no trips).
+    const reportedAt = (v: Vehicle) => parseBackendDate(v.lastSeenAt)?.getTime();
+    result = [...result].sort((a, b) => {
+      const ta = reportedAt(a), tb = reportedAt(b);
+      if (ta === undefined || tb === undefined) {
+        return ta === tb ? 0 : ta === undefined ? 1 : -1;
+      }
+      return sort === 'newest' ? tb - ta : ta - tb;
+    });
     return result;
   }, [vehicles, tab, query, sort]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Never past the last page: a search or a narrower tab can shrink the list
+  // under the page the operator is on, which used to leave an empty page with
+  // the pager hidden (FA-214).
+  const currentPage = Math.min(page, totalPages);
+  const paginated  = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   if (forbidden) {
     return (
@@ -158,43 +176,39 @@ export default function FleetPage() {
 
   return (
     <DashboardShell title={t('fleet.title')} subtitle={tv('fleet.subtitle')}>
-      {apiError && (
-        <div className="mb-3 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
-          <span>{apiError}</span>
-          <button
-            type="button"
-            onClick={() => setApiError(null)}
-            className="ms-3 shrink-0 text-rose-400 hover:text-rose-600"
-            aria-label="Dismiss"
-          >
-            ✕
-          </button>
-        </div>
+      {loadError !== undefined && (
+        <LoadError
+          className="mb-4"
+          title={tv('fleet.loadFailed')}
+          lines={failureLines(loadError, t)}
+          onRetry={() => setReloadKey((k) => k + 1)}
+          retrying={loading}
+        />
       )}
 
-      {/* Status counters */}
+      {/* Status counters — "—" until the vehicles have loaded, not 0 */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <MetricCard
           label={t('fleet.active')}
-          value={counts.active}
+          value={loaded ? counts.active : '—'}
           icon={<Bike className="h-5 w-5" />}
           iconColor="green"
         />
         <MetricCard
           label={t('fleet.charging')}
-          value={counts.charging}
+          value={loaded ? counts.charging : '—'}
           icon={<BatteryCharging className="h-5 w-5" />}
           iconColor="sky"
         />
         <MetricCard
           label={t('fleet.idle')}
-          value={counts.idle}
+          value={loaded ? counts.idle : '—'}
           icon={<Battery className="h-5 w-5" />}
           iconColor="violet"
         />
         <MetricCard
           label={t('fleet.maintenance')}
-          value={counts.maintenance}
+          value={loaded ? counts.maintenance : '—'}
           icon={<Wrench className="h-5 w-5" />}
           iconColor="orange"
         />
@@ -233,16 +247,16 @@ export default function FleetPage() {
             <Input
               placeholder={t('common.searchByName')}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => { setQuery(e.target.value); setPage(1); }}
               leftIcon={<Search className="h-4 w-4" />}
             />
           </div>
           <Select
             value={sort}
-            onChange={(e) => setSort(e.target.value)}
+            onChange={(e) => { setSort(e.target.value); setPage(1); }}
             options={[
-              { value: 'newest', label: t('common.newestFirst') },
-              { value: 'oldest', label: t('common.oldestFirst') },
+              { value: 'newest', label: t('fleet.sortReportedNewest') },
+              { value: 'oldest', label: t('fleet.sortReportedOldest') },
             ]}
             className="w-[200px]"
           />
@@ -251,7 +265,7 @@ export default function FleetPage() {
 
       {/* Content */}
       <div className="mt-5">
-        {loading ? (
+        {loading && !loaded ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
               <Card key={i} className="p-5">
@@ -262,12 +276,12 @@ export default function FleetPage() {
               </Card>
             ))}
           </div>
-        ) : filtered.length === 0 ? (
+        ) : !loaded ? null : filtered.length === 0 ? (
           <Card>
             <EmptyState
               icon={<Bike className="h-6 w-6" />}
               title={t('common.noData')}
-              description="No vehicles match your current filters."
+              description={vehicles.length === 0 ? tv('fleet.emptyNone') : t('fleet.emptyNoMatch')}
             />
           </Card>
         ) : view === 'list' ? (
@@ -282,7 +296,7 @@ export default function FleetPage() {
       </div>
 
       {totalPages > 1 && (
-        <Pagination currentPage={page} totalPages={totalPages} onChange={setPage} />
+        <Pagination currentPage={currentPage} totalPages={totalPages} onChange={setPage} />
       )}
 
       {/* Driver assignment */}

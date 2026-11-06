@@ -20,9 +20,11 @@ import type { RevenuePoint } from '@/types';
 interface Props {
   data: RevenuePoint[];
   loading?: boolean;
+  /** Shown instead of the chart when its data failed to load (FA-312). */
+  failure?: React.ReactNode;
 }
 
-export function MonthlyRevenueChart({ data, loading }: Props) {
+export function MonthlyRevenueChart({ data, loading, failure }: Props) {
   const { t, locale } = useI18n();
   const { formatMoney } = useFleetContext();
 
@@ -51,6 +53,8 @@ export function MonthlyRevenueChart({ data, loading }: Props) {
       <div className="mt-5 h-[240px]">
         {loading ? (
           <Skeleton className="h-full w-full" />
+        ) : failure ? (
+          failure
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data} margin={{ top: 10, right: 4, left: 0, bottom: 0 }}>

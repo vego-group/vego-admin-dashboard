@@ -10,8 +10,7 @@ import { useCountries } from '@/hooks/useCountries';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { driversApi } from '@/lib/api';
-import { ApiError } from '@/lib/api/client';
-import { fieldErrorFrom } from '@/lib/api-errors';
+import { failureLines, fieldErrorFrom, fieldErrorsFrom } from '@/lib/api-errors';
 import { flagEmoji, matchesPhoneRegex, toNationalNumber } from '@/lib/country';
 import { cn } from '@/lib/cn';
 import type { Country, Driver, DocumentStatus, DriverDocuments } from '@/types';
@@ -32,19 +31,11 @@ export class DocumentUploadError extends Error {
   }
 }
 
-/** What the API said about a refused upload, as lines to show under the documents. */
-function uploadErrorLines(err: unknown, t: (key: string, params?: Record<string, string | number>) => string): string[] {
-  if (err instanceof ApiError) {
-    if (err.status === 0) return [t('drivers.docUploadFailedNetwork')];
-    // Laravel names every refused file ("must be an image", "may not be greater
-    // than 5120 kilobytes"); its top-level message only summarises them.
-    const fieldMessages = Array.from(new Set(Object.values(err.errors ?? {}).flat().filter(Boolean)));
-    if (fieldMessages.length > 0) return fieldMessages;
-    if (err.message && !/^HTTP \d{3}$/.test(err.message)) return [err.message];
-    return [t('drivers.docUploadFailedStatus', { status: err.status })];
-  }
-  return [err instanceof Error && err.message ? err.message : t('common.error')];
-}
+/**
+ * Document image links are signed and expire 15 minutes after they are
+ * issued. While the form stays open they are re-fetched well inside that.
+ */
+const DOCUMENT_LINK_REFRESH_MS = 10 * 60_000;
 
 // ── Form value shape ──────────────────────────────────────────────────────────
 
@@ -77,6 +68,31 @@ export interface DriverFormValues {
   licenseBackFile: File | null;
   plateImageFile: File | null;
 }
+
+/**
+ * The request keys of `POST` / `PUT /fleet-admin/drivers` and the form field
+ * each one is typed into, so a 422 lands beside the field to fix (FA-213).
+ * `country` is the read-only country box. Keys missing here (`has_license`, a
+ * fleet's driver cap, …) have no field and go in the form's banner.
+ */
+const FIELD_BY_REQUEST_KEY = {
+  name:                   'fullName',
+  phone:                  'phone',
+  country_code:           'country',
+  iso_country_code:       'country',
+  country:                'country',
+  email:                  'email',
+  address:                'address',
+  city:                   'city',
+  driving_license_number: 'licenseNumber',
+  driving_license_expiry: 'licenseExpiry',
+  plate_number:           'plateNumber',
+} as const satisfies Record<string, keyof DriverFormValues | 'country'>;
+
+type ServerField = (typeof FIELD_BY_REQUEST_KEY)[keyof typeof FIELD_BY_REQUEST_KEY];
+
+/** `plate_number` is `string, max 20` on create and update (backend, 2026-07). */
+const PLATE_NUMBER_MAX_LENGTH = 20;
 
 const emptyForm: DriverFormValues = {
   fullName: '',
@@ -124,7 +140,10 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
   const [errors, setErrors] = useState<Partial<Record<keyof DriverFormValues, string>>>({});
   const [countryError, setCountryError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  /** Why the save was refused, in the backend's words. The form stays open. */
+  const [submitError, setSubmitError] = useState<string[] | null>(null);
+  const submitErrorRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   // The documents the API refused after the driver itself was saved, and that
   // driver's id: saving again then updates it and retries the upload.
   const [docUploadError, setDocUploadError] = useState<string[] | null>(null);
@@ -153,11 +172,14 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
         address: driver.address ?? '',
         city: driver.city ?? '',
         hasLicense: driver.documents.license.hasLicense,
-        licenseFrontName: driver.documents.license.status !== 'not_uploaded' ? 'existing-front.jpg' : '',
+        // Names of files picked in this form only. A document already on
+        // record is shown as such by the upload box; it used to be a made-up
+        // "existing-front.jpg" that looked like a file just selected.
+        licenseFrontName: '',
         licenseBackName: '',
         licenseNumber: driver.documents.license.number ?? '',
         licenseExpiry: driver.documents.license.expiryDate ?? '',
-        plateImageName: driver.documents.plate.status !== 'not_uploaded' ? 'existing-plate.jpg' : '',
+        plateImageName: '',
         plateNumber: driver.documents.plate.number ?? '',
         licenseFrontFile: null,
         licenseBackFile: null,
@@ -174,18 +196,52 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
     if (docUploadError) docUploadErrorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [docUploadError]);
 
-  // On edit, fetch the driver's document detail (image URLs + rejection reasons)
-  // which the list endpoint doesn't include.
+  // The save banner sits at the top of the form; the button that raised it is
+  // at the bottom.
+  useEffect(() => {
+    if (submitError) submitErrorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [submitError]);
+
+  // On edit, fetch the driver's document detail (image links + rejection
+  // reasons), which the list endpoint doesn't include. The links are signed and
+  // expire after 15 minutes, so they come from a fresh fetch each time the form
+  // opens — never from the list — and are fetched again while it stays open,
+  // including when the tab comes back after being hidden.
   useEffect(() => {
     setDocDetail(null);
     if (!open || !driver) return;
     let cancelled = false;
-    (async () => {
+    let fetchedAt = 0;
+    const load = async () => {
       const detail = await driversApi.get(driver.id);
-      if (!cancelled && detail) setDocDetail(detail.documents);
-    })();
-    return () => { cancelled = true; };
+      if (cancelled) return;
+      fetchedAt = Date.now();
+      if (detail) setDocDetail(detail.documents);
+    };
+    void load();
+    const timer = window.setInterval(() => { void load(); }, DOCUMENT_LINK_REFRESH_MS);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && Date.now() - fetchedAt > DOCUMENT_LINK_REFRESH_MS) void load();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [open, driver]);
+
+  /**
+   * Bring the first field the server refused into view: the Save button is at
+   * the bottom of a long form and the field may be at the top.
+   */
+  const revealFirstFieldError = () => {
+    window.requestAnimationFrame(() => {
+      formRef.current
+        ?.querySelector('[data-field-error]')
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+  };
 
   const update = <K extends keyof DriverFormValues>(key: K, val: DriverFormValues[K]) => {
     setValues((v) => ({ ...v, [key]: val }));
@@ -208,7 +264,7 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
    * rather than another country's.
    */
   const examplePlaceholder = (
-    field: 'addressPlaceholder' | 'cityPlaceholder' | 'licenseNumberPlaceholder',
+    field: 'addressPlaceholder' | 'cityPlaceholder' | 'licenseNumberPlaceholder' | 'plateNumberPlaceholder',
   ): string => {
     if (!fleetIso) return '';
     const key = `drivers.${field}.${fleetIso}`;
@@ -271,23 +327,46 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
       // and let a second save retry against the driver that now exists.
       if (err instanceof DocumentUploadError) {
         setSavedDriverId(err.driverId);
-        setDocUploadError(uploadErrorLines(err.uploadError, t));
+        // Laravel names every refused file ("must be an image", "may not be
+        // greater than 5120 kilobytes"); failureLines shows each one.
+        setDocUploadError(failureLines(err.uploadError, t));
         return;
       }
-      // country_not_supported / phone_invalid_for_country and a refused blank
-      // name or phone are input mistakes, not failures of the request: they
-      // belong beside the field the operator has to fix, never in the form-wide
-      // banner.
-      const fieldError = fieldErrorFrom(err);
-      if (fieldError) {
-        const detail  = fieldError.expectedFormat ?? fieldError.example;
-        const message = detail ? `${fieldError.message} (${detail})` : fieldError.message;
-        if (fieldError.field === 'country')   setCountryError(message);
-        else if (fieldError.field === 'name') setErrors((prev) => ({ ...prev, fullName: message }));
-        else                                  setErrors((prev) => ({ ...prev, phone: message }));
-      } else {
-        setSubmitError(err instanceof Error ? err.message : 'An unexpected error occurred. Please try again.');
+      // A refused field is an input mistake, not a failed request: it belongs
+      // beside the field the operator has to fix. country_not_supported and
+      // phone_invalid_for_country come as an error_code (with the expected
+      // format); everything else as Laravel's per-field `errors` (FA-213).
+      const coded  = fieldErrorFrom(err);
+      const byCode = coded && coded.code !== 'validation' ? coded : null;
+      const byKey  = fieldErrorsFrom<ServerField>(err, FIELD_BY_REQUEST_KEY);
+      if (!byCode && !byKey) {
+        // Anything else — a 500, a timeout, the fleet's driver cap — stays on
+        // the open form with the operator's edits intact (FA-201).
+        setSubmitError(failureLines(err, t));
+        return;
       }
+      const next: Partial<Record<keyof DriverFormValues, string>> = {};
+      let nextCountryError: string | null = null;
+      const unmapped = [...(byKey?.unmapped ?? [])];
+      if (byCode) {
+        const detail  = byCode.expectedFormat ?? byCode.example;
+        const message = detail ? `${byCode.message} (${detail})` : byCode.message;
+        if (byCode.field === 'country')   nextCountryError = message;
+        else if (byCode.field === 'name') next.fullName = message;
+        else                              next.phone = message;
+      }
+      for (const [field, message] of Object.entries(byKey?.fields ?? {}) as [ServerField, string][]) {
+        if (field === 'country') nextCountryError ??= message;
+        // The licence fields are hidden under "No licence": a message there
+        // would be invisible, so it goes in the banner instead.
+        else if ((field === 'licenseNumber' || field === 'licenseExpiry') && !values.hasLicense) unmapped.push(message);
+        else next[field] ??= message;
+      }
+      setErrors((prev) => ({ ...prev, ...next }));
+      if (nextCountryError) setCountryError(nextCountryError);
+      // Refusals with no field on this form still need saying.
+      if (unmapped.length > 0) setSubmitError(unmapped);
+      else revealFirstFieldError();
     } finally {
       setSubmitting(false);
     }
@@ -303,7 +382,7 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
 
   return (
     <Modal open={open} onClose={onClose} size="lg">
-      <form onSubmit={handleSubmit}>
+      <form ref={formRef} onSubmit={handleSubmit}>
         {/* Header */}
         <div
           className="flex items-start gap-3 border-b px-6 pb-4 pt-5"
@@ -327,9 +406,16 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
 
           {/* API error banner */}
           {submitError && (
-            <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-400">
+            <div
+              ref={submitErrorRef}
+              role="alert"
+              className="mb-4 flex items-start gap-2.5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-400"
+            >
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{submitError}</span>
+              <div className="min-w-0 space-y-1">
+                <p className="font-semibold">{isEdit ? t('drivers.updateFailed') : t('drivers.createFailed')}</p>
+                {submitError.map((line) => <p key={line} className="break-words">{line}</p>)}
+              </div>
             </div>
           )}
 
@@ -339,7 +425,7 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
           <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label={t('drivers.fullName')} required error={errors.fullName}>
               <Input
-                placeholder="Ahmed Al-Khaldi"
+                placeholder={t('drivers.fullNamePlaceholder')}
                 value={values.fullName}
                 onChange={(e) => update('fullName', e.target.value)}
               />
@@ -419,21 +505,22 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
             <Field label={`${t('drivers.emailAddress')} (${t('common.optional')})`} error={errors.email}>
               <Input
                 type="email"
-                placeholder="driver@example.com"
+                dir="ltr"
+                placeholder={t('drivers.emailPlaceholder')}
                 value={values.email}
                 onChange={(e) => update('email', e.target.value)}
               />
             </Field>
           </div>
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label={`${t('drivers.address')} (${t('common.optional')})`}>
+            <Field label={`${t('drivers.address')} (${t('common.optional')})`} error={errors.address}>
               <Input
                 placeholder={examplePlaceholder('addressPlaceholder')}
                 value={values.address}
                 onChange={(e) => update('address', e.target.value)}
               />
             </Field>
-            <Field label={`${t('drivers.city')} (${t('common.optional')})`}>
+            <Field label={`${t('drivers.city')} (${t('common.optional')})`} error={errors.city}>
               <Input
                 placeholder={examplePlaceholder('cityPlaceholder')}
                 value={values.city}
@@ -534,6 +621,7 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
                   <FileUploadBox
                     label={t('drivers.licenseFront')}
                     fileName={values.licenseFrontName}
+                    onRecord={!!existingDocStatus && existingDocStatus.license.status !== 'not_uploaded'}
                     onFileSelect={(f) => selectFile('licenseFrontFile', 'licenseFrontName', f)}
                     accept="image/*"
                   />
@@ -545,14 +633,14 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
                   />
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field label={`${t('drivers.licenseNumber')} (${t('common.optional')})`}>
+                  <Field label={`${t('drivers.licenseNumber')} (${t('common.optional')})`} error={errors.licenseNumber}>
                     <Input
                       placeholder={examplePlaceholder('licenseNumberPlaceholder')}
                       value={values.licenseNumber}
                       onChange={(e) => update('licenseNumber', e.target.value)}
                     />
                   </Field>
-                  <Field label={`${t('drivers.licenseExpiry')} (${t('common.optional')})`}>
+                  <Field label={`${t('drivers.licenseExpiry')} (${t('common.optional')})`} error={errors.licenseExpiry}>
                     <Input
                       type="date"
                       value={values.licenseExpiry}
@@ -586,12 +674,14 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
               <FileUploadBox
                 label={`${t('common.optional')}`}
                 fileName={values.plateImageName}
+                onRecord={!!existingDocStatus && existingDocStatus.plate.status !== 'not_uploaded'}
                 onFileSelect={(f) => selectFile('plateImageFile', 'plateImageName', f)}
                 accept="image/*"
               />
-              <Field label={`${t('drivers.plateNumber')} (${t('common.optional')})`}>
+              <Field label={`${t('drivers.plateNumber')} (${t('common.optional')})`} error={errors.plateNumber}>
                 <Input
-                  placeholder="ABC 1234"
+                  placeholder={examplePlaceholder('plateNumberPlaceholder')}
+                  maxLength={PLATE_NUMBER_MAX_LENGTH}
                   value={values.plateNumber}
                   onChange={(e) => update('plateNumber', e.target.value)}
                 />
@@ -656,7 +746,7 @@ function Field({
       </label>
       {children}
       {error ? (
-        <p className="mt-1 text-xs text-rose-600">{error}</p>
+        <p data-field-error className="mt-1 text-xs text-rose-600">{error}</p>
       ) : (
         hint && <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">{hint}</p>
       )}
@@ -731,12 +821,19 @@ function DocPreviewNote({
 }
 
 function FileUploadBox({
-  label, fileName, onFileSelect, accept = 'image/*,.pdf',
+  label, fileName, onRecord = false, onFileSelect, accept = 'image/*,.pdf',
 }: {
-  label: string; fileName: string; onFileSelect: (file: File) => void; accept?: string;
+  label: string;
+  /** A file picked in this form, if any. */
+  fileName: string;
+  /** The driver already has this document on record (edit form). */
+  onRecord?: boolean;
+  onFileSelect: (file: File) => void;
+  accept?: string;
 }) {
+  const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
-  const hasFile = !!fileName;
+  const hasFile = !!fileName || onRecord;
 
   return (
     <div>
@@ -765,15 +862,15 @@ function FileUploadBox({
           <>
             <Check className="h-5 w-5 text-indigo-500" />
             <span className="max-w-full truncate text-xs font-medium text-indigo-600 dark:text-indigo-400">
-              {fileName}
+              {fileName || t('drivers.fileOnRecord')}
             </span>
-            <span className="text-[10px] text-slate-400">Click to change</span>
+            <span className="text-[10px] text-slate-400">{t('drivers.changeFile')}</span>
           </>
         ) : (
           <>
             <Upload className="h-5 w-5 text-slate-400 group-hover:text-indigo-500 transition-colors" />
             <span className="text-xs text-slate-500 dark:text-slate-400">{label}</span>
-            <span className="text-[10px] text-indigo-500">Click to upload</span>
+            <span className="text-[10px] text-indigo-500">{t('drivers.uploadFile')}</span>
           </>
         )}
       </button>
@@ -781,35 +878,38 @@ function FileUploadBox({
   );
 }
 
-const DOC_STATUS_CONFIG: Record<DocumentStatus, { label: string; icon: React.ReactNode; className: string }> = {
+// The same words as the drivers table ("Pending Review", not "Pending"), in
+// the UI language — these were hard-coded English.
+const DOC_STATUS_CONFIG: Record<DocumentStatus, { labelKey: string; icon: React.ReactNode; className: string }> = {
   not_uploaded: {
-    label: 'Not Uploaded',
+    labelKey: 'drivers.docNotUploaded',
     icon: <X className="h-3 w-3" />,
     className: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
   },
   pending: {
-    label: 'Pending',
+    labelKey: 'drivers.docPending',
     icon: <Clock className="h-3 w-3" />,
     className: 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400',
   },
   verified: {
-    label: 'Verified',
+    labelKey: 'drivers.docVerified',
     icon: <Check className="h-3 w-3" />,
     className: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400',
   },
   rejected: {
-    label: 'Rejected',
+    labelKey: 'drivers.docRejected',
     icon: <AlertTriangle className="h-3 w-3" />,
     className: 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400',
   },
 };
 
 function DocStatusBadge({ status }: { status: DocumentStatus }) {
+  const { t } = useI18n();
   const cfg = DOC_STATUS_CONFIG[status];
   return (
     <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium', cfg.className)}>
       {cfg.icon}
-      {cfg.label}
+      {t(cfg.labelKey)}
     </span>
   );
 }

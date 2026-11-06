@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   TrendingUp, ShoppingCart, Users2,
   Download, CheckCircle2, Clock, XCircle, HelpCircle,
-  ArrowUp, AlertTriangle, Calendar, Info,
+  ArrowUp, ArrowDown, Minus, AlertTriangle, Calendar, Info,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { Card } from '@/components/ui/Card';
@@ -13,14 +13,15 @@ import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Pagination } from '@/components/ui/Pagination';
 import { NoAccessState } from '@/components/ui/NoAccessState';
+import { LoadError } from '@/components/ui/LoadError';
 import { PaymentSettings } from '@/components/wallet/PaymentSettings';
 import { brandLabel } from '@/components/wallet/SavedCardsList';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
 import { useFleetContext } from '@/hooks/useFleetContext';
-import { bidiIsolate } from '@/lib/format';
+import { bidiIsolate, formatNumber, parseBackendDate } from '@/lib/format';
 import { apiTransactionType, driversApi, walletApi, walletFilterErrorFrom } from '@/lib/api';
-import { isForbiddenError } from '@/lib/api-errors';
+import { failureLines, isForbiddenError } from '@/lib/api-errors';
 import { fractionDigitsOf, fromMinorUnits, toMinorUnits } from '@/lib/money';
 import type {
   CurrencyCode, Driver, TransactionType, TransactionStatus, WalletTransaction, WalletStats,
@@ -159,8 +160,9 @@ function isoDate(d: Date): string {
  * value in the CSV.
  */
 function formatDT(iso: string, fallback = '—'): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return fallback;
+  // Read as the backend means it: a zoneless date-time is UTC (FA-301).
+  const date = parseBackendDate(iso);
+  if (!date) return fallback;
   return new Intl.DateTimeFormat('en-GB', {
     day:    '2-digit',
     month:  'short',
@@ -194,6 +196,9 @@ function defaultTo(): string { return isoDate(new Date()); }
  * Debits arrive positive (`type: "debit"`), so the old `startsWith('-')` test
  * exported every single row with a leading `+` and a reconciliation against the
  * export added spending to the balance instead of subtracting it.
+ *
+ * A row whose direction is unknown (FA-411) gets no sign of ours: the value as
+ * the backend sent it, never a "+" it did not state.
  */
 function csvAmount(tx: WalletTransaction, fleetDecimals: number | null): string {
   const decimals = tx.money?.decimals ?? fleetDecimals ?? fractionDigitsOf(tx.amount);
@@ -202,7 +207,25 @@ function csvAmount(tx: WalletTransaction, fleetDecimals: number | null): string 
   const source = tx.signedAmount
     || tx.money?.amount
     || fromMinorUnits(toMinorUnits(tx.amount, decimals), decimals);
+  if (tx.direction === 'unknown') return source;
   return `${tx.direction === 'out' ? '-' : '+'}${source.replace(/^[+-]/, '')}`;
+}
+
+/** One CSV cell: quoted, with embedded quotes doubled. */
+function csvCell(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+/**
+ * A text cell that a spreadsheet can't run (FA-415). Driver names, notes and
+ * admin names are user-controlled (a driver registers from the mobile app), and
+ * Excel, LibreOffice and Sheets treat a cell starting with `=`, `+`, `-` or `@`
+ * — or a tab or carriage return before one — as a formula. A leading `'` makes
+ * the cell plain text. The Amount column is never passed through this: its
+ * leading sign is data, and it is built by {@link csvAmount}, not typed by anyone.
+ */
+function csvTextCell(value: string): string {
+  return csvCell(/^[=+\-@\t\r]/.test(value) ? `'${value}` : value);
 }
 
 function exportCsv(
@@ -221,16 +244,16 @@ function exportCsv(
     'Type', 'Payment Method', 'Note', 'Status', 'Admin',
   ];
   const lines = rows.map((r) => [
-    formatDT(r.createdAt, r.createdAt),
-    r.driverName,
-    csvAmount(r, decimals),
-    r.money?.currency ?? currency ?? '',
-    csvType(r),
-    paymentMethodText(r, t) ?? '',
-    localisedNote(r, t) ?? '',
-    rawStatusOf(r),
-    r.adminName ?? '',
-  ].map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','));
+    csvTextCell(formatDT(r.createdAt, r.createdAt)),
+    csvTextCell(r.driverName),
+    csvCell(csvAmount(r, decimals)),
+    csvTextCell(r.money?.currency ?? currency ?? ''),
+    csvTextCell(csvType(r)),
+    csvTextCell(paymentMethodText(r, t) ?? ''),
+    csvTextCell(localisedNote(r, t) ?? ''),
+    csvTextCell(rawStatusOf(r)),
+    csvTextCell(r.adminName ?? ''),
+  ].join(','));
   // The BOM is what tells Excel the file is UTF-8. Without it Excel on Windows
   // reads the bytes in the system code page and garbles every Arabic name.
   const csv  = '﻿' + [headers.join(','), ...lines].join('\n');
@@ -243,6 +266,28 @@ function exportCsv(
 
 // ── Stat card ─────────────────────────────────────────────────────────────
 
+/**
+ * The trend chip, by its sign (FA-417): up green "+12%", down rose "−12%",
+ * flat grey "0%". It was always green, up and "+", so a fall read "+-12%".
+ */
+function TrendChip({ trend }: { trend: number }) {
+  const { locale } = useI18n();
+  const up   = trend > 0;
+  const down = trend < 0;
+  const TrendIcon = up ? ArrowUp : down ? ArrowDown : Minus;
+  return (
+    <div className={cn(
+      'mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold',
+      up ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
+        : down ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400'
+        : 'bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-300',
+    )}>
+      <TrendIcon className="h-3 w-3" />
+      <span dir="ltr">{up ? '+' : down ? '−' : ''}{formatNumber(Math.abs(trend), locale)}%</span>
+    </div>
+  );
+}
+
 function StatCard({
   label, value, unit, subtitle, trend, iconBg, Icon, loading,
 }: {
@@ -250,7 +295,8 @@ function StatCard({
   value: string;
   unit?: string;
   subtitle?: React.ReactNode;
-  trend?: number;
+  /** Hidden when null or undefined — no trend is not a 0% trend. */
+  trend?: number | null;
   iconBg: string;
   Icon: React.ElementType;
   loading?: boolean;
@@ -277,12 +323,7 @@ function StatCard({
                   <span className="text-sm font-medium text-slate-500 dark:text-slate-400">{unit}</span>
                 )}
               </div>
-              {trend !== undefined && (
-                <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">
-                  <ArrowUp className="h-3 w-3" />
-                  +{trend}%
-                </div>
-              )}
+              {trend != null && <TrendChip trend={trend} />}
               {subtitle && (
                 <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">{subtitle}</p>
               )}
@@ -318,6 +359,13 @@ export default function WalletPage() {
   const [filterError, setFilterError] = useState<string | null>(null);
   // The ledger refused with a 403: this account may not see it at all.
   const [forbidden, setForbidden] = useState(false);
+  // The page of transactions could not be loaded (network, timeout, 5xx): said
+  // as such, with Retry — never "No transactions found" (FA-413). Held as the
+  // error itself so its lines follow the UI language.
+  const [loadError, setLoadError] = useState<unknown>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  // The CSV export failed for a reason other than a refused filter (FA-414).
+  const [exportError, setExportError] = useState<unknown>(null);
 
   // Filters
   const [fromDate, setFromDate] = useState(defaultFrom);
@@ -366,7 +414,7 @@ export default function WalletPage() {
 
   // Anything that changes what should be on screen puts the table back into
   // loading; the fetch effect clears it. Declared first so it runs before it.
-  useEffect(() => { setDataLoading(true); }, [query, page]);
+  useEffect(() => { setDataLoading(true); }, [query, page, reloadKey]);
 
   // One page per request, totals from the paginator — the server's filter is
   // exactly ours for every category, so nothing is refined here.
@@ -379,20 +427,24 @@ export default function WalletPage() {
         setServed({ rows: res.rows, total: res.page.total, lastPage: Math.max(1, res.page.lastPage) });
         setTruncated(false);
         setFilterError(null);
+        setLoadError(null);
       } catch (err) {
         if (cancelled) return;
         logger.error('[Wallet] Failed to load transactions:', err);
         if (isForbiddenError(err)) setForbidden(true);
         // A refused filter says which parameter it refused — show that, not an
         // empty table that looks like an answer.
-        setFilterError(walletFilterErrorFrom(err)?.message ?? null);
+        const refused = walletFilterErrorFrom(err);
+        setFilterError(refused?.message ?? null);
+        // Anything else is a failed load, not an empty ledger.
+        setLoadError(refused || isForbiddenError(err) ? null : err);
         setServed({ rows: [], total: 0, lastPage: 1 });
       } finally {
         if (!cancelled) setDataLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [query, page]);
+  }, [query, page, reloadKey]);
 
   // Straight from the paginator: no local slice, no local filter.
   const { rows, total, lastPage: totalPages } = served;
@@ -408,13 +460,17 @@ export default function WalletPage() {
    */
   const handleExport = async () => {
     setExporting(true);
+    setExportError(null);
     try {
       const res = await walletApi.getAllTransactions(query);
       exportCsv(res.rows, currency, currencyDecimals, t);
       if (res.truncated) setTruncated(true);
     } catch (err) {
       logger.error('[Wallet] CSV export failed:', err);
-      setFilterError(walletFilterErrorFrom(err)?.message ?? null);
+      const refused = walletFilterErrorFrom(err);
+      setFilterError(refused?.message ?? null);
+      // Anything but a refused filter used to fail silently (FA-414).
+      if (!refused) setExportError(err);
     } finally {
       setExporting(false);
     }
@@ -448,7 +504,9 @@ export default function WalletPage() {
           value={stats?.totalSpent != null ? formatMoney(stats.totalSpent, locale) : '—'}
           iconBg="bg-gradient-to-br from-rose-400 to-rose-600"
           Icon={ShoppingCart}
-          subtitle={stats ? t('wallet.ofBudget', { percent: stats.budgetUsedPercent }) : undefined}
+          subtitle={stats?.budgetUsedPercent != null
+            ? t('wallet.ofBudget', { percent: formatNumber(stats.budgetUsedPercent, locale) })
+            : undefined}
           loading={dataLoading}
         />
         <StatCard
@@ -554,11 +612,12 @@ export default function WalletPage() {
           </div>
         </div>
 
-        {/* Fleet drivers can top up their own wallets, so bonus rows can appear
-            here, and the type filter has no option of its own for them yet. */}
+        {/* Fleet-funded top-ups never earn a bonus (decided rule). Bonus rows can
+            still appear here from drivers' own top-ups; this line no longer claims
+            which filter lists them (FA-430). */}
         <p className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-400 dark:text-slate-500">
           <Info className="h-3 w-3 shrink-0" />
-          {t('wallet.bonusesUnderTopUp')}
+          {t('wallet.fleetTopUpsNoBonus')}
         </p>
 
         {/* A filter the endpoint refused, in its own words. Without this the
@@ -570,6 +629,17 @@ export default function WalletPage() {
               <span className="font-semibold">{t('wallet.filterRejected')}</span> {filterError}
             </span>
           </p>
+        )}
+
+        {/* The export failed, and why — never a button that silently did nothing. */}
+        {exportError != null && (
+          <LoadError
+            className="mt-3"
+            title={t('wallet.exportFailed')}
+            lines={failureLines(exportError, t)}
+            onRetry={() => { void handleExport(); }}
+            retrying={exporting}
+          />
         )}
 
         {/* A capped result must say so — a short export that looks complete is
@@ -612,6 +682,17 @@ export default function WalletPage() {
                     ))}
                   </tr>
                 ))
+              ) : loadError != null ? (
+                <tr>
+                  <td colSpan={8} className="px-5 py-8">
+                    <LoadError
+                      title={t('wallet.loadFailed')}
+                      lines={failureLines(loadError, t)}
+                      onRetry={() => setReloadKey((k) => k + 1)}
+                      retrying={dataLoading}
+                    />
+                  </td>
+                </tr>
               ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-5 py-16 text-center">
@@ -626,8 +707,10 @@ export default function WalletPage() {
                   const StatusIcon = STATUS_ICON[tx.status] ?? HelpCircle;
                   // Direction, never the sign. A debit is a positive amount with
                   // type "debit" — reading `amount >= 0` painted every debit
-                  // green as if it were a credit.
+                  // green as if it were a credit. An unknown direction is
+                  // neutral: grey, no sign (FA-411).
                   const isCredit   = tx.direction === 'in';
+                  const isDebit    = tx.direction === 'out';
                   const payment    = paymentMethodText(tx, t);
                   return (
                     <tr
@@ -645,10 +728,12 @@ export default function WalletPage() {
                       </td>
                       <td className={cn(
                         'px-5 py-4 font-bold tabular-nums',
-                        isCredit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400',
+                        isCredit ? 'text-emerald-600 dark:text-emerald-400'
+                          : isDebit ? 'text-rose-600 dark:text-rose-400'
+                          : 'text-slate-600 dark:text-slate-300',
                       )}>
                         {/* `amount` is a magnitude; the sign is the direction's. */}
-                        <span dir="ltr">{isCredit ? '+' : '−'}{formatMoney(tx.amount, locale)}</span>
+                        <span dir="ltr">{isCredit ? '+' : isDebit ? '−' : ''}{formatMoney(tx.amount, locale)}</span>
                       </td>
                       <td className="px-5 py-4">
                         <span className={cn(

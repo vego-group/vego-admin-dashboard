@@ -15,6 +15,11 @@ interface ConfirmDeleteDialogProps {
   /** Default: "Close". */
   cancelLabel?: string;
   isLoading?: boolean;
+  /**
+   * Why the confirmed action failed. Shown in the dialog, which stays open so
+   * the operator can retry or close it: a refusal must never look like a done.
+   */
+  error?: string[] | null;
 }
 
 /**
@@ -30,6 +35,7 @@ export function ConfirmDeleteDialog({
   confirmLabel,
   cancelLabel,
   isLoading,
+  error,
 }: ConfirmDeleteDialogProps) {
   const { t } = useI18n();
 
@@ -42,6 +48,15 @@ export function ConfirmDeleteDialog({
 
         <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-slate-50">{title}</h2>
         {description && <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">{description}</p>}
+
+        {error && error.length > 0 && (
+          <div
+            role="alert"
+            className="mt-4 space-y-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-start text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-400"
+          >
+            {error.map((line) => <p key={line} className="break-words">{line}</p>)}
+          </div>
+        )}
 
         <div className="mt-6 flex items-center justify-center gap-3">
           <Button variant="secondary" onClick={onClose} className="min-w-[110px]" disabled={isLoading} autoFocus>

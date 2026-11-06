@@ -10,6 +10,7 @@ import { SavedCardsList } from '@/components/wallet/SavedCardsList';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { useI18n } from '@/i18n/I18nProvider';
 import { walletApi } from '@/lib/api';
+import { failureMessage } from '@/lib/api-errors';
 import { logger } from '@/lib/logger';
 import type { BillingAddress, SavedCard } from '@/types';
 
@@ -78,8 +79,8 @@ export function PaymentSettings() {
       await walletApi.deleteSavedCard(cardId);
       setCards((list) => list.filter((c) => c.id !== cardId));
     } catch (err) {
-      const message = err instanceof Error ? err.message : '';
-      setCardsError(message && !/^HTTP \d{3}$/.test(message) ? message : t('wallet.removeCardFailed'));
+      logger.error('[PaymentSettings] removing a saved card failed:', err);
+      setCardsError(failureMessage(err, t, t('wallet.removeCardFailed')));
     } finally {
       setRemovingId(null);
     }

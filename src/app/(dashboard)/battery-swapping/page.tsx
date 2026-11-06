@@ -15,9 +15,10 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Pagination } from '@/components/ui/Pagination';
 import { NoAccessState } from '@/components/ui/NoAccessState';
+import { LoadError } from '@/components/ui/LoadError';
 import { useI18n } from '@/i18n/I18nProvider';
 import { swappingApi, type SwapActivity } from '@/lib/api';
-import { isForbiddenError } from '@/lib/api-errors';
+import { failureLines, isForbiddenError } from '@/lib/api-errors';
 import { formatRelativeTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import type { SwappingStation } from '@/types';
@@ -40,24 +41,39 @@ export default function BatterySwappingPage() {
   const [recentActivity, setRecentActivity] = useState<SwapActivity[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [forbidden, setForbidden] = useState(false);
+  // Why the last load of each part failed (FA-312). Both used to be dropped
+  // without a word: a failed cabinets load read as a network with no cabinets
+  // and every KPI at 0, a failed activity load as "No recent activity".
+  const [stationsError, setStationsError] = useState<unknown>(undefined);
+  const [activityError, setActivityError] = useState<unknown>(undefined);
+  /** The cabinets have loaded at least once; until then the counts are unknown. */
+  const [stationsLoaded, setStationsLoaded] = useState(false);
 
   const loadData = useCallback(async () => {
     setIsSyncing(true);
-    try {
-      const [stationsData, activityData] = await Promise.allSettled([
-        swappingApi.list(),
-        swappingApi.recentActivity(10),
-      ]);
-      if (stationsData.status === 'fulfilled') setStations(stationsData.value);
-      if (activityData.status === 'fulfilled') setRecentActivity(activityData.value);
-      // The cabinets are this page's data; a 403 on them is "no access", not "no stations".
-      setForbidden(stationsData.status === 'rejected' && isForbiddenError(stationsData.reason));
-    } catch (err) {
-      logger.error('[BatterySwapping] Failed to load data:', err);
-    } finally {
-      setIsSyncing(false);
-      setLoading(false);
+    const [stationsData, activityData] = await Promise.allSettled([
+      swappingApi.list(),
+      swappingApi.recentActivity(10),
+    ]);
+    if (stationsData.status === 'fulfilled') {
+      setStations(stationsData.value);
+      setStationsLoaded(true);
+      setStationsError(undefined);
+    } else {
+      logger.error('[BatterySwapping] Failed to load cabinets:', stationsData.reason);
+      setStationsError(stationsData.reason);
     }
+    if (activityData.status === 'fulfilled') {
+      setRecentActivity(activityData.value);
+      setActivityError(undefined);
+    } else {
+      logger.error('[BatterySwapping] Failed to load recent activity:', activityData.reason);
+      setActivityError(activityData.reason);
+    }
+    // The cabinets are this page's data; a 403 on them is "no access", not "no stations".
+    setForbidden(stationsData.status === 'rejected' && isForbiddenError(stationsData.reason));
+    setIsSyncing(false);
+    setLoading(false);
   }, []);
 
   useEffect(() => { void loadData(); }, [loadData]);
@@ -93,12 +109,16 @@ export default function BatterySwappingPage() {
     empty:     stations.filter((s) => s.emptySlots > 0).length,
   }), [stations]);
 
+  // Counts only once the cabinets have loaded: "(0)" after a failure is a claim.
+  const counted = (label: string, n: number) => (stationsLoaded ? `${label} (${n})` : label);
   const TABS: { value: FilterTab; label: string }[] = [
-    { value: 'all',       label: `${t('batterySwapping.all')} (${tabCounts.all})` },
-    { value: 'available', label: `${t('batterySwapping.available')} (${tabCounts.available})` },
-    { value: 'charging',  label: `${t('batterySwapping.charging')} (${tabCounts.charging})` },
-    { value: 'empty',     label: `${t('batterySwapping.empty')} (${tabCounts.empty})` },
+    { value: 'all',       label: counted(t('batterySwapping.all'),       tabCounts.all) },
+    { value: 'available', label: counted(t('batterySwapping.available'), tabCounts.available) },
+    { value: 'charging',  label: counted(t('batterySwapping.charging'),  tabCounts.charging) },
+    { value: 'empty',     label: counted(t('batterySwapping.empty'),     tabCounts.empty) },
   ];
+  /** A KPI: the count once the cabinets have loaded, "—" until then. */
+  const kpi = (n: number) => (stationsLoaded ? n : '—');
 
   if (forbidden) {
     return (
@@ -110,12 +130,24 @@ export default function BatterySwappingPage() {
 
   return (
     <DashboardShell title={t('batterySwapping.title')} subtitle={t('batterySwapping.subtitle')}>
+      {/* A failed load says so. After an earlier success the last cabinets
+          stay on screen below it, as last loaded. */}
+      {stationsError !== undefined && (
+        <LoadError
+          className="mb-4"
+          title={t('batterySwapping.loadFailed')}
+          lines={failureLines(stationsError, t)}
+          onRetry={() => { void loadData(); }}
+          retrying={isSyncing}
+        />
+      )}
+
       {/* KPI cards */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <MetricCard label={t('batterySwapping.readyBatteries')} value={totals.ready}    icon={<Battery className="h-5 w-5" />}        iconColor="green"   />
-        <MetricCard label={t('batterySwapping.charging')}       value={totals.charging} icon={<BatteryCharging className="h-5 w-5" />} iconColor="sky"     />
-        <MetricCard label={t('batterySwapping.emptySlots')}     value={totals.empty}    icon={<Battery className="h-5 w-5" />}        iconColor="orange"  />
-        <MetricCard label={t('batterySwapping.totalCapacity')}  value={totals.capacity} icon={<LayoutGrid className="h-5 w-5" />}     iconColor="violet"  unit={`${stations.length} ${t('batterySwapping.cabinets')}`} />
+        <MetricCard label={t('batterySwapping.readyBatteries')} value={kpi(totals.ready)}    icon={<Battery className="h-5 w-5" />}        iconColor="green"   />
+        <MetricCard label={t('batterySwapping.charging')}       value={kpi(totals.charging)} icon={<BatteryCharging className="h-5 w-5" />} iconColor="sky"     />
+        <MetricCard label={t('batterySwapping.emptySlots')}     value={kpi(totals.empty)}    icon={<Battery className="h-5 w-5" />}        iconColor="orange"  />
+        <MetricCard label={t('batterySwapping.totalCapacity')}  value={kpi(totals.capacity)} icon={<LayoutGrid className="h-5 w-5" />}     iconColor="violet"  unit={stationsLoaded ? `${stations.length} ${t('batterySwapping.cabinets')}` : undefined} />
       </div>
 
       {/* Toolbar */}
@@ -184,7 +216,7 @@ export default function BatterySwappingPage() {
           <Card className="p-5">
             <Skeleton className="h-[420px] w-full rounded-xl" />
           </Card>
-        ) : view === 'map' ? (
+        ) : !stationsLoaded ? null : view === 'map' ? (
           <>
             {/* Map */}
             <SwappingStationMap stations={filtered} height={420} />
@@ -195,7 +227,14 @@ export default function BatterySwappingPage() {
                 <h3 className="mb-4 text-sm font-semibold text-slate-900 dark:text-slate-50">
                   {t('batterySwapping.recentSwaps')}
                 </h3>
-                {recentActivity.length === 0 ? (
+                {activityError !== undefined ? (
+                  <LoadError
+                    title={t('common.sectionLoadFailed')}
+                    lines={failureLines(activityError, t)}
+                    onRetry={() => { void loadData(); }}
+                    retrying={isSyncing}
+                  />
+                ) : recentActivity.length === 0 ? (
                   <p className="text-center text-xs text-slate-400 py-4">
                     {t('batterySwapping.noRecentActivity')}
                   </p>

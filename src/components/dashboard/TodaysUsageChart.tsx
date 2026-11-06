@@ -17,9 +17,11 @@ import type { UsagePoint } from '@/types';
 interface TodaysUsageChartProps {
   data: UsagePoint[];
   loading?: boolean;
+  /** Shown instead of the chart when its data failed to load (FA-312). */
+  failure?: React.ReactNode;
 }
 
-export function TodaysUsageChart({ data, loading }: TodaysUsageChartProps) {
+export function TodaysUsageChart({ data, loading, failure }: TodaysUsageChartProps) {
   const { t } = useI18n();
 
   return (
@@ -29,10 +31,16 @@ export function TodaysUsageChart({ data, loading }: TodaysUsageChartProps) {
       </h3>
 
       <div className="mt-5 h-[220px]">
+        {/* A failure says so, and no data says that: neither is 24 hours at 0,
+            which is what both used to draw (FA-312). */}
         {loading ? (
           <Skeleton className="h-full w-full rounded-xl" />
-        ) : null}
-        <ResponsiveContainer width="100%" height="100%" style={loading ? { display: 'none' } : undefined}>
+        ) : failure ? (
+          failure
+        ) : data.length === 0 ? (
+          <p className="flex h-full items-center justify-center text-sm text-slate-400">{t('dashboard.usageEmpty')}</p>
+        ) : (
+        <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 10, right: 4, left: -22, bottom: 0 }}>
             <defs>
               <linearGradient id="usageGradient" x1="0" y1="0" x2="0" y2="1">
@@ -72,6 +80,7 @@ export function TodaysUsageChart({ data, loading }: TodaysUsageChartProps) {
             />
           </AreaChart>
         </ResponsiveContainer>
+        )}
       </div>
     </Card>
   );

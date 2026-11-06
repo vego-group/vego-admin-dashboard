@@ -7,18 +7,30 @@ import { fitToPoints, type LatLngTuple } from '@/lib/map-fit';
 import { clampPercent, html, trustedHtml, type TrustedHtml } from '@/lib/html';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useBasemap } from '@/hooks/useBasemap';
-import type { Vehicle, BatteryStation } from '@/types';
+import { useCountryViewport } from '@/hooks/useCountryViewport';
+import { vehicleDisplayName } from '@/lib/vehicle-label';
+import { formatBatteryLevel, formatRelativeTime, sharePercent } from '@/lib/format';
+import type { Vehicle, BatteryStation, FastChargingCabinet } from '@/types';
 
 export interface LiveFleetMapProps {
   vehicles?: Vehicle[];
+  /** Battery-swapping cabinets. */
   stations?: BatteryStation[];
+  /**
+   * Fast-charging piles: their own pin and popup, in ports and charging
+   * sessions. They used to be squeezed into `stations` and shown as a
+   * "Battery Station" with "min wait" and "swaps today" (FA-321).
+   */
+  piles?: FastChargingCabinet[];
   height?: number;
 }
 
 type Translate = ReturnType<typeof useI18n>['t'];
+type Locale = ReturnType<typeof useI18n>['locale'];
 
 /* ── SVG icons (inline strings for divIcon) ─────────────── */
 const BIKE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/></svg>`;
+const ZAP_SVG  = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>`;
 const BAT_SVG  = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 7h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-1"/><path d="M6 7H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="m11 7-4 5h6l-4 5"/><line x1="22" x2="22" y1="11" y2="13"/></svg>`;
 
 const VEHICLE_COLORS: Record<string, { grad: string; ring: string }> = {
@@ -28,9 +40,19 @@ const VEHICLE_COLORS: Record<string, { grad: string; ring: string }> = {
   maintenance: { grad: '#fb923c,#ea580c', ring: 'rgba(251,146,60,0.28)' },
 };
 
-function pinHtml(size: number, grad: string, ring: string, svg: string): TrustedHtml {
+/**
+ * A vehicle whose device is offline: a pale grey pin with no pulse, whatever
+ * its status. Its position is the last one it reported, and coloured by status
+ * with a pulsing ring it looked live (FA-316).
+ */
+const OFFLINE_PIN = { grad: '#cbd5e1,#94a3b8', ring: 'transparent' };
+
+function pinHtml(size: number, grad: string, ring: string, svg: string, { pulse = true, dimmed = false } = {}): TrustedHtml {
   const pad = 10;
-  return html`<div style="position:relative;width:${size}px;height:${size}px"><div style="position:absolute;inset:-${pad}px;border-radius:50%;background:${ring};animation:markerPulse 2s ease-in-out infinite"></div><div style="position:relative;width:${size}px;height:${size}px;border-radius:50%;background:linear-gradient(135deg,${grad});display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.22);border:2.5px solid white">${trustedHtml(svg)}</div></div>`;
+  const ringHtml = pulse
+    ? html`<div style="position:absolute;inset:-${pad}px;border-radius:50%;background:${ring};animation:markerPulse 2s ease-in-out infinite"></div>`
+    : '';
+  return html`<div style="position:relative;width:${size}px;height:${size}px;opacity:${dimmed ? 0.8 : 1}">${ringHtml}<div style="position:relative;width:${size}px;height:${size}px;border-radius:50%;background:linear-gradient(135deg,${grad});display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.22);border:2.5px solid white">${trustedHtml(svg)}</div></div>`;
 }
 
 /* ── Popup HTML generators ───────────────────────────────── */
@@ -40,8 +62,9 @@ function pinHtml(size: number, grad: string, ring: string, svg: string): Trusted
 // is rgb(var(--card)), which is dark in dark mode.
 
 function stationPopup(s: BatteryStation, t: Translate): TrustedHtml {
-  const avail = Math.round(clampPercent((s.available / s.totalCapacity) * 100));
-  const barColor = avail >= 60 ? '#10b981' : avail >= 30 ? '#f59e0b' : '#ef4444';
+  // No capacity, no share: "—" and an empty bar (FA-308).
+  const avail = sharePercent(s.available, s.totalCapacity);
+  const barColor = avail === undefined ? 'transparent' : avail >= 60 ? '#10b981' : avail >= 30 ? '#f59e0b' : '#ef4444';
   const batIconBlue = BAT_SVG.replace(/stroke="white"/g, 'stroke="#0284c7"').replace('width="15" height="15"', 'width="16" height="16"');
   return html`<div style="font-family:system-ui,sans-serif;width:256px;padding:16px">
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
@@ -54,10 +77,44 @@ function stationPopup(s: BatteryStation, t: Translate): TrustedHtml {
     <div style="background:#f1f5f9;border-radius:8px;padding:8px;text-align:center"><div style="font-size:16px;font-weight:700;color:#475569">${s.totalCapacity}</div><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">${t('dashboard.total')}</div></div>
   </div>
   <div style="margin-bottom:10px">
-    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:rgb(var(--muted-foreground))">${t('dashboard.availability')}</span><span style="font-weight:600;color:rgb(var(--foreground))">${avail}%</span></div>
-    <div style="height:6px;background:rgb(var(--muted));border-radius:999px;overflow:hidden"><div style="height:100%;background:${barColor};width:${avail}%;border-radius:999px"></div></div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:rgb(var(--muted-foreground))">${t('dashboard.availability')}</span><span style="font-weight:600;color:rgb(var(--foreground))">${avail === undefined ? '—' : `${avail}%`}</span></div>
+    <div style="height:6px;background:rgb(var(--muted));border-radius:999px;overflow:hidden"><div style="height:100%;background:${barColor};width:${avail ?? 0}%;border-radius:999px"></div></div>
   </div>
   <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:rgb(var(--muted-foreground))"><span>&#9201; ${t('mapPopup.minWait', { minutes: s.avgWaitTimeMinutes })}</span><span>${t('mapPopup.swapsToday', { count: s.todaySwaps })}</span></div>
+</div>`;
+}
+
+const PILE_STATUS: Record<FastChargingCabinet['status'], { key: string; bg: string; color: string }> = {
+  operational: { key: 'fastCharging.operational', bg: '#dcfce7', color: '#15803d' },
+  high_demand: { key: 'fastCharging.highDemand',  bg: '#fef3c7', color: '#b45309' },
+  error:       { key: 'fastCharging.error',       bg: '#ffe4e6', color: '#be123c' },
+};
+
+/** A fast-charging pile: ports and sessions, not batteries and swaps (FA-321). */
+function pilePopup(p: FastChargingCabinet, t: Translate): TrustedHtml {
+  const load = sharePercent(p.chargingPorts, p.totalPorts);
+  const barColor = load === undefined ? 'transparent' : load >= 80 ? '#ef4444' : load >= 50 ? '#f59e0b' : '#10b981';
+  const status = PILE_STATUS[p.status] ?? PILE_STATUS.operational;
+  const zapIconAmber = ZAP_SVG.replace(/stroke="white"/g, 'stroke="#d97706"').replace('width="15" height="15"', 'width="16" height="16"');
+  const subtitle = [p.district, t('mapPopup.fastChargingCabinet')].filter(Boolean).join(' · ');
+  return html`<div style="font-family:system-ui,sans-serif;width:256px;padding:16px">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:8px;min-width:0">
+      <div style="width:32px;height:32px;background:#fef3c7;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${trustedHtml(zapIconAmber)}</div>
+      <div style="min-width:0"><div style="font-size:13px;font-weight:600;color:rgb(var(--foreground));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px">${p.name}</div><div style="font-size:11px;color:rgb(var(--muted-foreground))">${subtitle}</div></div>
+    </div>
+    <span style="font-size:10px;padding:2px 8px;border-radius:999px;font-weight:600;background:${status.bg};color:${status.color};flex-shrink:0;white-space:nowrap">${t(status.key)}</span>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+    <div style="background:#f0fdf4;border-radius:8px;padding:8px;text-align:center"><div style="font-size:16px;font-weight:700;color:#16a34a">${p.availablePorts}</div><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">${t('fastCharging.available')}</div></div>
+    <div style="background:#e0f2fe;border-radius:8px;padding:8px;text-align:center"><div style="font-size:16px;font-weight:700;color:#0284c7">${p.chargingPorts}</div><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">${t('fastCharging.charging')}</div></div>
+    <div style="background:#fff1f2;border-radius:8px;padding:8px;text-align:center"><div style="font-size:16px;font-weight:700;color:#e11d48">${p.errorPorts}</div><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.05em;color:#64748b">${t('fastCharging.error')}</div></div>
+  </div>
+  <div style="margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:rgb(var(--muted-foreground))">${t('fastCharging.load')} · ${t('mapPopup.portsTotal', { count: p.totalPorts })}</span><span style="font-weight:600;color:rgb(var(--foreground))">${load === undefined ? '—' : `${load}%`}</span></div>
+    <div style="height:6px;background:rgb(var(--muted));border-radius:999px;overflow:hidden"><div style="height:100%;background:${barColor};width:${load ?? 0}%;border-radius:999px"></div></div>
+  </div>
+  <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:rgb(var(--muted-foreground))"><span>&#9201; ${t('mapPopup.avgCharge', { minutes: p.avgChargeTimeMinutes })}</span><span>${t('mapPopup.sessionsToday', { count: p.todaySessions })}</span></div>
 </div>`;
 }
 
@@ -68,31 +125,39 @@ const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
   maintenance: { bg: '#ffedd5', color: '#c2410c' },
 };
 
-function vehiclePopup(v: Vehicle, t: Translate): TrustedHtml {
+function vehiclePopup(v: Vehicle, t: Translate, locale: Locale): TrustedHtml {
   // An unknown status is drawn as idle, label and colours alike.
   const status = Object.prototype.hasOwnProperty.call(STATUS_BADGE, v.status) ? v.status : 'idle';
   const sc = STATUS_BADGE[status];
+  // No reading: "—" and an empty bar, never "0%" in red (FA-207).
+  const hasBattery = v.batteryLevel !== undefined;
   const battery = clampPercent(v.batteryLevel);
-  const batColor = battery >= 60 ? '#10b981' : battery >= 30 ? '#f59e0b' : '#ef4444';
+  const batColor = !hasBattery ? 'transparent' : battery >= 60 ? '#10b981' : battery >= 30 ? '#f59e0b' : '#ef4444';
   const bikeIconIndigo = BIKE_SVG.replace(/stroke="white"/g, 'stroke="#4f46e5"');
   const driverLine = v.assignedDriverName
     ? html`<div style="font-size:11px;color:rgb(var(--muted-foreground));margin-bottom:10px">&#128100; ${v.assignedDriverName}</div>` : '';
-  const speedLine = v.currentSpeedKmh > 0
+  // Offline: said in the header, since the pin is where it *was*. The last
+  // report's age for every vehicle, "—" when the device never said (FA-316).
+  const offlineTag = v.isOnline === false
+    ? html`<div style="font-size:10px;font-weight:600;color:#64748b;margin-top:1px">&#9679; ${t('vehicleControl.offline')}</div>` : '';
+  const lastReportedLine = html`<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px"><span style="color:rgb(var(--muted-foreground))">${t('fleet.lastReported')}</span><span style="font-weight:600;color:rgb(var(--foreground))">${formatRelativeTime(v.lastSeenAt, locale)}</span></div>`;
+  const speedLine = (v.currentSpeedKmh ?? 0) > 0
     ? html`<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px"><span style="color:rgb(var(--muted-foreground))">${t('mapPopup.speed')}</span><span style="font-weight:600;color:rgb(var(--foreground))">${v.currentSpeedKmh} ${t('common.kmh')}</span></div>` : '';
   return html`<div style="font-family:system-ui,sans-serif;width:224px;padding:16px">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px">
     <div style="display:flex;align-items:center;gap:8px;min-width:0">
       <div style="width:32px;height:32px;background:#eef2ff;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${trustedHtml(bikeIconIndigo)}</div>
-      <div style="min-width:0"><div style="font-size:13px;font-weight:600;color:rgb(var(--foreground))"><span dir="ltr">${v.plateNumber}</span></div><div style="font-size:11px;color:rgb(var(--muted-foreground))">${v.model}</div></div>
+      <div style="min-width:0"><div style="font-size:13px;font-weight:600;color:rgb(var(--foreground))"><span dir="ltr">${vehicleDisplayName(v)}</span></div><div style="font-size:11px;color:rgb(var(--muted-foreground))">${v.model ?? ''}</div>${offlineTag}</div>
     </div>
     <span style="font-size:10px;padding:2px 8px;border-radius:999px;font-weight:600;background:${sc.bg};color:${sc.color};flex-shrink:0;white-space:nowrap">${t(`status.${status}`)}</span>
   </div>
   ${driverLine}
   <div style="margin-bottom:8px">
-    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:rgb(var(--muted-foreground))">${t('fleet.battery')}</span><span style="font-weight:600;color:rgb(var(--foreground))">${battery}%</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:rgb(var(--muted-foreground))">${t('fleet.battery')}</span><span style="font-weight:600;color:rgb(var(--foreground))">${formatBatteryLevel(v.batteryLevel)}</span></div>
     <div style="height:6px;background:rgb(var(--muted));border-radius:999px;overflow:hidden"><div style="height:100%;background:${batColor};width:${battery}%;border-radius:999px"></div></div>
   </div>
   ${speedLine}
+  ${lastReportedLine}
   <div style="font-size:11px;color:rgb(var(--muted-foreground))">&#128205; ${v.location}</div>
 </div>`;
 }
@@ -102,15 +167,17 @@ function vehiclePopup(v: Vehicle, t: Translate): TrustedHtml {
 export default function LiveFleetMapInner({
   vehicles = [],
   stations = [],
+  piles = [],
   height = 380,
 }: LiveFleetMapProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const addBasemap   = useBasemap();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef       = useRef<LeafletMap | null>(null);
   const markersRef   = useRef<LeafletMarker[]>([]);
   const hasFittedRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
+  const viewRef = useCountryViewport(mapRef, mapReady, hasFittedRef, 12);
 
   /* Initialize map once */
   useEffect(() => {
@@ -122,11 +189,12 @@ export default function LiveFleetMapInner({
       const L = (await import('leaflet')) as any;
       if (cancelled || !containerRef.current) return;
 
-      // Placeholder viewport only — replaced by fitBounds() over the real
-      // markers as soon as any arrive. Never used to place a marker.
+      // Placeholder viewport only — the fleet's country (FA-314), replaced by
+      // fitBounds() over the real markers as soon as any arrive. Never used to
+      // place a marker.
       const map: LeafletMap = L.map(containerRef.current, {
-        center: [24.74, 46.672],
-        zoom: 13,
+        center: viewRef.current.center,
+        zoom: viewRef.current.zoom,
         zoomControl: true,
       });
 
@@ -143,7 +211,7 @@ export default function LiveFleetMapInner({
       hasFittedRef.current = false;
       setMapReady(false);
     };
-  }, [addBasemap]);
+  }, [addBasemap, viewRef]);
 
   /* Re-draw markers whenever map is ready or data changes */
   useEffect(() => {
@@ -182,6 +250,29 @@ export default function LiveFleetMapInner({
         markersRef.current.push(m);
       }
 
+      /* Fast-charging pile markers — amber, with a pile popup (FA-321). */
+      for (const p of piles) {
+        if (!p.coordinates) continue;
+        const icon = L.divIcon({
+          className: '',
+          html: String(pinHtml(40, '#fbbf24,#d97706', 'rgba(245,158,11,0.25)', ZAP_SVG)),
+          iconSize: [40, 40],
+          iconAnchor: [20, 20],
+          popupAnchor: [0, -26],
+        });
+        const m: LeafletMarker = L.marker(
+          [p.coordinates.lat, p.coordinates.lng],
+          { icon }
+        ).bindPopup(String(pilePopup(p, t)), {
+          maxWidth: 280,
+          minWidth: 280,
+          className: 'map-popup',
+          closeButton: false,
+        });
+        m.addTo(map);
+        markersRef.current.push(m);
+      }
+
       /* Vehicle markers — only for vehicles that have actually reported a
          position. There is no fallback coordinate: an offline bike used to be
          drawn on a hardcoded central-Riyadh point, which put a Jordanian fleet's
@@ -189,10 +280,11 @@ export default function LiveFleetMapInner({
          fleet list instead (see LocationLabel). */
       for (const v of vehicles) {
         if (!v.coordinates) continue;
-        const c = VEHICLE_COLORS[v.status] ?? VEHICLE_COLORS.active;
+        const offline = v.isOnline === false;
+        const c = offline ? OFFLINE_PIN : (VEHICLE_COLORS[v.status] ?? VEHICLE_COLORS.active);
         const icon = L.divIcon({
           className: '',
-          html: String(pinHtml(34, c.grad, c.ring, BIKE_SVG)),
+          html: String(pinHtml(34, c.grad, c.ring, BIKE_SVG, { pulse: !offline, dimmed: offline })),
           iconSize: [34, 34],
           iconAnchor: [17, 17],
           popupAnchor: [0, -22],
@@ -200,7 +292,7 @@ export default function LiveFleetMapInner({
         const m: LeafletMarker = L.marker(
           [v.coordinates.lat, v.coordinates.lng],
           { icon }
-        ).bindPopup(String(vehiclePopup(v, t)), {
+        ).bindPopup(String(vehiclePopup(v, t, locale)), {
           maxWidth: 260,
           minWidth: 240,
           className: 'map-popup',
@@ -220,22 +312,20 @@ export default function LiveFleetMapInner({
       }
     })();
     // `t` too: a language switch rebuilds the popups in the new language.
-  }, [mapReady, vehicles, stations, t]);
+  }, [mapReady, vehicles, stations, piles, t, locale]);
 
   return (
     <div
       className="relative overflow-hidden rounded-2xl border"
       style={{ borderColor: 'rgb(var(--border))', height }}
     >
-      {/* Live badge — sits above the map via z-index. Top-right in both
-          directions: Leaflet keeps its zoom control top-left in Arabic too, so
-          `end-4` would cover it there. */}
+      {/* What the pins are: positions as last reported when the page loaded.
+          This said "Live Updates" with a pulsing dot, and nothing polls
+          (FA-315). Top-right in both directions: Leaflet keeps its zoom
+          control top-left in Arabic too, so `end-4` would cover it there. */}
       <div className="pointer-events-none absolute right-4 top-4 z-[1001] inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm backdrop-blur dark:bg-slate-900/90 dark:text-slate-200">
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-        </span>
-        {t('common.liveUpdates')}
+        <span className="inline-flex h-2 w-2 rounded-full bg-slate-400" />
+        {t('common.lastKnownPositions')}
       </div>
       <div ref={containerRef} className="h-full w-full" />
     </div>

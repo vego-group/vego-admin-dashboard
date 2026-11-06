@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { Bike, BatteryCharging, Users, Cpu } from 'lucide-react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { MetricCard } from '@/components/dashboard/MetricCard';
@@ -11,114 +10,29 @@ import { BatteryHealthChart } from '@/components/dashboard/BatteryHealthChart';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { NoAccessState } from '@/components/ui/NoAccessState';
+import { LoadError, SectionLoadError } from '@/components/ui/LoadError';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
+import { useSection } from '@/hooks/useSection';
 import { dashboardApi, fleetApi, stationsApi } from '@/lib/api';
-import { isForbiddenError } from '@/lib/api-errors';
-import type {
-  DashboardMetrics,
-  UsagePoint,
-  BatteryHealthPoint,
-  Vehicle,
-  BatteryStation,
-} from '@/types';
-import { logger } from '@/lib/logger';
-
-// ── Safe initial state — all zeros, no fake numbers ─────────────────────────
-
-const EMPTY_METRICS: DashboardMetrics = {
-  activeFleet: 0,
-  availableBatteries: 0,
-  totalTripsToday: 0,
-  avgTripDurationMinutes: 0,
-  chargingBatteries: 0,
-  averageSoc: 0,
-  lowBatteryCount: 0,
-  averageCostPerVehicle: 0,
-  successRate: 0,
-  fleetTrend: 0,
-  driversTrend: 0,
-  batteriesTrend: 0,
-  tripsTrend: 0,
-  durationTrend: 0,
-  totalDrivers: 0,
-  activeTrips: 0,
-  unresolvedAlarms: 0,
-  onlineDevices: 0,
-};
-
-const FALLBACK_USAGE: UsagePoint[] = Array.from({ length: 24 }, (_, i) => ({
-  hour: `${String(i).padStart(2, '0')}:00`,
-  value: 0,
-}));
-
-const FALLBACK_HEALTH: BatteryHealthPoint[] = [
-  { month: 'Jan', health: 0 }, { month: 'Feb', health: 0 }, { month: 'Mar', health: 0 },
-  { month: 'Apr', health: 0 }, { month: 'May', health: 0 }, { month: 'Jun', health: 0 },
-];
-
+import { failureLines, isForbiddenError } from '@/lib/api-errors';
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
   const { t } = useI18n();
   const { tv } = useVehicleTerm();
 
-  // KPI + Fleet Status — starts with zeros, replaced by real API data
-  const [metrics, setMetrics] = useState<DashboardMetrics>(EMPTY_METRICS);
-  const [metricsLoading, setMetricsLoading] = useState(true);
+  // Each part loads, and fails, on its own, and a failure says so with a Retry.
+  // Failures used to go to the log only, leaving the page on zero-filled
+  // defaults that read as a fleet with nothing in it (FA-312).
+  const metrics  = useSection('[Dashboard] metrics',        () => dashboardApi.getMetrics());
+  const usage    = useSection('[Dashboard] usage',          () => dashboardApi.getUsage());
+  const health   = useSection('[Dashboard] battery health', () => dashboardApi.getBatteryHealth());
+  const vehicles = useSection('[Dashboard] vehicles',       () => fleetApi.list());
+  const stations = useSection('[Dashboard] stations',       () => stationsApi.list());
+
   // The KPIs are this page's data — a 403 on them means the account may not see it.
-  const [forbidden, setForbidden] = useState(false);
-
-  // Today's Usage chart
-  const [usage, setUsage] = useState<UsagePoint[]>(FALLBACK_USAGE);
-  const [usageLoading, setUsageLoading] = useState(true);
-
-  // Battery Health chart
-  const [health, setHealth] = useState<BatteryHealthPoint[]>(FALLBACK_HEALTH);
-  const [healthLoading, setHealthLoading] = useState(true);
-
-  // Live Fleet Map — empty until API responds
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [stations, setStations] = useState<BatteryStation[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    // ── KPI + Fleet Status → GET /fleet-admin/dashboard ────────────────────
-    dashboardApi.getMetrics()
-      .then((data) => { if (!cancelled) setMetrics(data); })
-      .catch((err) => {
-        logger.error('[Dashboard] metrics failed:', err);
-        if (!cancelled && isForbiddenError(err)) setForbidden(true);
-      })
-      .finally(() => { if (!cancelled) setMetricsLoading(false); });
-
-    // ── Today's Usage → GET /fleet-admin/dashboard/usage ───────────────────
-    dashboardApi.getUsage()
-      .then((data) => { if (!cancelled && data.length > 0) setUsage(data); })
-      .catch((err) => logger.error('[Dashboard] usage failed:', err))
-      .finally(() => { if (!cancelled) setUsageLoading(false); });
-
-    // ── Battery Health → GET /fleet-admin/dashboard/battery-health?months=6 ─
-    dashboardApi.getBatteryHealth()
-      .then((data) => { if (!cancelled && data.length > 0) setHealth(data); })
-      .catch((err) => logger.error('[Dashboard] battery-health failed:', err))
-      .finally(() => { if (!cancelled) setHealthLoading(false); });
-
-    // ── Live Fleet Map vehicles → GET /fleet-admin/motorcycles ─────────────
-    fleetApi.list()
-      .then((data) => { if (!cancelled) setVehicles(data); })
-      .catch((err) => logger.error('[Dashboard] vehicles failed:', err));
-
-    // ── Live Fleet Map stations → GET /fleet-admin/cabinets ────────────────
-    stationsApi.list()
-      .then((data) => { if (!cancelled) setStations(data); })
-      .catch((err) => logger.error('[Dashboard] stations failed:', err));
-
-    return () => { cancelled = true; };
-  }, []);
-
-  if (forbidden) {
+  if (metrics.error !== undefined && isForbiddenError(metrics.error)) {
     return (
       <DashboardShell title={t('dashboard.title')} subtitle={t('dashboard.subtitle')}>
         <NoAccessState />
@@ -126,47 +40,61 @@ export default function DashboardPage() {
     );
   }
 
+  const m = metrics.data;
+  const metricsPending = metrics.loading && !m;
+  // The map draws whatever did load; what did not is said above it.
+  const mapFailures = [vehicles, stations].filter((s) => s.error !== undefined);
+  const mapFailureLines = Array.from(new Set(mapFailures.flatMap((s) => failureLines(s.error, t))));
+
   return (
     <DashboardShell title={t('dashboard.title')} subtitle={t('dashboard.subtitle')}>
 
       {/* ── KPI cards ──────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {metricsLoading ? (
+        {metricsPending ? (
           <>
             <Skeleton className="h-28 rounded-2xl" />
             <Skeleton className="h-28 rounded-2xl" />
             <Skeleton className="h-28 rounded-2xl" />
             <Skeleton className="h-28 rounded-2xl" />
           </>
+        ) : !m ? (
+          <SectionLoadError
+            section={metrics}
+            title={t('dashboard.metricsLoadFailed')}
+            className="sm:col-span-2 lg:col-span-4"
+          />
         ) : (
           <>
             <MetricCard
               label={t('dashboard.activeFleet')}
-              value={metrics.activeFleet}
-              trend={metrics.fleetTrend}
+              value={m.activeFleet}
+              trend={m.fleetTrend}
               trendLabel={t('common.fromYesterday')}
               icon={<Bike className="h-5 w-5" />}
               iconColor="indigo"
             />
             <MetricCard
               label={t('dashboard.availableBatteries')}
-              value={metrics.availableBatteries}
-              trend={metrics.batteriesTrend}
-              trendLabel={t('dashboard.charged')}
+              value={m.availableBatteries}
+              trend={m.batteriesTrend}
+              // Was "charged": the change is in available batteries, like its
+              // siblings' day-on-day change (FA-320).
+              trendLabel={t('common.fromYesterday')}
               icon={<BatteryCharging className="h-5 w-5" />}
               iconColor="sky"
             />
             <MetricCard
               label={t('dashboard.totalDrivers')}
-              value={metrics.totalDrivers}
-              trend={metrics.driversTrend}
+              value={m.totalDrivers}
+              trend={m.driversTrend}
               trendLabel={t('common.fromYesterday')}
               icon={<Users className="h-5 w-5" />}
               iconColor="green"
             />
             <MetricCard
               label={t('dashboard.onlineDevices')}
-              value={metrics.onlineDevices}
+              value={m.onlineDevices}
               icon={<Cpu className="h-5 w-5" />}
               iconColor="violet"
             />
@@ -183,20 +111,42 @@ export default function DashboardPage() {
             </h2>
             <p className="text-xs text-slate-500">{tv('dashboard.liveFleetMapSubtitle')}</p>
           </div>
-          <LiveFleetMap vehicles={vehicles} stations={stations} />
+          {mapFailures.length > 0 && (
+            <LoadError
+              className="mb-4"
+              title={t('dashboard.mapLoadFailed')}
+              lines={mapFailureLines}
+              onRetry={() => mapFailures.forEach((s) => s.retry())}
+              retrying={mapFailures.some((s) => s.loading)}
+            />
+          )}
+          <LiveFleetMap vehicles={vehicles.data ?? []} stations={stations.data ?? []} />
         </Card>
 
-        {metricsLoading ? (
+        {metricsPending ? (
           <Skeleton className="min-h-[360px] rounded-2xl" />
         ) : (
-          <FleetStatusPanel metrics={metrics} />
+          <FleetStatusPanel
+            metrics={m}
+            failure={!m ? <SectionLoadError section={metrics} title={t('dashboard.metricsLoadFailed')} /> : undefined}
+          />
         )}
       </div>
 
       {/* ── Charts ─────────────────────────────────────────────────────────── */}
       <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <TodaysUsageChart data={usage} loading={usageLoading} />
-        <BatteryHealthChart data={health} loading={healthLoading} />
+        <TodaysUsageChart
+          data={usage.data ?? []}
+          loading={usage.loading}
+          failure={usage.error !== undefined ? <SectionLoadError section={usage} /> : undefined}
+        />
+        {/* No fallback series: a failure or an empty answer used to draw a 0 %
+            line over made-up English months Jan–Jun (FA-329). */}
+        <BatteryHealthChart
+          data={health.data ?? []}
+          loading={health.loading}
+          failure={health.error !== undefined ? <SectionLoadError section={health} /> : undefined}
+        />
       </div>
 
     </DashboardShell>

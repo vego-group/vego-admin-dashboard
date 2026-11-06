@@ -10,10 +10,11 @@ import { Card } from '@/components/ui/Card';
 import { NoAccessState } from '@/components/ui/NoAccessState';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { LoadError } from '@/components/ui/LoadError';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { fleetApi, driversApi } from '@/lib/api';
-import { isForbiddenError } from '@/lib/api-errors';
+import { failureLines, isForbiddenError } from '@/lib/api-errors';
 import type { Vehicle } from '@/types';
 import type { Driver } from '@/types';
 import type { MotorcycleBattery, MotorcycleStatistics, VehicleCommand, VehicleCommandOutcome } from '@/lib/api';
@@ -28,6 +29,11 @@ export default function VehicleControlPage() {
   const [loading, setLoading]     = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  /** Why the last vehicle load failed; shown with a Retry (FA-208). */
+  const [loadError, setLoadError] = useState<unknown>(undefined);
+  /** The vehicles have loaded at least once. */
+  const [loaded, setLoaded] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   // ── Per-vehicle extra data ────────────────────────────────────────────────
   const [battery, setBattery]         = useState<MotorcycleBattery | null>(null);
@@ -36,32 +42,68 @@ export default function VehicleControlPage() {
 
   // ── Active drivers (for assign dropdown) ─────────────────────────────────
   const [activeDrivers, setActiveDrivers] = useState<Driver[]>([]);
+  const [driversError, setDriversError] = useState<unknown>(undefined);
+  const [driversLoading, setDriversLoading] = useState(true);
+  const [driversReloadKey, setDriversReloadKey] = useState(0);
 
-  // ── Initial load: vehicles + active drivers ───────────────────────────────
+  // ── Vehicles ──────────────────────────────────────────────────────────────
+  // Loaded on their own. The drivers used to share a Promise.all with them, so
+  // a failed /drivers emptied the whole page, and a 403 on /drivers said this
+  // account had no access to vehicle control (FA-208).
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
+      setLoading(true);
       try {
-        const [vehicleData, driverData] = await Promise.all([
-          fleetApi.list(),
-          driversApi.list(),
-        ]);
+        const vehicleData = await fleetApi.list();
         if (!cancelled) {
           setVehicles(vehicleData);
-          setSelectedId(vehicleData[0]?.id ?? null);
-          setActiveDrivers(driverData.filter((d) => d.status === 'active'));
+          // A retry keeps the selected vehicle when it is still in the list.
+          setSelectedId((prev) =>
+            prev && vehicleData.some((v) => v.id === prev) ? prev : vehicleData[0]?.id ?? null,
+          );
+          setLoadError(undefined);
+          setLoaded(true);
         }
       } catch (err) {
-        logger.error('[VehicleControl] Failed to load initial data:', err);
-        if (!cancelled && isForbiddenError(err)) setForbidden(true);
+        logger.error('[VehicleControl] Failed to load vehicles:', err);
+        if (cancelled) return;
+        if (isForbiddenError(err)) setForbidden(true);
+        else setLoadError(err);
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
 
     return () => { cancelled = true; };
-  }, []);
+  }, [reloadKey]);
+
+  // ── Drivers, for the assignment picker only ───────────────────────────────
+  // Any failure here, a 403 included, costs the picker and nothing else: the
+  // vehicles and their controls do not depend on it. The panel says so, with
+  // a Retry.
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      setDriversLoading(true);
+      try {
+        const driverData = await driversApi.list();
+        if (!cancelled) {
+          setActiveDrivers(driverData.filter((d) => d.status === 'active'));
+          setDriversError(undefined);
+        }
+      } catch (err) {
+        logger.error('[VehicleControl] Failed to load drivers for assignment:', err);
+        if (!cancelled) setDriversError(err);
+      } finally {
+        if (!cancelled) setDriversLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [driversReloadKey]);
 
   // ── Fetch battery + statistics whenever selected vehicle changes ──────────
   useEffect(() => {
@@ -97,50 +139,34 @@ export default function VehicleControlPage() {
   }, [selectedId]);
 
   // ── Driver assignment ─────────────────────────────────────────────────────
+  // A refusal throws through to the control panel, which shows the backend's
+  // reason (FA-201, FA-243).
   const handleAssignDriver = useCallback(
-    async (motorcycleId: string, driverId: string): Promise<boolean> => {
-      try {
-        const ok = await fleetApi.assignDriver(motorcycleId, driverId);
-        if (ok) {
-          // API returns boolean — patch state from the local drivers list
-          const driver = activeDrivers.find((d) => d.id === driverId);
-          setVehicles((prev) =>
-            prev.map((v) =>
-              v.id === motorcycleId
-                ? { ...v, assignedDriverId: driverId, assignedDriverName: driver?.name ?? driverId }
-                : v
-            )
-          );
-          return true;
-        }
-        return false;
-      } catch (err) {
-        logger.error('[VehicleControl] assignDriver failed:', err);
-        return false;
-      }
+    async (motorcycleId: string, driverId: string): Promise<void> => {
+      await fleetApi.assignDriver(motorcycleId, driverId);
+      // The API answers no driver object — patch state from the local list.
+      const driver = activeDrivers.find((d) => d.id === driverId);
+      setVehicles((prev) =>
+        prev.map((v) =>
+          v.id === motorcycleId
+            ? { ...v, assignedDriverId: driverId, assignedDriverName: driver?.name ?? driverId }
+            : v
+        )
+      );
     },
     [activeDrivers]
   );
 
   const handleUnassignDriver = useCallback(
-    async (motorcycleId: string): Promise<boolean> => {
-      try {
-        const ok = await fleetApi.unassignDriver(motorcycleId);
-        if (ok) {
-          setVehicles((prev) =>
-            prev.map((v) =>
-              v.id === motorcycleId
-                ? { ...v, assignedDriverId: undefined, assignedDriverName: undefined }
-                : v
-            )
-          );
-          return true;
-        }
-        return false;
-      } catch (err) {
-        logger.error('[VehicleControl] unassignDriver failed:', err);
-        return false;
-      }
+    async (motorcycleId: string): Promise<void> => {
+      await fleetApi.unassignDriver(motorcycleId);
+      setVehicles((prev) =>
+        prev.map((v) =>
+          v.id === motorcycleId
+            ? { ...v, assignedDriverId: undefined, assignedDriverName: undefined }
+            : v
+        )
+      );
     },
     []
   );
@@ -191,7 +217,17 @@ export default function VehicleControlPage() {
 
   return (
     <DashboardShell title={tv('vehicleControl.title')} subtitle={t('vehicleControl.subtitle')}>
-      {loading ? (
+      {loadError !== undefined && (
+        <LoadError
+          className="mb-4"
+          title={tv('vehicleControl.loadFailed')}
+          lines={failureLines(loadError, t)}
+          onRetry={() => setReloadKey((k) => k + 1)}
+          retrying={loading}
+        />
+      )}
+
+      {loading && !loaded ? (
         <div className="grid gap-4 lg:grid-cols-[320px_1fr_320px]">
           <Card className="p-5">
             <Skeleton className="h-[600px] w-full" />
@@ -203,7 +239,7 @@ export default function VehicleControlPage() {
             <Skeleton className="h-[600px] w-full" />
           </Card>
         </div>
-      ) : (
+      ) : !loaded ? null : (
         <div className="grid gap-4 lg:grid-cols-[320px_1fr_320px]">
           {/* Left: Vehicle list */}
           <div className="min-h-[360px] lg:h-[calc(100vh-160px)]">
@@ -240,6 +276,9 @@ export default function VehicleControlPage() {
               <ControlPanel
                 vehicle={selected}
                 drivers={activeDrivers}
+                driversError={driversError}
+                driversLoading={driversLoading}
+                onRetryDrivers={() => setDriversReloadKey((k) => k + 1)}
                 onAssignDriver={handleAssignDriver}
                 onUnassignDriver={handleUnassignDriver}
                 onCommand={handleCommand}

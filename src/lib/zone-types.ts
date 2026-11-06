@@ -53,6 +53,13 @@ export const ZONE_TYPE_LIST: ZoneTypeConfig[] = [
 export const ZONE_SPEED_LIMIT_MIN = 1;
 export const ZONE_SPEED_LIMIT_MAX = 200;
 
+/**
+ * Where the zone form's slider stops unless the zone already holds more. Its
+ * own number: vehicle limits are a different, narrower range (10–80 km/h,
+ * @/lib/vehicle-speed) and zones keep theirs (FA-204).
+ */
+export const ZONE_SPEED_SLIDER_MAX = 100;
+
 /** A whole number of km/h the zone API accepts? */
 export function isValidZoneSpeedLimit(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isInteger(value)

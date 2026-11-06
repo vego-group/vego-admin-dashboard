@@ -11,10 +11,14 @@ interface SwitchProps {
 }
 
 export function Switch({ checked, onChange, disabled, size = 'md', ...rest }: SwitchProps) {
+  // Whole class names, so Tailwind sees them. The `rtl:` halves mirror the
+  // knob: in RTL the track starts on the right, and a positive translate
+  // pushed the knob out of it (FA-222). This used an inline `transform` that
+  // overrode the classes in both directions.
   const dimensions =
     size === 'sm'
-      ? { track: 'h-4 w-7', thumb: 'h-3 w-3', translate: 'translate-x-3' }
-      : { track: 'h-5 w-9', thumb: 'h-4 w-4', translate: 'translate-x-4' };
+      ? { track: 'h-4 w-7', thumb: 'h-3 w-3', on: 'translate-x-3 rtl:-translate-x-3' }
+      : { track: 'h-5 w-9', thumb: 'h-4 w-4', on: 'translate-x-4 rtl:-translate-x-4' };
 
   return (
     <button
@@ -38,14 +42,8 @@ export function Switch({ checked, onChange, disabled, size = 'md', ...rest }: Sw
         className={cn(
           'inline-block transform rounded-full bg-white shadow-sm transition-transform',
           dimensions.thumb,
-          checked ? dimensions.translate : 'translate-x-0.5',
-          'rtl:[&]:!translate-x-0' // base position for RTL
+          checked ? dimensions.on : 'translate-x-0.5 rtl:-translate-x-0.5',
         )}
-        style={
-          checked
-            ? { transform: `translateX(${size === 'sm' ? '0.75rem' : '1rem'})` }
-            : { transform: 'translateX(0.125rem)' }
-        }
       />
     </button>
   );
