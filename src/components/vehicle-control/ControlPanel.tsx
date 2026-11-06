@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
 import { FailureNote } from '@/components/ui/FailureNote';
+import { LoadError } from '@/components/ui/LoadError';
 import { AlertTriangle, Lock, Power, ShieldCheck, Unlock, UserPlus, UserMinus, Loader2, WifiOff } from 'lucide-react';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
@@ -18,6 +19,15 @@ import type { VehicleCommand, VehicleCommandOutcome } from '@/lib/api';
 interface ControlPanelProps {
   vehicle: Vehicle;
   drivers?: Driver[];
+  /**
+   * Why the driver list failed to load, if it did. The picker is then replaced
+   * by that reason and a Retry, rather than an empty dropdown that reads as
+   * "no active drivers" (FA-208).
+   */
+  driversError?: unknown;
+  /** The driver list is loading (first load or a retry). */
+  driversLoading?: boolean;
+  onRetryDrivers?: () => void;
   /** Throws when the backend refuses. */
   onAssignDriver?: (motorcycleId: string, driverId: string) => Promise<void>;
   /** Throws when the backend refuses. */
@@ -29,6 +39,9 @@ interface ControlPanelProps {
 export function ControlPanel({
   vehicle,
   drivers = [],
+  driversError,
+  driversLoading = false,
+  onRetryDrivers,
   onAssignDriver,
   onUnassignDriver,
   onCommand,
@@ -420,6 +433,15 @@ export function ControlPanel({
           /* No driver — show dropdown + assign button */
           <div>
             <p className="mb-2 text-xs text-slate-500">{tv('vehicleControl.noDriverAssigned')}</p>
+            {driversError !== undefined ? (
+              <LoadError
+                title={t('vehicleControl.driversLoadFailed')}
+                lines={failureLines(driversError, t)}
+                onRetry={onRetryDrivers}
+                retrying={driversLoading}
+              />
+            ) : (
+            <>
             <select
               value={selectedDriverId}
               onChange={(e) => setSelectedDriverId(e.target.value)}
@@ -451,6 +473,8 @@ export function ControlPanel({
               }
               {t('vehicleControl.assignDriver')}
             </button>
+            </>
+            )}
           </div>
         )}
 

@@ -519,6 +519,12 @@ const en = {
     speedLimitUnknown: 'Not reported',
     speedLimitUnknownHint:
       'This {{vehicle}} has not reported a speed limit. Setting one below sends it to the device.',
+    // Loading the page (FA-208). The vehicle list and the driver picker load
+    // separately: a failed driver list only costs the picker.
+    loadFailed: "Your {{vehicles}} couldn't be loaded.",
+    driversLoadFailed: "Drivers couldn't be loaded, so none can be picked here.",
+    listEmpty: 'Your fleet has no {{vehicles}} yet.',
+    listNoMatch: 'Nothing matches this search.',
   },
   zones: {
     title: 'Zone Control',

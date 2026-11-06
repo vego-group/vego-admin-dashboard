@@ -42,6 +42,13 @@ export function VehicleListPanel({ vehicles, selectedId, onSelect }: VehicleList
         />
       </div>
 
+      {/* No vehicles, or none this search matches: said, not a blank column. */}
+      {filtered.length === 0 && (
+        <p className="px-2 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
+          {vehicles.length === 0 ? tv('vehicleControl.listEmpty') : t('vehicleControl.listNoMatch')}
+        </p>
+      )}
+
       <ul className="mt-3 flex-1 space-y-2 overflow-y-auto pe-1 scrollbar-thin">
         {filtered.map((v) => {
           const isSelected = v.id === selectedId;
