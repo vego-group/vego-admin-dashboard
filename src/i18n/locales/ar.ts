@@ -38,6 +38,8 @@ const ar: Translations = {
   common: {
     appName: 'ماي فيجو',
     appTagline: 'إدارة الأسطول',
+    roleFleetAdmin: 'مدير الأسطول',
+    toggleNavigation: 'إظهار القائمة أو إخفاؤها',
     search: 'بحث',
     searchByName: 'البحث بالاسم...',
     all: 'الكل',

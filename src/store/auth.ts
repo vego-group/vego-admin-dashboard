@@ -329,9 +329,12 @@ export const useAuthStore = create<AuthState>()(
             code: otp,
           });
 
+          // The server's own id and name, or empty: never a made-up person.
+          // These were 'admin' / 'Fleet Admin' when the answer had no user,
+          // shown in English in the top bar (FA-005).
           const user: User = {
-            id: String(res.user?.id ?? 'admin'),
-            name: res.user?.name ?? 'Fleet Admin',
+            id: res.user?.id != null ? String(res.user.id) : '',
+            name: res.user?.name?.trim() ?? '',
             email: res.user?.email ?? '',
             role: 'admin',
           };
@@ -381,6 +384,17 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'myvego.auth',
+      // v1 (FA-005): a session stored by v0 with no user in the OTP answer has
+      // the invented id 'admin' and name 'Fleet Admin'; blank them so the top
+      // bar shows no placeholder person. Everything else is kept as it was.
+      version: 1,
+      migrate: (persisted, version) => {
+        const state = (persisted ?? {}) as Partial<AuthState>;
+        if (version < 1 && state.user?.id === 'admin' && state.user.name === 'Fleet Admin') {
+          return { ...state, user: { ...state.user, id: '', name: '' } } as AuthState;
+        }
+        return state as AuthState;
+      },
       partialize: (state) => ({
         user: state.user,
         token: state.token,

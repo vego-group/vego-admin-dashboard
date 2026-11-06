@@ -14,6 +14,9 @@ const en = {
   common: {
     appName: 'MyVego',
     appTagline: 'Fleet Management',
+    // The signed-in account's role in the top bar (FA-005).
+    roleFleetAdmin: 'Fleet admin',
+    toggleNavigation: 'Toggle navigation',
     search: 'Search',
     searchByName: 'Search by name...',
     all: 'All',
