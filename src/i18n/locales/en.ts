@@ -637,6 +637,11 @@ const en = {
     overlapWithZones:
       'The drawn zone overlaps: {{zones}}. Adjust the boundaries so the zones do not overlap.',
     overlapHint: 'The current shape overlaps an existing zone — adjust the boundaries.',
+    // The outline may not cross itself (FA-325).
+    selfCrossingEdge:
+      'This line would cross the zone’s own outline. Place the point so the outline does not cross itself.',
+    selfCrossingClose:
+      'Closing this shape would make its outline cross itself. Add points so the line back to the first point does not cross it, or start again.',
     // A refused save, shown inside the drawer (FA-326).
     createFailed: "The zone wasn't saved.",
     updateFailed: "Your changes to the zone weren't saved.",
