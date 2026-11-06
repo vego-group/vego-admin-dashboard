@@ -147,7 +147,11 @@ export default function FleetPage() {
   }, [vehicles, tab, query, sort]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Never past the last page: a search or a narrower tab can shrink the list
+  // under the page the operator is on, which used to leave an empty page with
+  // the pager hidden (FA-214).
+  const currentPage = Math.min(page, totalPages);
+  const paginated  = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   if (forbidden) {
     return (
@@ -234,13 +238,13 @@ export default function FleetPage() {
             <Input
               placeholder={t('common.searchByName')}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => { setQuery(e.target.value); setPage(1); }}
               leftIcon={<Search className="h-4 w-4" />}
             />
           </div>
           <Select
             value={sort}
-            onChange={(e) => setSort(e.target.value)}
+            onChange={(e) => { setSort(e.target.value); setPage(1); }}
             options={[
               { value: 'newest', label: t('fleet.sortReportedNewest') },
               { value: 'oldest', label: t('fleet.sortReportedOldest') },
@@ -283,7 +287,7 @@ export default function FleetPage() {
       </div>
 
       {totalPages > 1 && (
-        <Pagination currentPage={page} totalPages={totalPages} onChange={setPage} />
+        <Pagination currentPage={currentPage} totalPages={totalPages} onChange={setPage} />
       )}
 
       {/* Driver assignment */}

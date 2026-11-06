@@ -145,7 +145,11 @@ export default function DriversPage() {
   }, [drivers, tab, query, sort]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Never past the last page: a search, a status change or a removed driver can
+  // shrink the list under the page the operator is on, which used to leave an
+  // empty table with the pager hidden (FA-214).
+  const currentPage = Math.min(page, totalPages);
+  const paginated  = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   // ----- Handlers -----------------------------------------------------------
 
@@ -467,7 +471,7 @@ export default function DriversPage() {
             <Input
               placeholder={t('common.searchByName')}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => { setQuery(e.target.value); setPage(1); }}
               leftIcon={<Search className="h-4 w-4" />}
             />
           </div>
@@ -502,7 +506,7 @@ export default function DriversPage() {
       </div>
 
       {totalPages > 1 && (
-        <Pagination currentPage={page} totalPages={totalPages} onChange={setPage} />
+        <Pagination currentPage={currentPage} totalPages={totalPages} onChange={setPage} />
       )}
 
       {/* Modals */}
