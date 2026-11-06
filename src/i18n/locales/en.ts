@@ -316,6 +316,10 @@ const en = {
     deactivateFailed: "Couldn't set {{name}} to inactive.",
     blockFailed: "Couldn't block {{name}}.",
     unblockFailed: "Couldn't unblock {{name}}.",
+    // The list itself (FA-209).
+    loadFailed: "Drivers couldn't be loaded.",
+    emptyNone: 'No drivers yet. Use Add New Driver to add one.',
+    emptyNoMatch: 'No drivers match this search or filter.',
     // Wallet balance & top-up
     walletBalance: 'Wallet Balance',
     topUp: 'Top Up',

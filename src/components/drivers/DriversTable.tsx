@@ -15,6 +15,8 @@ import { useFleetContext } from '@/hooks/useFleetContext';
 
 interface DriversTableProps {
   drivers: Driver[];
+  /** Said in the table's body when `drivers` is empty, instead of a bare header. */
+  emptyMessage?: string;
   onEdit?: (driver: Driver) => void;
   onTopUp?: (driver: Driver) => void;
   /** Throws when the backend refuses; the table then says why (FA-210). */
@@ -76,7 +78,7 @@ function DocsCount(driver: Driver) {
 
 // ── Table ──────────────────────────────────────────────────────────────────
 
-export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlockToggle, onAssignMotorcycle }: DriversTableProps) {
+export function DriversTable({ drivers, emptyMessage, onEdit, onTopUp, onToggleStatus, onBlockToggle, onAssignMotorcycle }: DriversTableProps) {
   const { t, locale } = useI18n();
   const { tv } = useVehicleTerm();
   const { formatMoney, currencyStatus } = useFleetContext();
@@ -224,6 +226,13 @@ export function DriversTable({ drivers, onEdit, onTopUp, onToggleStatus, onBlock
             </tr>
           </thead>
           <tbody>
+            {drivers.length === 0 && (
+              <tr>
+                <td colSpan={8} className="px-5 py-12 text-center text-sm text-slate-500 dark:text-slate-400">
+                  {emptyMessage ?? t('common.noData')}
+                </td>
+              </tr>
+            )}
             {drivers.map((d) => {
               const { verified, total } = DocsCount(d);
               const isBlocked = d.status === 'blocked';

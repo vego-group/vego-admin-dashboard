@@ -331,6 +331,10 @@ const ar: Translations = {
     deactivateFailed: 'تعذّر تحويل {{name}} إلى غير نشط.',
     blockFailed: 'تعذّر حظر {{name}}.',
     unblockFailed: 'تعذّر إلغاء حظر {{name}}.',
+    // The list itself (FA-209).
+    loadFailed: 'تعذّر تحميل السائقين.',
+    emptyNone: 'لا يوجد سائقون بعد. استخدم «إضافة سائق جديد» لإضافة سائق.',
+    emptyNoMatch: 'لا يوجد سائقون يطابقون هذا البحث أو التصفية.',
     // Wallet balance & top-up
     walletBalance: 'رصيد المحفظة',
     topUp: 'شحن',

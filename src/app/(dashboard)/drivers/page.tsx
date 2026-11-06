@@ -17,12 +17,13 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Pagination } from '@/components/ui/Pagination';
 import { SuccessDialog } from '@/components/ui/SuccessDialog';
 import { NoAccessState } from '@/components/ui/NoAccessState';
+import { LoadError } from '@/components/ui/LoadError';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { useCountries } from '@/hooks/useCountries';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { driversApi, fleetApi } from '@/lib/api';
-import { isForbiddenError } from '@/lib/api-errors';
+import { failureLines, isForbiddenError } from '@/lib/api-errors';
 import { toE164 } from '@/lib/country';
 import { ltrIsolate } from '@/lib/format';
 import type { CancelledSessions, DialCode, Driver, DriverStatus, Vehicle } from '@/types';
@@ -82,6 +83,14 @@ export default function DriversPage() {
   const [motorcycles, setMotorcycles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
+  /**
+   * Why the last load failed, shown with a Retry. A failure used to be only
+   * logged, so the page read as "no drivers" with a row of 0s (FA-209).
+   */
+  const [loadError, setLoadError] = useState<unknown>(undefined);
+  /** The drivers have loaded at least once; until then the counts are unknown. */
+  const [loaded, setLoaded] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   // Filters
   const [tab, setTab] = useState<TabValue>('all');
@@ -104,6 +113,7 @@ export default function DriversPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setLoading(true);
       try {
         // Motorcycles power the assignment picker; a failure there shouldn't hide drivers.
         const [driverData, motorcycleData] = await Promise.all([
@@ -116,16 +126,20 @@ export default function DriversPage() {
         if (!cancelled) {
           setDrivers(driverData.map(withoutDocumentLinks));
           setMotorcycles(motorcycleData);
+          setLoadError(undefined);
+          setLoaded(true);
         }
       } catch (err) {
         logger.error('[Drivers] Failed to load data:', err);
-        if (!cancelled && isForbiddenError(err)) setForbidden(true);
+        if (cancelled) return;
+        if (isForbiddenError(err)) setForbidden(true);
+        else setLoadError(err);
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [reloadKey]);
 
   const PAGE_SIZE = 10;
 
@@ -415,11 +429,21 @@ export default function DriversPage() {
 
   return (
     <DashboardShell title={t('drivers.title')} subtitle={t('drivers.subtitle')}>
-      {/* KPI cards */}
+      {loadError !== undefined && (
+        <LoadError
+          className="mb-4"
+          title={t('drivers.loadFailed')}
+          lines={failureLines(loadError, t)}
+          onRetry={() => setReloadKey((k) => k + 1)}
+          retrying={loading}
+        />
+      )}
+
+      {/* KPI cards — "—" until the drivers have loaded, not 0 */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <MetricCard
           label={t('drivers.activeDrivers')}
-          value={drivers.filter((d) => d.status === 'active').length}
+          value={loaded ? drivers.filter((d) => d.status === 'active').length : '—'}
           icon={<Bike className="h-5 w-5" />}
           iconColor="indigo"
         />
@@ -428,20 +452,20 @@ export default function DriversPage() {
             are approved at once. There is nothing to act on from this page. */}
         <MetricCard
           label={t('drivers.pendingDrivers')}
-          value={drivers.filter((d) => d.status === 'pending').length}
+          value={loaded ? drivers.filter((d) => d.status === 'pending').length : '—'}
           icon={<Clock className="h-5 w-5" />}
           iconColor="blue"
           hint={t('drivers.pendingDriversHint')}
         />
         <MetricCard
           label={t('drivers.inactive')}
-          value={drivers.filter((d) => d.status === 'inactive').length}
+          value={loaded ? drivers.filter((d) => d.status === 'inactive').length : '—'}
           icon={<UserX className="h-5 w-5" />}
           iconColor="orange"
         />
         <MetricCard
           label={t('drivers.blockedDrivers')}
-          value={drivers.filter((d) => d.status === 'blocked').length}
+          value={loaded ? drivers.filter((d) => d.status === 'blocked').length : '—'}
           icon={<Ban className="h-5 w-5" />}
           iconColor="orange"
         />
@@ -489,13 +513,16 @@ export default function DriversPage() {
 
       {/* Content */}
       <div className="mt-5">
-        {loading ? (
+        {loading && !loaded ? (
           <Card className="p-5">
             <Skeleton className="h-[400px] w-full" />
           </Card>
-        ) : (
+        ) : !loaded ? null : (
           <DriversTable
             drivers={paginated}
+            // Nobody at all, or nobody this search/tab matches: two different
+            // things to tell the operator (FA-209).
+            emptyMessage={drivers.length === 0 ? t('drivers.emptyNone') : t('drivers.emptyNoMatch')}
             onEdit={(d) => setFormMode({ kind: 'edit', driver: d })}
             onTopUp={(d) => setDriverToTopUp(d)}
             onToggleStatus={handleToggleStatus}
