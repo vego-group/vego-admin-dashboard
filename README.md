@@ -70,9 +70,8 @@ tile, so check the tiles themselves if the map looks wrong.
 - Phone number plus a one-time code. The operator picks the country (the list
   comes from `GET /countries`), enters the national number, and confirms the
   6-digit code on `/otp`. The app sends the number in full E.164 form.
-- Fleet-admin accounts only. Sign-in goes through the backend's shared staff
-  login, so another kind of account can get a token; `GET /fleet-admin/me` then
-  answers 403, and the app signs it out and says why on the login page.
+- Fleet-admin accounts only. If `GET /fleet-admin/me` answers 403, the app signs
+  the account out and says why on the login page.
 - The bearer token is kept by the auth store (`src/store/auth.ts`, persisted to
   `localStorage`). `src/lib/api/client.ts` attaches it to every request.
 - Any 401 ends the session and the login page says it expired.
