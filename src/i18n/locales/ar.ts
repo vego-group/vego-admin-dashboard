@@ -82,6 +82,8 @@ const ar: Translations = {
     minutes: 'دقيقة',
     kilometers: 'كم',
     kmh: 'كم/س',
+    volts: 'فولت',
+    celsius: '°م',
     signOut: 'تسجيل الخروج',
     signIn: 'تسجيل الدخول',
     lastKnownPositions: 'آخر المواقع المعروفة',
@@ -222,6 +224,9 @@ const ar: Translations = {
     assignSuccessDescription: 'تم تعيين {{driver}} {{lilVehicle}} {{plate}}.',
     unassignSuccessTitle: 'تم إلغاء تعيين السائق',
     unassignSuccessDescription: 'لم يعد {{lilVehicle}} {{plate}} سائق معيَّن.',
+    loadFailed: 'تعذّر تحميل قائمة الأسطول.',
+    emptyNone: 'أسطولك فارغ حالياً.',
+    emptyNoMatch: 'لا توجد نتائج مطابقة لهذا البحث أو التصفية.',
   },
   stations: {
     title: 'محطات البطاريات',
@@ -274,6 +279,11 @@ const ar: Translations = {
     cityPlaceholder: { SA: 'الرياض', JO: 'عمّان' },
     // السعودية فقط: لا توجد صيغة مؤكدة لرخصة القيادة الأردنية.
     licenseNumberPlaceholder: { SA: 'SA-XXXXXX' },
+    // السعودية فقط: لا توجد صيغة مؤكدة للوحة الأردنية.
+    plateNumberPlaceholder: { SA: 'ABC 1234' },
+    fullNamePlaceholder: 'مثال: أحمد الخالدي',
+    emailPlaceholder: 'name@example.com',
+    fileOnRecord: 'ملف محفوظ',
     vehicleAssignment: 'تعيين {{alVehicle}}',
     assignVehicle: 'تعيين {{vehicle}}',
     assignedVehicle: 'تعيين {{alVehicle}} الحالي',

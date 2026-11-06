@@ -63,6 +63,8 @@ const en = {
     minutes: 'min',
     kilometers: 'km',
     kmh: 'km/h',
+    volts: 'V',
+    celsius: '°C',
     signOut: 'Sign Out',
     signIn: 'Sign In',
     lastKnownPositions: 'Last known positions',
@@ -204,6 +206,10 @@ const en = {
     assignSuccessDescription: '{{driver}} is now assigned to {{plate}}.',
     unassignSuccessTitle: 'Driver unassigned',
     unassignSuccessDescription: '{{plate}} no longer has a driver assigned.',
+    // Loading the list (was raw English err.message, FA-215).
+    loadFailed: "Your {{vehicles}} couldn't be loaded.",
+    emptyNone: 'Your fleet has no {{vehicles}} yet.',
+    emptyNoMatch: 'Nothing matches this search or filter.',
   },
   stations: {
     title: 'Battery Stations',
@@ -258,6 +264,12 @@ const en = {
     cityPlaceholder: { SA: 'Riyadh', JO: 'Amman' },
     // Saudi only: there is no confirmed Jordanian licence format.
     licenseNumberPlaceholder: { SA: 'SA-XXXXXX' },
+    // Saudi only, as before: there is no confirmed Jordanian plate format.
+    plateNumberPlaceholder: { SA: 'ABC 1234' },
+    fullNamePlaceholder: 'e.g. Ahmed Al-Khaldi',
+    emailPlaceholder: 'name@example.com',
+    // An upload box for a document the driver already has on file.
+    fileOnRecord: 'File on record',
     vehicleAssignment: '{{Vehicle}} Assignment',
     assignVehicle: 'Assign {{Vehicle}}',
     assignedVehicle: 'Assigned {{Vehicle}}',

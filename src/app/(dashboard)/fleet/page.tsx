@@ -16,10 +16,11 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Pagination } from '@/components/ui/Pagination';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { SuccessDialog } from '@/components/ui/SuccessDialog';
+import { LoadError } from '@/components/ui/LoadError';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { fleetApi, driversApi } from '@/lib/api';
-import { isForbiddenError } from '@/lib/api-errors';
+import { failureLines, isForbiddenError } from '@/lib/api-errors';
 import type { Driver, Vehicle, VehicleStatus } from '@/types';
 import { ltrIsolate, parseBackendDate } from '@/lib/format';
 import { vehicleDisplayName, vehicleMatches } from '@/lib/vehicle-label';
@@ -40,7 +41,15 @@ export default function FleetPage() {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState('newest');
   const [page, setPage] = useState(1);
-  const [apiError, setApiError] = useState<string | null>(null);
+  /**
+   * Why the last load failed, in the backend's words, with a Retry. It was the
+   * raw English `err.message` (or "Failed to load vehicles") in a banner with
+   * an English "Dismiss" (FA-215).
+   */
+  const [loadError, setLoadError] = useState<unknown>(undefined);
+  /** The vehicles have loaded at least once; until then the counts are unknown. */
+  const [loaded, setLoaded] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [forbidden, setForbidden] = useState(false);
 
   // Driver-assignment modal + success feedback
@@ -50,6 +59,7 @@ export default function FleetPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setLoading(true);
       try {
         // Drivers power the assignment picker; a failure there shouldn't hide the fleet.
         const [vehicleData, driverData] = await Promise.all([
@@ -62,11 +72,14 @@ export default function FleetPage() {
         if (!cancelled) {
           setVehicles(vehicleData);
           setDrivers(driverData);
+          setLoadError(undefined);
+          setLoaded(true);
         }
       } catch (err) {
         logger.error('[Fleet] Failed to load vehicles:', err);
+        if (cancelled) return;
         if (isForbiddenError(err)) setForbidden(true);
-        else setApiError(err instanceof Error ? err.message : 'Failed to load vehicles');
+        else setLoadError(err);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -74,7 +87,7 @@ export default function FleetPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   // ----- Driver assignment handlers -----------------------------------------
 
@@ -163,43 +176,39 @@ export default function FleetPage() {
 
   return (
     <DashboardShell title={t('fleet.title')} subtitle={tv('fleet.subtitle')}>
-      {apiError && (
-        <div className="mb-3 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
-          <span>{apiError}</span>
-          <button
-            type="button"
-            onClick={() => setApiError(null)}
-            className="ms-3 shrink-0 text-rose-400 hover:text-rose-600"
-            aria-label="Dismiss"
-          >
-            ✕
-          </button>
-        </div>
+      {loadError !== undefined && (
+        <LoadError
+          className="mb-4"
+          title={tv('fleet.loadFailed')}
+          lines={failureLines(loadError, t)}
+          onRetry={() => setReloadKey((k) => k + 1)}
+          retrying={loading}
+        />
       )}
 
-      {/* Status counters */}
+      {/* Status counters — "—" until the vehicles have loaded, not 0 */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <MetricCard
           label={t('fleet.active')}
-          value={counts.active}
+          value={loaded ? counts.active : '—'}
           icon={<Bike className="h-5 w-5" />}
           iconColor="green"
         />
         <MetricCard
           label={t('fleet.charging')}
-          value={counts.charging}
+          value={loaded ? counts.charging : '—'}
           icon={<BatteryCharging className="h-5 w-5" />}
           iconColor="sky"
         />
         <MetricCard
           label={t('fleet.idle')}
-          value={counts.idle}
+          value={loaded ? counts.idle : '—'}
           icon={<Battery className="h-5 w-5" />}
           iconColor="violet"
         />
         <MetricCard
           label={t('fleet.maintenance')}
-          value={counts.maintenance}
+          value={loaded ? counts.maintenance : '—'}
           icon={<Wrench className="h-5 w-5" />}
           iconColor="orange"
         />
@@ -256,7 +265,7 @@ export default function FleetPage() {
 
       {/* Content */}
       <div className="mt-5">
-        {loading ? (
+        {loading && !loaded ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
               <Card key={i} className="p-5">
@@ -267,12 +276,12 @@ export default function FleetPage() {
               </Card>
             ))}
           </div>
-        ) : filtered.length === 0 ? (
+        ) : !loaded ? null : filtered.length === 0 ? (
           <Card>
             <EmptyState
               icon={<Bike className="h-6 w-6" />}
               title={t('common.noData')}
-              description="No vehicles match your current filters."
+              description={vehicles.length === 0 ? tv('fleet.emptyNone') : t('fleet.emptyNoMatch')}
             />
           </Card>
         ) : view === 'list' ? (

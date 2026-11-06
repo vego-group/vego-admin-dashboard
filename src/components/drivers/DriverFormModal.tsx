@@ -172,11 +172,14 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
         address: driver.address ?? '',
         city: driver.city ?? '',
         hasLicense: driver.documents.license.hasLicense,
-        licenseFrontName: driver.documents.license.status !== 'not_uploaded' ? 'existing-front.jpg' : '',
+        // Names of files picked in this form only. A document already on
+        // record is shown as such by the upload box; it used to be a made-up
+        // "existing-front.jpg" that looked like a file just selected.
+        licenseFrontName: '',
         licenseBackName: '',
         licenseNumber: driver.documents.license.number ?? '',
         licenseExpiry: driver.documents.license.expiryDate ?? '',
-        plateImageName: driver.documents.plate.status !== 'not_uploaded' ? 'existing-plate.jpg' : '',
+        plateImageName: '',
         plateNumber: driver.documents.plate.number ?? '',
         licenseFrontFile: null,
         licenseBackFile: null,
@@ -261,7 +264,7 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
    * rather than another country's.
    */
   const examplePlaceholder = (
-    field: 'addressPlaceholder' | 'cityPlaceholder' | 'licenseNumberPlaceholder',
+    field: 'addressPlaceholder' | 'cityPlaceholder' | 'licenseNumberPlaceholder' | 'plateNumberPlaceholder',
   ): string => {
     if (!fleetIso) return '';
     const key = `drivers.${field}.${fleetIso}`;
@@ -422,7 +425,7 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
           <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label={t('drivers.fullName')} required error={errors.fullName}>
               <Input
-                placeholder="Ahmed Al-Khaldi"
+                placeholder={t('drivers.fullNamePlaceholder')}
                 value={values.fullName}
                 onChange={(e) => update('fullName', e.target.value)}
               />
@@ -502,7 +505,8 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
             <Field label={`${t('drivers.emailAddress')} (${t('common.optional')})`} error={errors.email}>
               <Input
                 type="email"
-                placeholder="driver@example.com"
+                dir="ltr"
+                placeholder={t('drivers.emailPlaceholder')}
                 value={values.email}
                 onChange={(e) => update('email', e.target.value)}
               />
@@ -617,6 +621,7 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
                   <FileUploadBox
                     label={t('drivers.licenseFront')}
                     fileName={values.licenseFrontName}
+                    onRecord={!!existingDocStatus && existingDocStatus.license.status !== 'not_uploaded'}
                     onFileSelect={(f) => selectFile('licenseFrontFile', 'licenseFrontName', f)}
                     accept="image/*"
                   />
@@ -669,12 +674,13 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
               <FileUploadBox
                 label={`${t('common.optional')}`}
                 fileName={values.plateImageName}
+                onRecord={!!existingDocStatus && existingDocStatus.plate.status !== 'not_uploaded'}
                 onFileSelect={(f) => selectFile('plateImageFile', 'plateImageName', f)}
                 accept="image/*"
               />
               <Field label={`${t('drivers.plateNumber')} (${t('common.optional')})`} error={errors.plateNumber}>
                 <Input
-                  placeholder="ABC 1234"
+                  placeholder={examplePlaceholder('plateNumberPlaceholder')}
                   maxLength={PLATE_NUMBER_MAX_LENGTH}
                   value={values.plateNumber}
                   onChange={(e) => update('plateNumber', e.target.value)}
@@ -815,12 +821,19 @@ function DocPreviewNote({
 }
 
 function FileUploadBox({
-  label, fileName, onFileSelect, accept = 'image/*,.pdf',
+  label, fileName, onRecord = false, onFileSelect, accept = 'image/*,.pdf',
 }: {
-  label: string; fileName: string; onFileSelect: (file: File) => void; accept?: string;
+  label: string;
+  /** A file picked in this form, if any. */
+  fileName: string;
+  /** The driver already has this document on record (edit form). */
+  onRecord?: boolean;
+  onFileSelect: (file: File) => void;
+  accept?: string;
 }) {
+  const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
-  const hasFile = !!fileName;
+  const hasFile = !!fileName || onRecord;
 
   return (
     <div>
@@ -849,15 +862,15 @@ function FileUploadBox({
           <>
             <Check className="h-5 w-5 text-indigo-500" />
             <span className="max-w-full truncate text-xs font-medium text-indigo-600 dark:text-indigo-400">
-              {fileName}
+              {fileName || t('drivers.fileOnRecord')}
             </span>
-            <span className="text-[10px] text-slate-400">Click to change</span>
+            <span className="text-[10px] text-slate-400">{t('drivers.changeFile')}</span>
           </>
         ) : (
           <>
             <Upload className="h-5 w-5 text-slate-400 group-hover:text-indigo-500 transition-colors" />
             <span className="text-xs text-slate-500 dark:text-slate-400">{label}</span>
-            <span className="text-[10px] text-indigo-500">Click to upload</span>
+            <span className="text-[10px] text-indigo-500">{t('drivers.uploadFile')}</span>
           </>
         )}
       </button>

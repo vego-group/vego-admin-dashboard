@@ -127,13 +127,13 @@ export function VehicleDetails({
         {battery && (battery.sohPct != null || battery.voltage != null || battery.temperature != null) && (
           <div className="mt-3 flex flex-wrap gap-3">
             {battery.sohPct != null && (
-              <StatChip icon={<BatteryCharging className="h-3.5 w-3.5" />} label={t('vehicleControl.stateOfHealth')} value={`${formatNumber(battery.sohPct, locale)}%`} />
+              <StatChip icon={<BatteryCharging className="h-3.5 w-3.5" />} label={t('vehicleControl.stateOfHealth')} value={`${formatNumber(battery.sohPct, locale)}%`} ltr />
             )}
             {battery.voltage != null && (
-              <StatChip icon={<Activity className="h-3.5 w-3.5" />} label={t('vehicleControl.voltage')} value={`${formatNumber(battery.voltage, locale)} V`} />
+              <StatChip icon={<Activity className="h-3.5 w-3.5" />} label={t('vehicleControl.voltage')} value={`${formatNumber(battery.voltage, locale)} ${t('common.volts')}`} />
             )}
             {battery.temperature != null && (
-              <StatChip icon={<Thermometer className="h-3.5 w-3.5" />} label={t('vehicleControl.temperature')} value={`${formatNumber(battery.temperature, locale)} °C`} />
+              <StatChip icon={<Thermometer className="h-3.5 w-3.5" />} label={t('vehicleControl.temperature')} value={`${formatNumber(battery.temperature, locale)} ${t('common.celsius')}`} />
             )}
           </div>
         )}
@@ -288,18 +288,21 @@ function StatCard({
 }
 
 function StatChip({
-  icon, label, value,
+  icon, label, value, ltr = false,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
+  /** Keep the value left-to-right: "97%" would read "%97" in Arabic. */
+  ltr?: boolean;
 }) {
   return (
     <span className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium text-slate-600 dark:text-slate-300"
       style={{ borderColor: 'rgb(var(--border))' }}>
       <span className="text-slate-400">{icon}</span>
-      {/* "97%", "72.4 V", "31 °C" are LTR: in Arabic they read "%97", "V 72.4". */}
-      {label}: <span className="font-semibold" dir="ltr">{value}</span>
+      {/* A number with a translated unit ("72.4 فولت") follows the page's
+          direction; a percentage stays LTR. */}
+      {label}: <span className="font-semibold" dir={ltr ? 'ltr' : undefined}>{value}</span>
     </span>
   );
 }
