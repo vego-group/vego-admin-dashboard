@@ -370,7 +370,11 @@ export interface UsagePoint {
 
 export interface BatteryHealthPoint {
   month: string;
-  health: number;
+  /**
+   * Average SOH for the month, or **null** for a month with no reading: the
+   * chart leaves a gap there instead of plunging to 0 % (FA-329).
+   */
+  health: number | null;
 }
 
 export interface RevenuePoint {

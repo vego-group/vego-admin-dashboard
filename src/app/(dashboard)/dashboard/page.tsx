@@ -16,13 +16,6 @@ import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { useSection } from '@/hooks/useSection';
 import { dashboardApi, fleetApi, stationsApi } from '@/lib/api';
 import { failureLines, isForbiddenError } from '@/lib/api-errors';
-import type { BatteryHealthPoint } from '@/types';
-
-const FALLBACK_HEALTH: BatteryHealthPoint[] = [
-  { month: 'Jan', health: 0 }, { month: 'Feb', health: 0 }, { month: 'Mar', health: 0 },
-  { month: 'Apr', health: 0 }, { month: 'May', health: 0 }, { month: 'Jun', health: 0 },
-];
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
@@ -147,8 +140,10 @@ export default function DashboardPage() {
           loading={usage.loading}
           failure={usage.error !== undefined ? <SectionLoadError section={usage} /> : undefined}
         />
+        {/* No fallback series: a failure or an empty answer used to draw a 0 %
+            line over made-up English months Jan–Jun (FA-329). */}
         <BatteryHealthChart
-          data={health.data && health.data.length > 0 ? health.data : FALLBACK_HEALTH}
+          data={health.data ?? []}
           loading={health.loading}
           failure={health.error !== undefined ? <SectionLoadError section={health} /> : undefined}
         />

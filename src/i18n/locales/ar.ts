@@ -189,6 +189,7 @@ const ar: Translations = {
     metricsLoadFailed: 'تعذّر تحميل أرقام الأسطول.',
     mapLoadFailed: 'تعذّر تحميل جزء من بيانات الخريطة.',
     usageEmpty: 'لا توجد بيانات استخدام لهذا اليوم.',
+    healthEmpty: 'لا توجد قراءات لصحة البطاريات بعد.',
   },
   fleet: {
     title: 'إدارة الأسطول',

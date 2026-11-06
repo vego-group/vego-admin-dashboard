@@ -23,6 +23,8 @@ interface BatteryHealthChartProps {
 
 export function BatteryHealthChart({ data, loading, failure }: BatteryHealthChartProps) {
   const { t } = useI18n();
+  // Nothing to plot: no months, or no month with a reading.
+  const empty = !data.some((p) => typeof p.health === 'number');
 
   return (
     <Card className="p-5">
@@ -35,6 +37,8 @@ export function BatteryHealthChart({ data, loading, failure }: BatteryHealthChar
           <Skeleton className="h-full w-full rounded-xl" />
         ) : failure ? (
           failure
+        ) : empty ? (
+          <p className="flex h-full items-center justify-center text-sm text-slate-400">{t('dashboard.healthEmpty')}</p>
         ) : (
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 10, right: 4, left: -22, bottom: 0 }}>
@@ -59,9 +63,11 @@ export function BatteryHealthChart({ data, loading, failure }: BatteryHealthChar
                 boxShadow: '0 10px 25px -5px rgb(0 0 0 / 0.08)',
               }}
             />
+            {/* A month with no reading is null: a gap, not a drop to 0. */}
             <Line
               type="monotone"
               dataKey="health"
+              connectNulls={false}
               stroke="#4f46e5"
               strokeWidth={2.5}
               dot={{ r: 4, strokeWidth: 2, stroke: '#4f46e5', fill: '#fff' }}

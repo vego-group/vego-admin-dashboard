@@ -170,6 +170,7 @@ const en = {
     metricsLoadFailed: "The fleet figures couldn't be loaded.",
     mapLoadFailed: "Part of the map couldn't be loaded.",
     usageEmpty: 'No usage data for today.',
+    healthEmpty: 'No battery health readings yet.',
   },
   fleet: {
     title: 'Fleet Management',

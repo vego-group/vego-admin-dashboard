@@ -2150,9 +2150,10 @@ interface ApiUsageBucket {
 interface ApiHealthPoint {
   month?: string;
   label?: string;
-  avg_soh?: number;
-  health?: number;
-  value?: number;
+  /** Null for a month with no battery readings. */
+  avg_soh?: number | string | null;
+  health?: number | string | null;
+  value?: number | string | null;
 }
 
 export const dashboardApi = {
@@ -2213,7 +2214,8 @@ export const dashboardApi = {
     const list = Array.isArray(raw) ? raw : ((raw as { data?: ApiHealthPoint[] }).data ?? []);
     return list.map((p) => ({
       month:  p.label ?? p.month ?? '',
-      health: p.avg_soh ?? p.health ?? p.value ?? 0,
+      // No reading stays no reading — null, a gap in the line — never 0 % (FA-329).
+      health: readNumber(p.avg_soh, p.health, p.value) ?? null,
     }));
   },
 };
