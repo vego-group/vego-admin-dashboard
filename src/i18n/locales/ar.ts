@@ -482,6 +482,7 @@ const ar: Translations = {
     connection: 'الاتصال',
     online: 'متصل',
     offline: 'غير متصل',
+    connectionUnknown: 'غير مُبلَّغ عنه',
     // Statistics card
     statistics: 'الإحصائيات',
     statSwaps: 'التبديلات',

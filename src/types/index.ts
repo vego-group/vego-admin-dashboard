@@ -189,7 +189,8 @@ export interface Vehicle {
   isEngineRunning: boolean;
   /** As the device reported it; 'unknown' when it reported nothing (never 'strong'). */
   gpsSignal: GpsSignal;
-  isOnline: boolean;
+  /** As the device reported it; **undefined when it reported nothing**, never a guessed `false`. */
+  isOnline?: boolean;
   /** When the vehicle's device last reported (`iot_device.last_seen_at`). */
   lastSeenAt?: string;
   /**

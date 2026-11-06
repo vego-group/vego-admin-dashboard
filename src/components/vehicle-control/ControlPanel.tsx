@@ -217,7 +217,7 @@ export function ControlPanel({
 
         {/* A command to an offline device may simply never arrive. Say so rather
             than letting a spinner and a success imply it did. */}
-        {!vehicle.isOnline && (
+        {vehicle.isOnline === false && (
           <div className="mt-3 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
             <WifiOff className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
             <p>{tv('vehicleControl.commandOffline')}</p>
@@ -491,8 +491,10 @@ export function ControlPanel({
           />
           <SystemStatusRow
             label={t('vehicleControl.connection')}
-            value={vehicle.isOnline ? t('vehicleControl.online') : t('vehicleControl.offline')}
-            tone={vehicle.isOnline ? 'success' : 'danger'}
+            value={vehicle.isOnline === undefined
+              ? t('vehicleControl.connectionUnknown')
+              : vehicle.isOnline ? t('vehicleControl.online') : t('vehicleControl.offline')}
+            tone={vehicle.isOnline === undefined ? 'neutral' : vehicle.isOnline ? 'success' : 'danger'}
           />
         </ul>
       </Card>

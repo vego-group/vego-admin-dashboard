@@ -577,7 +577,9 @@ function mapMotorcycle(m: ApiMotorcycle): Vehicle {
     isLocked:           m.is_locked ?? false,
     isEngineRunning:    m.is_engine_running ?? false,
     gpsSignal:          toGpsSignal(gps?.gps_signal ?? iot?.gps_signal),
-    isOnline:           iot?.is_online ?? false,
+    // Absent stays absent: a device that reported nothing is not known to be
+    // offline, and must not be drawn grey and "Offline" on that guess.
+    isOnline:           typeof iot?.is_online === 'boolean' ? iot.is_online : undefined,
     lastSeenAt:         iot?.last_seen_at || undefined,
     supportedCommands:  toSupportedCommands(m.supported_commands ?? iot?.supported_commands),
   };

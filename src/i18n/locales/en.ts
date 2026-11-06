@@ -473,6 +473,7 @@ const en = {
     connection: 'Connection',
     online: 'Online',
     offline: 'Offline',
+    connectionUnknown: 'Not reported',
     // Statistics card
     statistics: 'Statistics',
     // Sessions, not trips: the platform has no trips (FA-206).
