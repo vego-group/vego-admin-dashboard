@@ -332,7 +332,8 @@ export function DriversTable({ drivers, emptyMessage, onEdit, onTopUp, onToggleS
                           <span
                             className={cn(
                               'pointer-events-none inline-flex h-4 w-4 items-center justify-center rounded-full bg-white shadow transition-transform duration-200',
-                              d.status === 'active' ? 'translate-x-4' : 'translate-x-0',
+                              // Mirrored in RTL, where the track starts on the right (FA-222).
+                              d.status === 'active' ? 'translate-x-4 rtl:-translate-x-4' : 'translate-x-0',
                             )}
                           >
                             {togglingId === d.id && (
