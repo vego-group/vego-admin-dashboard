@@ -24,7 +24,7 @@ export function VehicleCard({ vehicle, onClick, onAssignDriver }: VehicleCardPro
 
   return (
     <Card
-      className="cursor-pointer p-5 transition-all hover:shadow-card-hover"
+      className="p-5"
       onClick={onClick}
     >
       <div className="flex items-start justify-between gap-3">
