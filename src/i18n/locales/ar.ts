@@ -633,6 +633,9 @@ const ar: Translations = {
     overlapWithZones:
       'النطاق المرسوم يتداخل مع: {{zones}}. عدّل الحدود بحيث لا تتداخل النطاقات.',
     overlapHint: 'الشكل الحالي يتداخل مع نطاق موجود — عدّل الحدود.',
+    createFailed: 'لم يتم حفظ النطاق.',
+    updateFailed: 'لم يتم حفظ تغييرات النطاق.',
+    shapeOnMap: 'الشكل على الخريطة',
 
     showOnMap: 'إظهار على الخريطة',
     hideFromMap: 'إخفاء من الخريطة',

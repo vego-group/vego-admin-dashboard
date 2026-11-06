@@ -637,6 +637,10 @@ const en = {
     overlapWithZones:
       'The drawn zone overlaps: {{zones}}. Adjust the boundaries so the zones do not overlap.',
     overlapHint: 'The current shape overlaps an existing zone — adjust the boundaries.',
+    // A refused save, shown inside the drawer (FA-326).
+    createFailed: "The zone wasn't saved.",
+    updateFailed: "Your changes to the zone weren't saved.",
+    shapeOnMap: 'Shape on the map',
 
     // Actions / dialogs
     showOnMap: 'Show on map',

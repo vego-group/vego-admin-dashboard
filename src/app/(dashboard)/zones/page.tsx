@@ -11,7 +11,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
 import { ZoneCard } from '@/components/zones/ZoneCard';
 import { ZoneMap } from '@/components/zones/ZoneMap';
-import { ZoneFormDrawer, type ZoneFormValues } from '@/components/zones/ZoneFormDrawer';
+import { ZoneFormDrawer, ZoneSubmitRefusal, type ZoneFormValues } from '@/components/zones/ZoneFormDrawer';
 import { useI18n } from '@/i18n/I18nProvider';
 import { zonesApi } from '@/lib/api';
 import { isForbiddenError } from '@/lib/api-errors';
@@ -151,48 +151,41 @@ export default function ZonesPage() {
 
   // ----- CRUD handlers ------------------------------------------------------
 
+  // Both throw on failure: the drawer stays open and shows why, with each
+  // field the backend refused on that field (FA-326).
   const handleAdd = async (values: ZoneFormValues) => {
     // Last line of defence — the drawing guards should have caught this already.
     const conflicts = findOverlappingZones(drawingPoints, zones);
     if (conflicts.length > 0) {
-      setApiError(t('zones.overlapWithZones', { zones: listZones(conflicts) }));
-      return;
+      throw new ZoneSubmitRefusal([t('zones.overlapWithZones', { zones: listZones(conflicts) })]);
     }
-    try {
-      const created = await zonesApi.create({
-        name_en:       values.name_en,
-        name_ar:       values.name_ar,
-        type:          values.type,
-        speedLimitKmh: values.speedLimitKmh,
-        active:        values.active,
-        polygon:       drawingPoints,
-      });
-      setZones((prev) => [created, ...prev]);
-      setDrawingPoints([]);
-      setFormMode({ kind: 'closed' });
-      setSuccessDialog({ kind: 'added' });
-    } catch (err) {
-      setApiError(err instanceof Error ? err.message : 'Failed to create zone');
-    }
+    const created = await zonesApi.create({
+      name_en:       values.name_en,
+      name_ar:       values.name_ar,
+      type:          values.type,
+      speedLimitKmh: values.speedLimitKmh,
+      active:        values.active,
+      polygon:       drawingPoints,
+    });
+    setZones((prev) => [created, ...prev]);
+    setDrawingPoints([]);
+    setFormMode({ kind: 'closed' });
+    setSuccessDialog({ kind: 'added' });
   };
 
   const handleEdit = async (values: ZoneFormValues, zoneId?: string) => {
     if (!zoneId) return;
-    try {
-      const updated = await zonesApi.update(zoneId, {
-        name_en:       values.name_en,
-        name_ar:       values.name_ar,
-        type:          values.type,
-        speedLimitKmh: values.speedLimitKmh,
-        active:        values.active,
-      });
-      if (updated) {
-        setZones((prev) => prev.map((z) => (z.id === updated.id ? updated : z)));
-        setFormMode({ kind: 'closed' });
-        setSuccessDialog({ kind: 'updated' });
-      }
-    } catch (err) {
-      setApiError(err instanceof Error ? err.message : 'Failed to update zone');
+    const updated = await zonesApi.update(zoneId, {
+      name_en:       values.name_en,
+      name_ar:       values.name_ar,
+      type:          values.type,
+      speedLimitKmh: values.speedLimitKmh,
+      active:        values.active,
+    });
+    if (updated) {
+      setZones((prev) => prev.map((z) => (z.id === updated.id ? updated : z)));
+      setFormMode({ kind: 'closed' });
+      setSuccessDialog({ kind: 'updated' });
     }
   };
 
