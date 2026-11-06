@@ -99,6 +99,39 @@ export function fieldErrorFrom(err: unknown): FieldError | null {
   return null;
 }
 
+/**
+ * Every field Laravel refused in a 422, sorted onto a form's own fields.
+ *
+ * `fieldErrorFrom` answers with one field, and only for name, phone and
+ * country; everything else (an email already taken, a plate over 20
+ * characters, a bad licence expiry) used to land in a form-wide banner, away
+ * from the field to fix (FA-213). This reads all of `errors`:
+ *
+ *   fields    the first message for each key `fieldByKey` maps to a field
+ *   unmapped  the messages for keys the form has no field for, for its banner
+ *
+ * **Null** when nothing maps to a field — not a 422, no `errors`, or only keys
+ * the form does not show — so the caller handles it like any other failure.
+ */
+export function fieldErrorsFrom<F extends string>(
+  err: unknown,
+  fieldByKey: Readonly<Record<string, F>>,
+): { fields: Partial<Record<F, string>>; unmapped: string[] } | null {
+  if (!(err instanceof ApiError) || err.status !== 422 || !err.errors) return null;
+  const fields: Partial<Record<F, string>> = {};
+  const unmapped: string[] = [];
+  for (const [key, messages] of Object.entries(err.errors)) {
+    const list = (Array.isArray(messages) ? messages : [messages])
+      .filter((m): m is string => typeof m === 'string' && m.trim() !== '');
+    if (list.length === 0) continue;
+    const field = Object.prototype.hasOwnProperty.call(fieldByKey, key) ? fieldByKey[key] : undefined;
+    if (field === undefined) unmapped.push(...list);
+    else if (fields[field] === undefined) fields[field] = list[0];
+  }
+  if (Object.keys(fields).length === 0) return null;
+  return { fields, unmapped: Array.from(new Set(unmapped)) };
+}
+
 /** True when this failure belongs on a field and must stay off the page. */
 export function isFieldLevelError(err: unknown): boolean {
   return fieldErrorFrom(err) !== null;

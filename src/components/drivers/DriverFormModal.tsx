@@ -10,7 +10,7 @@ import { useCountries } from '@/hooks/useCountries';
 import { useFleetContext } from '@/hooks/useFleetContext';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import { driversApi } from '@/lib/api';
-import { failureLines, fieldErrorFrom } from '@/lib/api-errors';
+import { failureLines, fieldErrorFrom, fieldErrorsFrom } from '@/lib/api-errors';
 import { flagEmoji, matchesPhoneRegex, toNationalNumber } from '@/lib/country';
 import { cn } from '@/lib/cn';
 import type { Country, Driver, DocumentStatus, DriverDocuments } from '@/types';
@@ -69,6 +69,31 @@ export interface DriverFormValues {
   plateImageFile: File | null;
 }
 
+/**
+ * The request keys of `POST` / `PUT /fleet-admin/drivers` and the form field
+ * each one is typed into, so a 422 lands beside the field to fix (FA-213).
+ * `country` is the read-only country box. Keys missing here (`has_license`, a
+ * fleet's driver cap, …) have no field and go in the form's banner.
+ */
+const FIELD_BY_REQUEST_KEY = {
+  name:                   'fullName',
+  phone:                  'phone',
+  country_code:           'country',
+  iso_country_code:       'country',
+  country:                'country',
+  email:                  'email',
+  address:                'address',
+  city:                   'city',
+  driving_license_number: 'licenseNumber',
+  driving_license_expiry: 'licenseExpiry',
+  plate_number:           'plateNumber',
+} as const satisfies Record<string, keyof DriverFormValues | 'country'>;
+
+type ServerField = (typeof FIELD_BY_REQUEST_KEY)[keyof typeof FIELD_BY_REQUEST_KEY];
+
+/** `plate_number` is `string, max 20` on create and update (backend, 2026-07). */
+const PLATE_NUMBER_MAX_LENGTH = 20;
+
 const emptyForm: DriverFormValues = {
   fullName: '',
   phone: '',
@@ -118,6 +143,7 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
   /** Why the save was refused, in the backend's words. The form stays open. */
   const [submitError, setSubmitError] = useState<string[] | null>(null);
   const submitErrorRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   // The documents the API refused after the driver itself was saved, and that
   // driver's id: saving again then updates it and retries the upload.
   const [docUploadError, setDocUploadError] = useState<string[] | null>(null);
@@ -201,6 +227,18 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [open, driver]);
+
+  /**
+   * Bring the first field the server refused into view: the Save button is at
+   * the bottom of a long form and the field may be at the top.
+   */
+  const revealFirstFieldError = () => {
+    window.requestAnimationFrame(() => {
+      formRef.current
+        ?.querySelector('[data-field-error]')
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+  };
 
   const update = <K extends keyof DriverFormValues>(key: K, val: DriverFormValues[K]) => {
     setValues((v) => ({ ...v, [key]: val }));
@@ -291,22 +329,41 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
         setDocUploadError(failureLines(err.uploadError, t));
         return;
       }
-      // country_not_supported / phone_invalid_for_country and a refused blank
-      // name or phone are input mistakes, not failures of the request: they
-      // belong beside the field the operator has to fix, never in the form-wide
-      // banner.
-      const fieldError = fieldErrorFrom(err);
-      if (fieldError) {
-        const detail  = fieldError.expectedFormat ?? fieldError.example;
-        const message = detail ? `${fieldError.message} (${detail})` : fieldError.message;
-        if (fieldError.field === 'country')   setCountryError(message);
-        else if (fieldError.field === 'name') setErrors((prev) => ({ ...prev, fullName: message }));
-        else                                  setErrors((prev) => ({ ...prev, phone: message }));
-      } else {
-        // Anything else — a 500, a timeout, an email already taken — stays on
+      // A refused field is an input mistake, not a failed request: it belongs
+      // beside the field the operator has to fix. country_not_supported and
+      // phone_invalid_for_country come as an error_code (with the expected
+      // format); everything else as Laravel's per-field `errors` (FA-213).
+      const coded  = fieldErrorFrom(err);
+      const byCode = coded && coded.code !== 'validation' ? coded : null;
+      const byKey  = fieldErrorsFrom<ServerField>(err, FIELD_BY_REQUEST_KEY);
+      if (!byCode && !byKey) {
+        // Anything else — a 500, a timeout, the fleet's driver cap — stays on
         // the open form with the operator's edits intact (FA-201).
         setSubmitError(failureLines(err, t));
+        return;
       }
+      const next: Partial<Record<keyof DriverFormValues, string>> = {};
+      let nextCountryError: string | null = null;
+      const unmapped = [...(byKey?.unmapped ?? [])];
+      if (byCode) {
+        const detail  = byCode.expectedFormat ?? byCode.example;
+        const message = detail ? `${byCode.message} (${detail})` : byCode.message;
+        if (byCode.field === 'country')   nextCountryError = message;
+        else if (byCode.field === 'name') next.fullName = message;
+        else                              next.phone = message;
+      }
+      for (const [field, message] of Object.entries(byKey?.fields ?? {}) as [ServerField, string][]) {
+        if (field === 'country') nextCountryError ??= message;
+        // The licence fields are hidden under "No licence": a message there
+        // would be invisible, so it goes in the banner instead.
+        else if ((field === 'licenseNumber' || field === 'licenseExpiry') && !values.hasLicense) unmapped.push(message);
+        else next[field] ??= message;
+      }
+      setErrors((prev) => ({ ...prev, ...next }));
+      if (nextCountryError) setCountryError(nextCountryError);
+      // Refusals with no field on this form still need saying.
+      if (unmapped.length > 0) setSubmitError(unmapped);
+      else revealFirstFieldError();
     } finally {
       setSubmitting(false);
     }
@@ -322,7 +379,7 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
 
   return (
     <Modal open={open} onClose={onClose} size="lg">
-      <form onSubmit={handleSubmit}>
+      <form ref={formRef} onSubmit={handleSubmit}>
         {/* Header */}
         <div
           className="flex items-start gap-3 border-b px-6 pb-4 pt-5"
@@ -452,14 +509,14 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
             </Field>
           </div>
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label={`${t('drivers.address')} (${t('common.optional')})`}>
+            <Field label={`${t('drivers.address')} (${t('common.optional')})`} error={errors.address}>
               <Input
                 placeholder={examplePlaceholder('addressPlaceholder')}
                 value={values.address}
                 onChange={(e) => update('address', e.target.value)}
               />
             </Field>
-            <Field label={`${t('drivers.city')} (${t('common.optional')})`}>
+            <Field label={`${t('drivers.city')} (${t('common.optional')})`} error={errors.city}>
               <Input
                 placeholder={examplePlaceholder('cityPlaceholder')}
                 value={values.city}
@@ -571,14 +628,14 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
                   />
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field label={`${t('drivers.licenseNumber')} (${t('common.optional')})`}>
+                  <Field label={`${t('drivers.licenseNumber')} (${t('common.optional')})`} error={errors.licenseNumber}>
                     <Input
                       placeholder={examplePlaceholder('licenseNumberPlaceholder')}
                       value={values.licenseNumber}
                       onChange={(e) => update('licenseNumber', e.target.value)}
                     />
                   </Field>
-                  <Field label={`${t('drivers.licenseExpiry')} (${t('common.optional')})`}>
+                  <Field label={`${t('drivers.licenseExpiry')} (${t('common.optional')})`} error={errors.licenseExpiry}>
                     <Input
                       type="date"
                       value={values.licenseExpiry}
@@ -615,9 +672,10 @@ export function DriverFormModal({ open, onClose, driver, onSubmit }: DriverFormM
                 onFileSelect={(f) => selectFile('plateImageFile', 'plateImageName', f)}
                 accept="image/*"
               />
-              <Field label={`${t('drivers.plateNumber')} (${t('common.optional')})`}>
+              <Field label={`${t('drivers.plateNumber')} (${t('common.optional')})`} error={errors.plateNumber}>
                 <Input
                   placeholder="ABC 1234"
+                  maxLength={PLATE_NUMBER_MAX_LENGTH}
                   value={values.plateNumber}
                   onChange={(e) => update('plateNumber', e.target.value)}
                 />
@@ -682,7 +740,7 @@ function Field({
       </label>
       {children}
       {error ? (
-        <p className="mt-1 text-xs text-rose-600">{error}</p>
+        <p data-field-error className="mt-1 text-xs text-rose-600">{error}</p>
       ) : (
         hint && <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">{hint}</p>
       )}
