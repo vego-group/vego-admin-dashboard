@@ -470,6 +470,8 @@ const ar: Translations = {
     securityLock: 'قفل الأمان',
     locked: 'مقفل',
     unlocked: 'غير مقفل',
+    lockAction: 'قفل',
+    unlockAction: 'فتح القفل',
     speedLimit: 'حد السرعة',
     emergency: 'طوارئ',
     emergencyStop: 'إيقاف طارئ',
@@ -522,6 +524,11 @@ const ar: Translations = {
     emergencyStopConfirmDescription:
       'الإيقاف الطارئ يقطع المحرك ويقفل {{alVehicle}} فوراً في أي مكان. وإن كان سائق يقود {{alVehicle}} فسيتوقف المحرك أثناء القيادة. لا تستخدمه إلا عند الضرورة لإيقاف الحركة.',
     emergencyStopConfirmAction: 'إيقاف طارئ',
+    stopEngineConfirmTitle: 'إيقاف محرك {{alVehicle}}؟',
+    stopEngineConfirmDescription:
+      'يتوقف المحرك فوراً في أي مكان. وإن كان سائق يقود {{alVehicle}} فسيتوقف المحرك أثناء القيادة.',
+    stopEngineConfirmSpeed: 'آخر سرعة مُبلَّغ عنها: {{speed}}.',
+    stopEngineConfirmAction: 'إيقاف المحرك',
     speedLimitUnknown: 'غير مُبلَّغ عنه',
     speedLimitUnknownHint:
       'لم يُبلِّغ جهاز {{alVehicle}} عن حد سرعة. تحديد حد أدناه يرسله إلى الجهاز.',

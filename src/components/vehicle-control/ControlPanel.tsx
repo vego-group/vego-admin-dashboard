@@ -75,7 +75,12 @@ export function ControlPanel({
    */
   const [unsupported, setUnsupported] = useState<Set<VehicleCommand>>(new Set());
 
-  const [confirmEmergencyStop, setConfirmEmergencyStop] = useState(false);
+  /**
+   * The command waiting for the operator to confirm it. Both cut the engine of
+   * a vehicle that may have a driver on it right now, so neither fires on the
+   * click: plain Stop used to (FA-221).
+   */
+  const [confirming, setConfirming] = useState<'stop' | 'emergency_stop' | null>(null);
 
   // Re-sync when a different vehicle is selected (component instance is reused).
   useEffect(() => {
@@ -86,7 +91,7 @@ export function ControlPanel({
     setPending(null);
     setCommandError(null);
     setUnsupported(new Set());
-    setConfirmEmergencyStop(false);
+    setConfirming(null);
     // Only resync on vehicle switch, not on every optimistic prop update.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vehicle.id]);
@@ -183,6 +188,10 @@ export function ControlPanel({
   // arrived pinned to the wrong end and the first drag *sent* that wrong value.
   const engineCommand: VehicleCommand = isRunning ? 'stop' : 'start';
   const lockCommand:   VehicleCommand = isLocked  ? 'unlock' : 'lock';
+  /** Speed for the Stop confirmation, only when the vehicle reported moving. */
+  const reportedSpeed = vehicle.currentSpeedKmh !== undefined && vehicle.currentSpeedKmh > 0
+    ? `${vehicle.currentSpeedKmh} ${t('common.kmh')}`
+    : null;
   const speedSupported = isSupported('set_speed_limit');
   /** What the label shows: the value being dragged, else the confirmed one. */
   const shownSpeed     = speedDraft ?? speedLimit;
@@ -239,12 +248,19 @@ export function ControlPanel({
 
         {/* Power */}
         <div className="mt-4">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-            {t('vehicleControl.powerControl')}
-          </p>
+          {/* The heading says the state; the button says what it will do. */}
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+              {t('vehicleControl.powerControl')}
+            </p>
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              {isRunning ? t('vehicleControl.running') : t('vehicleControl.stopped')}
+            </span>
+          </div>
           <button
             type="button"
-            onClick={() => runCommand(engineCommand)}
+            // Starting is safe; stopping is confirmed first (FA-221).
+            onClick={() => (engineCommand === 'stop' ? setConfirming('stop') : runCommand('start'))}
             disabled={!!pending || !isSupported(engineCommand)}
             title={!isSupported(engineCommand) ? unsupportedTitle : undefined}
             className={cn(
@@ -263,9 +279,14 @@ export function ControlPanel({
 
         {/* Security Lock */}
         <div className="mt-4">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-            {t('vehicleControl.securityLock')}
-          </p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+              {t('vehicleControl.securityLock')}
+            </p>
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              {isLocked ? t('vehicleControl.locked') : t('vehicleControl.unlocked')}
+            </span>
+          </div>
           <button
             type="button"
             onClick={() => runCommand(lockCommand)}
@@ -278,10 +299,12 @@ export function ControlPanel({
                 : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400'
             )}
           >
+            {/* The action, not the state: it used to read "Locked" on the
+                button that unlocks (FA-221). */}
             {pending === 'lock' || pending === 'unlock'
               ? <Loader2 className="h-4 w-4 animate-spin" />
-              : isLocked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
-            {isLocked ? t('vehicleControl.locked') : t('vehicleControl.unlocked')}
+              : isLocked ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+            {isLocked ? t('vehicleControl.unlockAction') : t('vehicleControl.lockAction')}
           </button>
         </div>
 
@@ -364,7 +387,7 @@ export function ControlPanel({
             type="button"
             // Confirmed, not fired on the click: this cuts the engine of a
             // vehicle that may have a driver on it right now.
-            onClick={() => setConfirmEmergencyStop(true)}
+            onClick={() => setConfirming('emergency_stop')}
             disabled={!!pending || !isSupported('emergency_stop')}
             title={!isSupported('emergency_stop') ? unsupportedTitle : undefined}
             className="mt-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 text-sm font-bold text-white shadow-sm transition-all hover:from-rose-700 hover:to-red-700 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
@@ -382,15 +405,24 @@ export function ControlPanel({
       </Card>
 
       <ConfirmDeleteDialog
-        open={confirmEmergencyStop}
-        onClose={() => setConfirmEmergencyStop(false)}
+        open={confirming !== null}
+        onClose={() => setConfirming(null)}
         onConfirm={() => {
-          setConfirmEmergencyStop(false);
-          void runCommand('emergency_stop');
+          const action = confirming;
+          setConfirming(null);
+          if (action) void runCommand(action);
         }}
-        title={tv('vehicleControl.emergencyStopConfirmTitle')}
-        description={tv('vehicleControl.emergencyStopConfirmDescription')}
-        confirmLabel={tv('vehicleControl.emergencyStopConfirmAction')}
+        title={confirming === 'stop'
+          ? tv('vehicleControl.stopEngineConfirmTitle')
+          : tv('vehicleControl.emergencyStopConfirmTitle')}
+        description={confirming === 'stop'
+          ? [tv('vehicleControl.stopEngineConfirmDescription'),
+             reportedSpeed ? t('vehicleControl.stopEngineConfirmSpeed', { speed: reportedSpeed }) : '',
+            ].filter(Boolean).join(' ')
+          : tv('vehicleControl.emergencyStopConfirmDescription')}
+        confirmLabel={confirming === 'stop'
+          ? t('vehicleControl.stopEngineConfirmAction')
+          : tv('vehicleControl.emergencyStopConfirmAction')}
       />
 
       {/* Driver Assignment */}

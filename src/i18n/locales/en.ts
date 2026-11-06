@@ -460,6 +460,9 @@ const en = {
     securityLock: 'Security Lock',
     locked: 'Locked',
     unlocked: 'Unlocked',
+    // What the lock button does; `locked` / `unlocked` above say the state.
+    lockAction: 'Lock',
+    unlockAction: 'Unlock',
     speedLimit: 'Speed Limit',
     emergency: 'Emergency',
     emergencyStop: 'EMERGENCY STOP',
@@ -516,6 +519,12 @@ const en = {
     emergencyStopConfirmDescription:
       'An emergency stop cuts the engine and locks the {{vehicle}} immediately, wherever it is. If a driver is riding it, it will stop under them. Only use this when the {{vehicle}} must not keep moving.',
     emergencyStopConfirmAction: 'Emergency stop',
+    // Plain Stop is confirmed too (FA-221): it also cuts a possibly moving vehicle.
+    stopEngineConfirmTitle: 'Stop the engine of this {{vehicle}}?',
+    stopEngineConfirmDescription:
+      'The engine stops at once, wherever the {{vehicle}} is. If a driver is riding it, it will stop under them.',
+    stopEngineConfirmSpeed: 'Last reported speed: {{speed}}.',
+    stopEngineConfirmAction: 'Stop engine',
     speedLimitUnknown: 'Not reported',
     speedLimitUnknownHint:
       'This {{vehicle}} has not reported a speed limit. Setting one below sends it to the device.',
