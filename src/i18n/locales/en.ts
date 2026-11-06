@@ -745,6 +745,11 @@ const en = {
     avgWait: 'Avg Wait: {{minutes}} min',
     todaySwaps: 'Today: {{count}} swaps',
     lastKnownStatus: 'Last known status',
+    // Fast-charging pile popup (FA-321)
+    fastChargingCabinet: 'Fast-Charging Cabinet',
+    portsTotal: '{{count}} ports',
+    avgCharge: 'Avg charge: {{minutes}} min',
+    sessionsToday: 'Sessions today: {{count}}',
   },
   batterySwapping: {
     title: 'Battery Swapping',

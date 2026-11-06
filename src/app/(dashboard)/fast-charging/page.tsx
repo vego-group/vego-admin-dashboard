@@ -19,7 +19,7 @@ import { fastChargingApi } from '@/lib/api';
 import { failureLines, isForbiddenError } from '@/lib/api-errors';
 import { cn } from '@/lib/cn';
 import { sharePercent } from '@/lib/format';
-import type { FastChargingCabinet, BatteryStation, FastChargingStatus } from '@/types';
+import type { FastChargingCabinet, FastChargingStatus } from '@/types';
 import { logger } from '@/lib/logger';
 
 type ViewMode = 'map' | 'card';
@@ -30,7 +30,6 @@ const PAGE_SIZE = 9; // 3-column grid — fills rows evenly
 export default function FastChargingPage() {
   const { t } = useI18n();
   const [cabinets, setCabinets] = useState<FastChargingCabinet[]>([]);
-  const [mapStations, setMapStations] = useState<BatteryStation[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<ViewMode>('map');
   const [tab, setTab] = useState<FilterTab>('all');
@@ -54,21 +53,6 @@ export default function FastChargingPage() {
           setLoadError(undefined);
           setLoaded(true);
           setCabinets(fcData);
-          // Convert piles → BatteryStation shape for the map
-          setMapStations(fcData.map((c) => ({
-            id:                 c.id,
-            name:               c.name,
-            district:           c.district,
-            city:               c.city,
-            coordinates:        c.coordinates,
-            available:          c.availablePorts,
-            charging:           c.chargingPorts,
-            inUse:              c.chargingPorts,
-            totalCapacity:      c.totalPorts,
-            avgWaitTimeMinutes: c.avgChargeTimeMinutes,
-            todaySwaps:         c.todaySessions,
-            type:               'fast_charge' as const,
-          })));
         }
       } catch (err) {
         logger.error('[FastCharging] Failed to load data:', err);
@@ -82,11 +66,22 @@ export default function FastChargingPage() {
     return () => { cancelled = true; };
   }, [reloadKey]);
 
+  // Port totals, for the KPI cards (which say "ports").
   const totals = useMemo(() => ({
     available: cabinets.reduce((s, x) => s + x.availablePorts, 0),
     charging:  cabinets.reduce((s, x) => s + x.chargingPorts,  0),
     error:     cabinets.reduce((s, x) => s + x.errorPorts,     0),
     total:     cabinets.reduce((s, x) => s + x.totalPorts,     0),
+  }), [cabinets]);
+
+  // Cabinet counts, for the tabs: each tab filters cabinets by exactly this
+  // rule. The tabs used to show the port totals, so "Error (7)" could open a
+  // list of one cabinet (FA-321).
+  const tabCounts = useMemo(() => ({
+    all:       cabinets.length,
+    available: cabinets.filter((c) => c.availablePorts > 0).length,
+    charging:  cabinets.filter((c) => c.chargingPorts  > 0).length,
+    error:     cabinets.filter((c) => c.status === 'error').length,
   }), [cabinets]);
 
   const filtered = useMemo(() => {
@@ -117,10 +112,10 @@ export default function FastChargingPage() {
   // Counts only once the piles have loaded: "(0)" after a failure is a claim.
   const counted = (label: string, n: number) => (loaded ? `${label} (${n})` : label);
   const TABS: { value: FilterTab; label: string }[] = [
-    { value: 'all',       label: counted(t('fastCharging.all'),       totals.total) },
-    { value: 'available', label: counted(t('fastCharging.available'), totals.available) },
-    { value: 'charging',  label: counted(t('fastCharging.charging'),  totals.charging) },
-    { value: 'error',     label: counted(t('fastCharging.error'),     totals.error) },
+    { value: 'all',       label: counted(t('fastCharging.all'),       tabCounts.all) },
+    { value: 'available', label: counted(t('fastCharging.available'), tabCounts.available) },
+    { value: 'charging',  label: counted(t('fastCharging.charging'),  tabCounts.charging) },
+    { value: 'error',     label: counted(t('fastCharging.error'),     tabCounts.error) },
   ];
 
   if (forbidden) {
@@ -205,7 +200,7 @@ export default function FastChargingPage() {
         ) : !loaded ? null : view === 'map' ? (
           <>
             <Card className="p-5">
-              <LiveFleetMap height={400} stations={mapStations} />
+              <LiveFleetMap height={400} piles={cabinets} />
             </Card>
 
             {/* Below-map section: Nearby Cabinets */}

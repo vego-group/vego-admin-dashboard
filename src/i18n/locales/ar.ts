@@ -746,6 +746,10 @@ const ar: Translations = {
     avgWait: 'متوسط الانتظار: {{minutes}} دقيقة',
     todaySwaps: 'اليوم: {{count}} عملية تبديل',
     lastKnownStatus: 'آخر حالة معروفة',
+    fastChargingCabinet: 'خزانة شحن سريع',
+    portsTotal: 'المنافذ: {{count}}',
+    avgCharge: 'متوسط الشحن: {{minutes}} دقيقة',
+    sessionsToday: 'جلسات اليوم: {{count}}',
   },
   batterySwapping: {
     title: 'تبديل البطاريات',
