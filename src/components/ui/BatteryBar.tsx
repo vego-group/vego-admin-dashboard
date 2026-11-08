@@ -1,7 +1,8 @@
 import { cn } from '@/lib/cn';
 
 interface BatteryBarProps {
-  value: number;
+  /** 0–100, or nothing when not reported: an empty track, not a red 0. */
+  value: number | null | undefined;
   className?: string;
   showLabel?: boolean;
   size?: 'sm' | 'md';
@@ -15,7 +16,8 @@ function getColor(value: number) {
 }
 
 export function BatteryBar({ value, className, size = 'md' }: BatteryBarProps) {
-  const clamped = Math.max(0, Math.min(100, value));
+  const known   = typeof value === 'number' && Number.isFinite(value);
+  const clamped = known ? Math.max(0, Math.min(100, value)) : 0;
   return (
     <div
       className={cn(
@@ -25,7 +27,7 @@ export function BatteryBar({ value, className, size = 'md' }: BatteryBarProps) {
       )}
     >
       <div
-        className={cn('h-full rounded-full transition-all duration-500', getColor(clamped))}
+        className={cn('h-full rounded-full transition-all duration-500', known ? getColor(clamped) : 'bg-transparent')}
         style={{ width: `${clamped}%` }}
       />
     </div>

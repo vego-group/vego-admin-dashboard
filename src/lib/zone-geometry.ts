@@ -108,6 +108,90 @@ export function polygonsOverlap(a: ZonePoint[], b: ZonePoint[]): boolean {
   return false;
 }
 
+// ── The shape's own outline (FA-325) ─────────────────────────────────────────
+//
+// A zone's outline must not cross or touch itself: a "bow-tie" is not a valid
+// polygon (PostGIS ST_IsValid refuses it) and has no sensible inside. Edges
+// that follow each other meet at their shared vertex by construction — that is
+// not a crossing, even when the path carries straight on through it. Two such
+// edges are only wrong when the second doubles back over the first. Any other
+// pair of edges may not meet at all.
+
+function samePoint(a: ZonePoint, b: ZonePoint): boolean {
+  return Math.abs(a.lat - b.lat) <= EPS && Math.abs(a.lng - b.lng) <= EPS;
+}
+
+/** The points with consecutive repeats (a double click on one spot) removed. */
+function withoutRepeats(points: ZonePoint[]): ZonePoint[] {
+  const out: ZonePoint[] = [];
+  for (const p of points) {
+    if (out.length === 0 || !samePoint(out[out.length - 1], p)) out.push(p);
+  }
+  return out;
+}
+
+/**
+ * Edges `shared`–`a` and `shared`–`b` follow each other through `shared`. True
+ * when they run back over each other: collinear, and leaving `shared` the same
+ * way. Collinear and leaving it in opposite directions is a straight line.
+ */
+function adjacentEdgesOverlap(shared: ZonePoint, a: ZonePoint, b: ZonePoint): boolean {
+  if (orientation(shared, a, b) !== 0) return false;
+  const dot = (a.lng - shared.lng) * (b.lng - shared.lng) + (a.lat - shared.lat) * (b.lat - shared.lat);
+  return dot > 0;
+}
+
+/**
+ * Would the edge from the last point of the open path being drawn to `next`
+ * cross or touch the path's own earlier edges? The edge back to the first
+ * point does not exist yet; {@link closingEdgeCrossesPath} checks it when the
+ * shape is finished. A click on the last point again adds no edge: false.
+ */
+export function newEdgeCrossesPath(path: ZonePoint[], next: ZonePoint): boolean {
+  const pts = withoutRepeats(path);
+  const n = pts.length;
+  if (n === 0) return false;
+  const last = pts[n - 1];
+  if (samePoint(last, next)) return false;
+  // The edge just before meets the new one at `last`, and may only meet it there.
+  if (n >= 2 && adjacentEdgesOverlap(last, pts[n - 2], next)) return true;
+  // Every earlier edge, pts[i]–pts[i+1] for i = 0 … n-3: no contact at all.
+  for (let i = 0; i + 1 < n - 1; i++) {
+    if (segmentsIntersect(pts[i], pts[i + 1], last, next)) return true;
+  }
+  return false;
+}
+
+/**
+ * Would closing the path — the edge from its last point back to its first —
+ * cross or touch the path's own edges? False for fewer than 3 distinct points,
+ * which are not a shape yet.
+ */
+export function closingEdgeCrossesPath(path: ZonePoint[]): boolean {
+  const pts = withoutRepeats(path);
+  const n = pts.length;
+  if (n < 3) return false;
+  const first = pts[0];
+  const last = pts[n - 1];
+  // It meets the last edge at `last` and the first edge at `first`, only there.
+  if (adjacentEdgesOverlap(last, pts[n - 2], first)) return true;
+  if (adjacentEdgesOverlap(first, pts[1], last)) return true;
+  // Every other edge, pts[i]–pts[i+1] for i = 1 … n-3: no contact at all.
+  for (let i = 1; i + 1 < n - 1; i++) {
+    if (segmentsIntersect(pts[i], pts[i + 1], last, first)) return true;
+  }
+  return false;
+}
+
+/** True when the closed outline through `points` crosses or touches itself. */
+export function outlineCrossesItself(points: ZonePoint[]): boolean {
+  const pts = withoutRepeats(points);
+  for (let k = 1; k < pts.length; k++) {
+    if (newEdgeCrossesPath(pts.slice(0, k), pts[k])) return true;
+  }
+  return closingEdgeCrossesPath(pts);
+}
+
 /** Every existing zone whose polygon overlaps `polygon`. */
 export function findOverlappingZones(
   polygon: ZonePoint[],

@@ -9,8 +9,8 @@
  * Auth prefix:  /fleet-admin/*
  */
 
-import { ApiError, apiClient } from '@/lib/api/client';
-import { isFieldLevelError } from '@/lib/api-errors';
+import { ApiError, apiClient, DeclinedError, isTimeoutError, PAYMENT_TIMEOUT_MS } from '@/lib/api/client';
+import { serverMessage } from '@/lib/api-errors';
 import {
   SEEDED_COUNTRIES,
   matchesPhoneRegex,
@@ -53,15 +53,16 @@ import type {
   DashboardMetrics,
   DeviceStatus,
   DialCode,
+  DocumentStatus,
   Driver,
   DriverDocuments,
   DriverSession,
   DriverStatusChangeResult,
   FleetProfile,
+  GpsSignal,
   IoTDevice,
   SessionKind,
   SessionStatus,
-  DriverRegistrationRequest,
   FastChargingCabinet,
   FastChargingStatus,
   Notification,
@@ -115,6 +116,12 @@ interface ApiDriver {
   driving_license_number?: string | null;
   driving_license_expiry?: string | null;
   driving_license_file?: string | null;
+  /**
+   * Signed link to the licence image, on the driver detail (backend note
+   * 2026-11-05). Like every document `file_url`, it expires 15 minutes after
+   * it is issued: never store it, fetch the driver again when it is needed.
+   */
+  driving_license_file_url?: string | null;
   plate_number?: string | null;
   has_license?: boolean;
   // Document status on list rows (added with the upload feature)
@@ -123,11 +130,8 @@ interface ApiDriver {
   // Motorcycle — list returns assigned_motorcycle, show returns motorcycle
   assigned_motorcycle?: { id?: number; model_name?: string; model?: string; plate_number?: string } | null;
   motorcycle?: { id?: number; model_name?: string; model?: string; plate_number?: string } | null;
-  // Stats — not present in list/show response yet; will be 0 until backend adds them
-  trips_count?: number;
-  total_cost?: number;
-  charges_count?: number;
-  swaps_count?: number;
+  // No per-driver activity or cost: the list and show responses carry none, and
+  // the platform has no trips (FA-217). A column that always read 0 is gone.
   // Wallet balance — the show endpoint returns the money object; the list
   // response still carries a flat scalar in the fleet's own currency.
   wallet_balance?: string | number;
@@ -180,7 +184,6 @@ interface ApiMotorcycle {
   // Real API: assigned_user; legacy: driver
   assigned_user?: { id: number | string; name: string } | null;
   driver?: { id: number | string; name: string };
-  last_trip_at?: string;
   total_distance_km?: number;
   estimated_range_km?: number;
   speed_limit_kmh?: number;
@@ -325,35 +328,47 @@ interface ApiNotification {
   read_at?: string | null;
 }
 
-interface ApiRegistrationRequest {
-  id: number | string;
-  user_id?: number | string;
-  name?: string;
-  first_name?: string;
-  last_name?: string;
-  phone?: string;
-  email?: string;
-  created_at?: string;
-  requested_at?: string;
-  account_status?: string;
-  status?: string;
-  driving_license?: {
-    status?: string;
-    license_number?: string;
-    expiry_date?: string;
-  };
-  plate?: { status?: string; plate_number?: string };
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Mappers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function toDocStatus(s?: string): 'not_uploaded' | 'pending' | 'verified' | 'rejected' {
-  if (s === 'approved') return 'verified';
-  if (s === 'pending')  return 'pending';
-  if (s === 'rejected') return 'rejected';
-  return 'not_uploaded';
+/**
+ * A driver document's review status, as this app shows it.
+ *
+ * The backend model stores `approved`; its API docs say `verified`. Both mean
+ * the same thing and both are read as verified (FA-202). Only `approved` used
+ * to be, so a `verified` licence showed "Not uploaded" and its driver "0/3
+ * verified".
+ *
+ * A status the payload leaves out is **never** read as verified (FA-226). A
+ * file on record with no status is waiting for review ("Pending review"); no
+ * file is nothing to review. An unknown value is logged once and read the same
+ * way. ⏳ The exact enum on list, show and upload is being confirmed (D1.4).
+ */
+const DOC_STATUS_BY_VALUE: Readonly<Record<string, DocumentStatus>> = {
+  approved:     'verified',
+  verified:     'verified',
+  pending:      'pending',
+  rejected:     'rejected',
+  not_uploaded: 'not_uploaded',
+};
+
+const warnedDocStatuses = new Set<string>();
+
+function toDocStatus(raw: string | null | undefined, hasFile = false): DocumentStatus {
+  const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (value) {
+    const known = DOC_STATUS_BY_VALUE[value];
+    if (known) return known;
+    if (!warnedDocStatuses.has(value)) {
+      warnedDocStatuses.add(value);
+      logger.warn(
+        `[driversApi] Unknown document status "${raw}"; showing it as ` +
+        `${hasFile ? 'pending review' : 'not uploaded'}.`,
+      );
+    }
+  }
+  return hasFile ? 'pending' : 'not_uploaded';
 }
 
 function toDriverStatus(s?: string): Driver['status'] {
@@ -391,6 +406,14 @@ function normalizeCancelledSessions(
   };
 }
 
+/** A 2xx status-change answer, read without inventing the status it omitted. */
+function toStatusChangeResult(res: StatusChangeResponse | undefined): DriverStatusChangeResult {
+  return {
+    status: res?.data?.status ? toDriverStatus(res.data.status) : null,
+    cancelled_sessions: normalizeCancelledSessions(res?.data?.cancelled_sessions),
+  };
+}
+
 function toVehicleStatus(s?: string): VehicleStatus {
   if (s === 'active')      return 'active';
   if (s === 'charging')    return 'charging';
@@ -420,18 +443,20 @@ function mapDriver(d: ApiDriver): Driver {
   const plate   = d.plate;
   const customs = d.customs_card;
 
-  const hasLicense   = d.has_license ?? license?.has_license ?? !!license;
   const licenseNum   = license?.number ?? license?.license_number ?? d.driving_license_number ?? undefined;
-  const licenseFile  = d.driving_license_file;
-  // Prefer the explicit status (nested object or flat list field); else infer.
-  const licenseStatus =
-    license?.status ?? d.driving_license_status
-      ? toDocStatus(license?.status ?? d.driving_license_status ?? undefined)
-      : licenseNum || licenseFile
-        ? 'verified'
-        : hasLicense
-          ? 'pending'
-          : 'not_uploaded';
+  // The explicit status (nested block, or the list's flat field) when there is
+  // one. Without it, a licence image on record is "Pending review" — never
+  // "Verified", which only a reviewer can make it (FA-226). A licence number
+  // alone is not a reviewable document.
+  const licenseFileUrl = license?.file_url ?? d.driving_license_file_url ?? undefined;
+  const hasLicenseFile = !!(licenseFileUrl || license?.back_file_url || d.driving_license_file);
+  const licenseStatus  = toDocStatus(license?.status ?? d.driving_license_status, hasLicenseFile);
+  // The saved answer when the payload has one (FA-212). Otherwise, whether
+  // there is anything licence-shaped on record. Not `!!license`: the detail
+  // endpoint sends a `driving_license` block even when it is "not_uploaded",
+  // which made every driver read as "Has licence".
+  const hasLicense = d.has_license ?? license?.has_license
+    ?? (licenseStatus !== 'not_uploaded' || !!licenseNum);
 
   // The document block is the truth and the flat column is the fallback, in that
   // order: a detail edited on a driver who has a licence or plate on file is
@@ -444,13 +469,13 @@ function mapDriver(d: ApiDriver): Driver {
       hasLicense,
       number:          licenseNum,
       expiryDate:      license?.expiry_date ?? d.driving_license_expiry ?? undefined,
-      fileUrl:         license?.file_url,
+      fileUrl:         licenseFileUrl,
       backFileUrl:     license?.back_file_url,
       rejectionReason: license?.rejection_reason ?? undefined,
     },
     customsCard: { status: toDocStatus(customs?.status) },
     plate: {
-      status:          toDocStatus(plate?.status ?? d.plate_status ?? undefined),
+      status:          toDocStatus(plate?.status ?? d.plate_status, !!plate?.file_url),
       number:          plate?.number ?? plate?.plate_number ?? d.plate_number ?? undefined,
       fileUrl:         plate?.file_url,
       rejectionReason: plate?.rejection_reason ?? undefined,
@@ -471,10 +496,6 @@ function mapDriver(d: ApiDriver): Driver {
     assignedMotorcycleId:    moto?.id != null ? String(moto.id) : undefined,
     assignedMotorcyclePlate: moto?.plate_number ?? undefined,
     status:       toDriverStatus(d.status),
-    trips:        d.trips_count ?? 0,
-    totalCost:    d.total_cost ?? 0,
-    charges:      d.charges_count ?? 0,
-    swaps:        d.swaps_count ?? 0,
     walletBalance: moneyToNumber(readMoney(d.wallet, { amount: d.wallet_balance })),
     dialCode:       toDialCode(d.country_code),
     isoCountryCode: toIsoCountryCode(d.iso_country_code),
@@ -501,11 +522,22 @@ function toSupportedCommands(raw: unknown): string[] | undefined {
     .filter(Boolean);
 }
 
+/**
+ * A GPS fix quality as the device reported it, or 'unknown' when it reported
+ * none. A missing value used to read 'strong' (FA-218, FA-311).
+ */
+function toGpsSignal(raw: unknown): GpsSignal {
+  const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  return value === 'strong' || value === 'weak' || value === 'none' ? value : 'unknown';
+}
+
 function mapMotorcycle(m: ApiMotorcycle): Vehicle {
   const iot = m.iot_device;
   const gps = iot?.latest_gps;
-  // Real API returns brand + model separately ("VEGO" + "Pro 400"); combine them.
-  const model = [m.brand, m.model_name ?? m.model].filter(Boolean).join(' ').trim() || 'VegoMax Pro';
+  // Real API returns brand + model separately ("VEGO" + "Pro 400"); combine
+  // them. Nothing when it sends neither: this used to say "VegoMax Pro", a
+  // name no vehicle carries (FA-205).
+  const model = [m.brand, m.model_name ?? m.model].filter(Boolean).join(' ').trim() || undefined;
   // Real API driver is `assigned_user`; older shape used `driver`.
   const driver = m.assigned_user ?? m.driver ?? undefined;
 
@@ -513,37 +545,68 @@ function mapMotorcycle(m: ApiMotorcycle): Vehicle {
   // Riyadh — which silently relocated every vehicle that had never reported GPS.
   // For a Jordanian fleet that put the whole offline half of the fleet in another
   // country. A missing position is now missing: the maps drop the marker and the
-  // lists say so. Latitude 0 / longitude 0 are legal values, so the guard tests
-  // for `undefined`, not falsiness.
-  const lat = num(gps?.latitude)  ?? num(m.current_lat) ?? num(iot?.latitude);
-  const lng = num(gps?.longitude) ?? num(m.current_lng) ?? num(iot?.longitude);
-  const coordinates = lat !== undefined && lng !== undefined ? { lat, lng } : undefined;
+  // lists say so. A lone 0 is a legal latitude or longitude; exactly 0 / 0 is
+  // an unlocated row, not a place (FA-328, see readPosition).
+  const coordinates = readPosition(
+    [gps?.latitude, gps?.longitude],
+    [m.current_lat, m.current_lng],
+    [iot?.latitude, iot?.longitude],
+  );
 
   return {
     id:                 String(m.id),
-    plateNumber:        m.plate_number ?? `VH-${m.id}`,
-    model:              model as Vehicle['model'],
+    // The plate as sent, or nothing — never the invented "VH-{id}".
+    plateNumber:        m.plate_number?.trim() || undefined,
+    model,
     status:             toVehicleStatus(m.status),
-    // Real API: battery.battery_percentage is the SOC.
-    batteryLevel:       m.battery?.battery_percentage ?? m.battery?.soc_pct ?? 0,
+    // Real API: battery.battery_percentage is the SOC. Absent stays absent: a
+    // vehicle with no reading is not at 0 % (FA-207).
+    batteryLevel:       readNumber(m.battery?.battery_percentage, m.battery?.soc_pct),
     location:           m.city ?? '',
     coordinates,
     assignedDriverId:   driver ? String(driver.id) : undefined,
     assignedDriverName: driver?.name,
-    lastTripAt:         m.last_trip_at ?? new Date().toISOString(),
-    totalDistanceKm:    m.total_distance_km ?? 0,
-    currentSpeedKmh:    gps?.speed ?? iot?.speed_kmh ?? 0,
-    estimatedRangeKm:   m.estimated_range_km ?? 0,
+    totalDistanceKm:    readNumber(m.total_distance_km),
+    // The last reading, or nothing — 0 km/h is a reading, "no telemetry" is not.
+    currentSpeedKmh:    readNumber(gps?.speed, iot?.speed_kmh),
+    estimatedRangeKm:   readNumber(m.estimated_range_km),
     // No default. This was `?? 80` — a ceiling no fleet had set, shown back to
     // the operator as theirs, on a slider that stopped at 45. Unknown is
     // unknown; the control panel says so rather than picking a number.
     speedLimitKmh:      m.speed_limit_kmh ?? undefined,
     isLocked:           m.is_locked ?? false,
     isEngineRunning:    m.is_engine_running ?? false,
-    gpsSignal:          (gps?.gps_signal ?? iot?.gps_signal ?? 'strong') as Vehicle['gpsSignal'],
-    isOnline:           iot?.is_online ?? false,
+    gpsSignal:          toGpsSignal(gps?.gps_signal ?? iot?.gps_signal),
+    // Absent stays absent: a device that reported nothing is not known to be
+    // offline, and must not be drawn grey and "Offline" on that guess.
+    isOnline:           typeof iot?.is_online === 'boolean' ? iot.is_online : undefined,
+    lastSeenAt:         iot?.last_seen_at || undefined,
     supportedCommands:  toSupportedCommands(m.supported_commands ?? iot?.supported_commands),
   };
+}
+
+/**
+ * A map position from the first `[lat, lng]` source that carries one, or
+ * **undefined**.
+ *
+ * Each pair is read as a pair, never the latitude of one source with the
+ * longitude of the next. A pair is a position only when both halves read as
+ * numbers within range and it is not exactly 0 / 0 (FA-328). That point is in
+ * the Gulf of Guinea, and it is what an unlocated row looks like when the
+ * column defaults to `"0.00000000"`: it used to drop a pin at sea and stretch
+ * the map fit to the whole world. A 0 / 0 source falls through to the next
+ * one. A lone 0 stays: the equator and the prime meridian are real places.
+ */
+function readPosition(...sources: Array<[unknown, unknown]>): { lat: number; lng: number } | undefined {
+  for (const [rawLat, rawLng] of sources) {
+    const lat = num(rawLat);
+    const lng = num(rawLng);
+    if (lat === undefined || lng === undefined) continue;
+    if (lat === 0 && lng === 0) continue;
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
+    return { lat, lng };
+  }
+  return undefined;
 }
 
 /**
@@ -554,14 +617,13 @@ function mapMotorcycle(m: ApiMotorcycle): Vehicle {
  * site with no coordinate is unlocated; it is dropped from maps and labelled in
  * lists. Both fields must resolve: a lone latitude is not a position.
  *
- * The backend sends these as strings ("24.71360000"), hence `num()`.
+ * The backend sends these as strings ("24.71360000"), hence `num()`; and
+ * "0.00000000" / "0.00000000" is unlocated, not a site at sea (FA-328).
  */
 function readSiteCoordinates(
   s: { lat?: string | number; lng?: string | number; latitude?: number; longitude?: number },
 ): { lat: number; lng: number } | undefined {
-  const lat = num(s.lat) ?? num(s.latitude);
-  const lng = num(s.lng) ?? num(s.longitude);
-  return lat !== undefined && lng !== undefined ? { lat, lng } : undefined;
+  return readPosition([s.lat, s.lng], [s.latitude, s.longitude]);
 }
 
 function mapCabinet(c: ApiCabinet): SwappingStation {
@@ -649,6 +711,13 @@ const DEBIT_TYPES = new Set([
 ]);
 
 /**
+ * Transaction `type` values that move money **into** the wallet: the stored
+ * `credit`, the legacy top-up spellings and `refund`. Bonuses are matched
+ * through `BONUS_TX_TYPES` / `ledger_type` in {@link toDirection}.
+ */
+const CREDIT_TYPES = new Set(['credit', 'top_up', 'topup', 'refund']);
+
+/**
  * Which way the money moved.
  *
  * The backend's `direction` is authoritative when present. Otherwise the *type*
@@ -657,11 +726,19 @@ const DEBIT_TYPES = new Set([
  * **positive** amount with `type: "debit"`, and a negative passed in is
  * normalised to its magnitude on write. Reading the sign was exactly why debits
  * rendered green as credits.
+ *
+ * A type no document names, with no `direction`, is `'unknown'` (FA-411): a
+ * hold, capture or release row must not read as income. It used to default to
+ * `'in'`, a green "+".
  */
 function toDirection(tx: ApiTransaction): TransactionDirection {
   const raw = (tx.direction ?? '').toLowerCase();
   if (raw === 'in' || raw === 'out') return raw;
-  return DEBIT_TYPES.has(tx.type ?? '') || tx.ledger_type === 'bonus_reversal' ? 'out' : 'in';
+  const type   = tx.type ?? '';
+  const ledger = tx.ledger_type ?? '';
+  if (DEBIT_TYPES.has(type) || ledger === 'bonus_reversal') return 'out';
+  if (CREDIT_TYPES.has(type) || BONUS_TX_TYPES.includes(type) || ledger === 'bonus') return 'in';
+  return 'unknown';
 }
 
 /**
@@ -1223,21 +1300,190 @@ function extractList<T>(raw: unknown): T[] {
   return [];
 }
 
-// Shape returned by getBattery()
+/**
+ * One page of a paginated list, with the server's counts **when it sent them**
+ * (FA-302, FA-306, FA-224).
+ *
+ * `lastPage` and `total` are absent when the response carried no paginator
+ * counts. Callers must then say the list may be incomplete whenever a full page
+ * came back, never present it as everything there is.
+ */
+export interface ListPage<T> {
+  rows: T[];
+  /** The page these rows are, 1-based. */
+  page: number;
+  perPage: number;
+  lastPage?: number;
+  /** Rows matching the filters across all pages. */
+  total?: number;
+}
+
+const warnedListEnvelopes = new Set<string>();
+
+/**
+ * Read one page of rows and its paginator counts, whichever Laravel shape the
+ * endpoint uses. ⏳ D1.3: the envelope of sessions, alarms, IoT devices and
+ * notifications is not confirmed, so all three shapes are accepted:
+ *
+ *     { data: [...], meta: { current_page, last_page, per_page, total } }   resource collection
+ *     { data: { data: [...], current_page, last_page, per_page, total } }   wrapped paginator
+ *     { data: [...], current_page, last_page, per_page, total }             bare paginator
+ *
+ * Anything else (a bare array, a `data` array with no counts) keeps its rows,
+ * comes back without `lastPage`/`total`, and is logged once per endpoint.
+ */
+function readListPage<T>(
+  raw: unknown,
+  requested: { page: number; perPage: number },
+  endpoint: string,
+  { warnWithoutCounts = true }: { warnWithoutCounts?: boolean } = {},
+): ListPage<T> {
+  const rows = extractList<T>(raw);
+  const asRecord = (v: unknown): Record<string, unknown> | undefined =>
+    v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined;
+  const top = asRecord(raw);
+  const counts = [asRecord(top?.['meta']), asRecord(top?.['data']), top]
+    .find((c) => c !== undefined && 'current_page' in c && ('last_page' in c || 'total' in c));
+
+  if (!counts) {
+    if (warnWithoutCounts && !warnedListEnvelopes.has(endpoint)) {
+      warnedListEnvelopes.add(endpoint);
+      logger.warn(
+        `[API] ${endpoint} sent no paginator counts (current_page/last_page/total); ` +
+        'the list is shown as "may be incomplete" whenever a full page comes back.',
+      );
+    }
+    return { rows, page: requested.page, perPage: requested.perPage };
+  }
+
+  const int = (v: unknown): number | undefined => {
+    const n = typeof v === 'string' ? Number(v) : v;
+    return typeof n === 'number' && Number.isInteger(n) && n >= 0 ? n : undefined;
+  };
+  const perPage  = int(counts['per_page']) || requested.perPage;
+  const total    = int(counts['total']);
+  const lastPage = int(counts['last_page'])
+    ?? (total !== undefined ? Math.max(1, Math.ceil(total / perPage)) : undefined);
+  return {
+    rows,
+    page: int(counts['current_page']) || requested.page,
+    perPage,
+    lastPage: lastPage !== undefined ? Math.max(1, lastPage) : undefined,
+    total,
+  };
+}
+
+/** Rows per request, and the page cap, when a whole list is walked (FA-224). */
+const WHOLE_LIST_PER_PAGE = 100;
+const WHOLE_LIST_MAX_PAGES = 50;
+
+/**
+ * Every row of a list the UI needs whole: pickers, KPIs, maps and the
+ * client-side tabs and search of drivers, vehicles, cabinets, piles and zones
+ * (FA-224).
+ *
+ * These were fetched with no paging params and only `data` was read, so a
+ * paginated answer (Laravel's default is 15 rows) would have shown page 1
+ * everywhere without a word. Now each page asks for 100 rows and `last_page` is
+ * followed. A response without paginator counts is taken as the whole list, as
+ * before. ⏳ D1.3: if an endpoint refuses `per_page`/`page` (422), the plain
+ * request is sent instead, so this can never break a list that works today.
+ */
+async function fetchAllRows<T>(path: string): Promise<T[]> {
+  const sep = path.includes('?') ? '&' : '?';
+  const rows: T[] = [];
+  for (let page = 1; page <= WHOLE_LIST_MAX_PAGES; page++) {
+    let raw: unknown;
+    try {
+      raw = await apiClient.get<unknown>(`${path}${sep}per_page=${WHOLE_LIST_PER_PAGE}&page=${page}`);
+    } catch (err) {
+      if (page === 1 && err instanceof ApiError && err.status === 422) {
+        logger.warn(`[API] ${path} refused per_page/page (422); fetching it without them.`);
+        return extractList<T>(await apiClient.get<unknown>(path));
+      }
+      throw err;
+    }
+    const result = readListPage<T>(raw, { page, perPage: WHOLE_LIST_PER_PAGE }, path, { warnWithoutCounts: false });
+    rows.push(...result.rows);
+    if (result.lastPage === undefined || page >= result.lastPage || result.rows.length === 0) return rows;
+  }
+  logger.warn(
+    `[API] ${path}: stopped after ${WHOLE_LIST_MAX_PAGES} pages (${rows.length} rows); ` +
+    'the rest of the list is not shown.',
+  );
+  return rows;
+}
+
+/**
+ * What `GET …/motorcycles/{id}/battery` reported. **Every field is absent when
+ * the payload does not carry it**: these used to default to 0, and the details
+ * card then preferred that 0 over the list's real SOC and showed 0 % / 0 km
+ * (FA-207).
+ */
 export interface MotorcycleBattery {
-  level: number;          // soc_pct  0-100
-  sohPct?: number;        // state-of-health %
-  rangeKm: number;        // estimated_range_km
+  level?: number;         // state of charge, 0–100
+  sohPct?: number;        // state of health, %
+  rangeKm?: number;
   voltage?: number;
   temperature?: number;
 }
 
-// Shape returned by getStatistics()
+/**
+ * What `GET …/motorcycles/{id}/statistics` reported, every field absent when
+ * missing. No trips: the platform has none — activity is swap and charging
+ * sessions (FA-206).
+ */
 export interface MotorcycleStatistics {
-  trips: number;
-  swaps: number;
-  alarms: number;
-  totalDistanceKm: number;
+  swaps?: number;
+  charges?: number;
+  alarms?: number;
+  totalDistanceKm?: number;
+}
+
+/**
+ * A finite number from a payload field, or **undefined**. Takes the first
+ * candidate that is a number, a numeric string ("24.5"), or an object with a
+ * numeric `total` — the statistics endpoint is recorded as nesting its counts
+ * (`swap_sessions.total`, `alarms.total`). `Number()` on such an object is
+ * NaN, and "NaN" was what the Alarms card showed (FA-206).
+ */
+function readNumber(...candidates: unknown[]): number | undefined {
+  for (const raw of candidates) {
+    const value = raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? (raw as { total?: unknown }).total
+      : raw;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim() !== '') {
+      const n = Number(value);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return undefined;
+}
+
+/** A plain object, or undefined. */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+/** A single-resource answer's payload: `{ data: {...} }` or the object itself. */
+function payloadRecord(res: unknown): Record<string, unknown> {
+  const obj = asRecord(res) ?? {};
+  return asRecord(obj.data) ?? obj;
+}
+
+const warnedShapes = new Set<string>();
+
+/** Log, once per endpoint, a 2xx whose fields we could not find. */
+function warnUnreadShape(endpoint: string, payload: Record<string, unknown>): void {
+  if (warnedShapes.has(endpoint)) return;
+  warnedShapes.add(endpoint);
+  logger.warn(
+    `[fleetApi] ${endpoint} answered without any field this page reads; showing "—". ` +
+    `Keys: ${Object.keys(payload).join(', ') || '(none)'}`,
+  );
 }
 
 // ── Vehicle control commands ─────────────────────────────────────────────────
@@ -1276,7 +1522,7 @@ export interface VehicleControlState {
  */
 export type VehicleCommandOutcome =
   | { ok: true;  state: VehicleControlState }
-  | { ok: false; reason: 'unsupported' | 'failed'; message: string | null };
+  | { ok: false; reason: 'unsupported' | 'failed' | 'unconfirmed'; message: string | null };
 
 /**
  * Does this failure mean the device cannot do this, rather than that the attempt
@@ -1316,8 +1562,7 @@ function intendedState(action: VehicleCommand, speedLimit?: number): VehicleCont
 
 export const fleetApi = {
   async list(): Promise<Vehicle[]> {
-    const raw = await apiClient.get<unknown>('/fleet-admin/motorcycles');
-    return extractList<ApiMotorcycle>(raw).map(mapMotorcycle);
+    return (await fetchAllRows<ApiMotorcycle>('/fleet-admin/motorcycles')).map(mapMotorcycle);
   },
 
   async getById(id: string): Promise<Vehicle | null> {
@@ -1332,64 +1577,71 @@ export const fleetApi = {
     }
   },
 
-  /** Real-time battery state + latest log */
+  /**
+   * Battery state + latest log. The shape is unconfirmed (⏳ D1.1), so both
+   * the flat form and the nested ones (`battery`, `latest_log`,
+   * `latest_battery`) are read, flat first. A field none of them carries is
+   * left out, never 0.
+   */
   async getBattery(id: string): Promise<MotorcycleBattery | null> {
     try {
       const res = await apiClient.get<unknown>(`/fleet-admin/motorcycles/${id}/battery`);
-      const obj = res as Record<string, unknown>;
-      const d   = (obj.data && typeof obj.data === 'object'
-        ? obj.data : obj) as Record<string, unknown>;
-      return {
-        level:       Number(d.soc_pct       ?? d.battery_level  ?? 0),
-        sohPct:      d.soh_pct       != null ? Number(d.soh_pct)       : undefined,
-        rangeKm:     Number(d.estimated_range_km ?? d.range_km ?? 0),
-        voltage:     d.voltage       != null ? Number(d.voltage)       : undefined,
-        temperature: d.temperature   != null ? Number(d.temperature)   : undefined,
+      const d = payloadRecord(res);
+      const sources = [d, asRecord(d.battery), asRecord(d.latest_log), asRecord(d.latest_battery)]
+        .filter((s): s is Record<string, unknown> => !!s);
+      const pick = (...keys: string[]) => readNumber(...sources.flatMap((s) => keys.map((k) => s[k])));
+      const battery: MotorcycleBattery = {
+        level:       pick('battery_percentage', 'soc_pct', 'soc', 'battery_level'),
+        sohPct:      pick('soh_pct', 'soh'),
+        rangeKm:     pick('estimated_range_km', 'range_km'),
+        voltage:     pick('voltage'),
+        temperature: pick('temperature'),
       };
+      if (Object.values(battery).every((v) => v === undefined)) warnUnreadShape('GET …/battery', d);
+      return battery;
     } catch {
       return null;
     }
   },
 
-  /** Trip / swap / alarm statistics for a motorcycle */
+  /**
+   * Swap / charging / alarm counts for a motorcycle. Reads the nested
+   * `{ swap_sessions: { total } }` shape recorded from the backend and the flat
+   * `*_count` one until the shape is confirmed (⏳ D1.1). No trips (FA-206).
+   */
   async getStatistics(id: string): Promise<MotorcycleStatistics | null> {
     try {
       const res = await apiClient.get<unknown>(`/fleet-admin/motorcycles/${id}/statistics`);
-      const obj = res as Record<string, unknown>;
-      const d   = (obj.data && typeof obj.data === 'object'
-        ? obj.data : obj) as Record<string, unknown>;
-      return {
-        trips:           Number(d.trips_count          ?? d.total_trips  ?? d.trips  ?? 0),
-        swaps:           Number(d.swap_sessions_count  ?? d.total_swaps  ?? d.swaps  ?? 0),
-        alarms:          Number(d.alarms_count         ?? d.total_alarms ?? d.alarms ?? 0),
-        totalDistanceKm: Number(d.total_distance_km    ?? d.distance_km  ?? 0),
+      const top = payloadRecord(res);
+      const d = asRecord(top.statistics) ?? top;
+      const stats: MotorcycleStatistics = {
+        swaps:           readNumber(d.swap_sessions, d.swap_sessions_count, d.total_swaps, d.swaps),
+        charges:         readNumber(d.charging_sessions, d.charging_sessions_count, d.total_charges, d.charges),
+        alarms:          readNumber(d.alarms, d.alarms_count, d.total_alarms),
+        totalDistanceKm: readNumber(d.total_distance_km, d.distance_km),
       };
+      if (Object.values(stats).every((v) => v === undefined)) warnUnreadShape('GET …/statistics', d);
+      return stats;
     } catch {
       return null;
     }
   },
 
-  /** Assign a driver — body: { user_id } */
-  async assignDriver(motorcycleId: string, driverId: string): Promise<boolean> {
-    try {
-      await apiClient.post(
-        `/fleet-admin/motorcycles/${motorcycleId}/assign-driver`,
-        { user_id: Number(driverId) },
-      );
-      return true;
-    } catch {
-      return false;
-    }
+  /**
+   * Assign a driver — body: { user_id }. A refusal **throws** the ApiError, so
+   * the picker can show the backend's reason (driver already riding, vehicle
+   * not in this fleet…) instead of a generic "failed" (FA-201, FA-243).
+   */
+  async assignDriver(motorcycleId: string, driverId: string): Promise<void> {
+    await apiClient.post(
+      `/fleet-admin/motorcycles/${motorcycleId}/assign-driver`,
+      { user_id: Number(driverId) },
+    );
   },
 
-  /** Unassign the current driver */
-  async unassignDriver(motorcycleId: string): Promise<boolean> {
-    try {
-      await apiClient.delete(`/fleet-admin/motorcycles/${motorcycleId}/assign-driver`);
-      return true;
-    } catch {
-      return false;
-    }
+  /** Unassign the current driver. Throws the ApiError on a refusal. */
+  async unassignDriver(motorcycleId: string): Promise<void> {
+    await apiClient.delete(`/fleet-admin/motorcycles/${motorcycleId}/assign-driver`);
   },
 
   /**
@@ -1429,6 +1681,7 @@ export const fleetApi = {
       };
     } catch (err) {
       const unsupported = isUnsupportedCommand(err);
+      const timedOut    = isTimeoutError(err);
       logger.warn(
         `[fleetApi] Command "${action}" on motorcycle ${motorcycleId} ` +
         `${unsupported ? 'is not supported by this device' : 'failed'}:`,
@@ -1436,10 +1689,14 @@ export const fleetApi = {
       );
       return {
         ok: false,
-        reason: unsupported ? 'unsupported' : 'failed',
-        // The backend's own sentence when it wrote one — it knows more about why
-        // than any message this layer could compose.
-        message: err instanceof ApiError && err.message ? err.message : null,
+        // No answer in time: the command may have reached the vehicle, so the
+        // panel must not say "nothing has changed".
+        reason: unsupported ? 'unsupported' : timedOut ? 'unconfirmed' : 'failed',
+        // The backend's own sentence when it wrote one ("must be between 10 and
+        // 80") — it knows more about why than any message this layer could
+        // compose. Null for no answer and for a bare "HTTP 500", which the
+        // panel words itself, in the UI language.
+        message: serverMessage(err),
       };
     }
   },
@@ -1451,9 +1708,8 @@ export const fleetApi = {
 
 export const stationsApi = {
   async list(): Promise<BatteryStation[]> {
-    const raw = await apiClient.get<unknown>('/fleet-admin/cabinets');
     // One cabinet mapper, then a projection — see toBatteryStation.
-    return extractList<ApiCabinet>(raw).map(mapCabinet).map(toBatteryStation);
+    return (await fetchAllRows<ApiCabinet>('/fleet-admin/cabinets')).map(mapCabinet).map(toBatteryStation);
   },
 };
 
@@ -1504,8 +1760,7 @@ export interface DriverDocumentUploadInput {
 
 export const driversApi = {
   async list(): Promise<Driver[]> {
-    const raw = await apiClient.get<unknown>('/fleet-admin/drivers');
-    return extractList<ApiDriver>(raw).map(mapDriver);
+    return (await fetchAllRows<ApiDriver>('/fleet-admin/drivers')).map(mapDriver);
   },
 
   /** Full driver detail — includes document file_url / rejection_reason the list omits. */
@@ -1521,10 +1776,13 @@ export const driversApi = {
 
   async create(input: DriverCreateInput): Promise<Driver> {
     // POST /fleet-admin/drivers — only send fields the backend accepts
-    const body: Record<string, string | undefined> = {
+    const body: Record<string, string | boolean | undefined> = {
       name:  input.name,
       phone: input.phone,
     };
+    // "Has licence / No licence" was collected and never sent (FA-212).
+    // ⏳ The backend is confirming it accepts `has_license` on POST and PUT.
+    if (input.documents?.license)                body['has_license']            = input.documents.license.hasLicense;
     if (input.dialCode)                          body['country_code']           = input.dialCode;
     if (input.email)                             body['email']                  = input.email;
     if (input.address)                           body['address']                = input.address;
@@ -1539,49 +1797,49 @@ export const driversApi = {
     return mapDriver(raw);
   },
 
-  async update(id: string, updates: DriverUpdateInput): Promise<Driver | null> {
-    try {
-      // PUT /fleet-admin/drivers/:id — send every field the caller supplied.
-      //
-      // The guards are `!== undefined`, not truthiness. Truthiness meant `''` was
-      // indistinguishable from "not supplied", so an operator could never clear
-      // an email, address or city: the field was dropped and the old value
-      // survived, with the form showing the clear as if it had saved. `undefined`
-      // is "leave alone"; `''` is "clear this", and it is sent as `''`.
-      //
-      // Confirmed: `''` and `null` both clear, for every nullable field here, so
-      // the `''` we already send is right. The two exceptions are `name` and
-      // `phone` — a blank one is a 422 naming the field rather than a silent wipe
-      // (a driver with no phone cannot log in). The form blocks both before they
-      // get here; if one slips through, the 422 is rethrown onto its field below.
-      const body: Record<string, string | undefined> = {};
-      if (updates.name     !== undefined) body['name']         = updates.name;
-      if (updates.phone    !== undefined) body['phone']        = updates.phone;
-      if (updates.dialCode !== undefined) body['country_code'] = updates.dialCode;
-      if (updates.email    !== undefined) body['email']        = updates.email;
-      if (updates.address  !== undefined) body['address']      = updates.address;
-      if (updates.city     !== undefined) body['city']         = updates.city;
+  /**
+   * Save a driver's details. Every failure **throws** the ApiError (FA-201):
+   * this used to return null on anything but a field error, and the form then
+   * closed as if it had saved, discarding the operator's edits. The form now
+   * stays open with the backend's reason.
+   */
+  async update(id: string, updates: DriverUpdateInput): Promise<Driver> {
+    // PUT /fleet-admin/drivers/:id — send every field the caller supplied.
+    //
+    // The guards are `!== undefined`, not truthiness. Truthiness meant `''` was
+    // indistinguishable from "not supplied", so an operator could never clear
+    // an email, address or city: the field was dropped and the old value
+    // survived, with the form showing the clear as if it had saved. `undefined`
+    // is "leave alone"; `''` is "clear this", and it is sent as `''`.
+    //
+    // Confirmed: `''` and `null` both clear, for every nullable field here, so
+    // the `''` we already send is right. The two exceptions are `name` and
+    // `phone` — a blank one is a 422 naming the field rather than a silent wipe
+    // (a driver with no phone cannot log in). The form blocks both before they
+    // get here; if one slips through, the form shows the 422 on its field.
+    const body: Record<string, string | boolean | undefined> = {};
+    if (updates.name     !== undefined) body['name']         = updates.name;
+    if (updates.phone    !== undefined) body['phone']        = updates.phone;
+    if (updates.dialCode !== undefined) body['country_code'] = updates.dialCode;
+    if (updates.email    !== undefined) body['email']        = updates.email;
+    if (updates.address  !== undefined) body['address']      = updates.address;
+    if (updates.city     !== undefined) body['city']         = updates.city;
 
-      // Licence expiry and plate number were accepted by `create` and silently
-      // dropped by `update`. Editing either one alone was a no-op unless the
-      // operator also happened to attach a file, because only the multipart
-      // documents endpoint carried them.
-      const license = updates.documents?.license;
-      const plate   = updates.documents?.plate;
-      if (license?.number     !== undefined) body['driving_license_number'] = license.number;
-      if (license?.expiryDate !== undefined) body['driving_license_expiry'] = license.expiryDate;
-      if (plate?.number       !== undefined) body['plate_number']           = plate.number;
+    // Licence expiry and plate number were accepted by `create` and silently
+    // dropped by `update`. Editing either one alone was a no-op unless the
+    // operator also happened to attach a file, because only the multipart
+    // documents endpoint carried them.
+    const license = updates.documents?.license;
+    const plate   = updates.documents?.plate;
+    // Persist the operator's "Has licence / No licence" answer (FA-212).
+    if (license?.hasLicense !== undefined) body['has_license']            = license.hasLicense;
+    if (license?.number     !== undefined) body['driving_license_number'] = license.number;
+    if (license?.expiryDate !== undefined) body['driving_license_expiry'] = license.expiryDate;
+    if (plate?.number       !== undefined) body['plate_number']           = plate.number;
 
-      const res = await apiClient.put<{ data: ApiDriver } | ApiDriver>(`/fleet-admin/drivers/${id}`, body);
-      const raw = (res as { data?: ApiDriver }).data ?? (res as ApiDriver);
-      return mapDriver(raw);
-    } catch (err) {
-      // A rejected country or phone is the operator's to fix, and the form can
-      // only show it next to the field if it survives this catch. Everything else
-      // keeps the historical null-on-failure contract.
-      if (isFieldLevelError(err)) throw err;
-      return null;
-    }
+    const res = await apiClient.put<{ data: ApiDriver } | ApiDriver>(`/fleet-admin/drivers/${id}`, body);
+    const raw = (res as { data?: ApiDriver }).data ?? (res as ApiDriver);
+    return mapDriver(raw);
   },
 
   /**
@@ -1617,7 +1875,7 @@ export const driversApi = {
 
     const lic = res.data?.driving_license;
     const pl  = res.data?.plate;
-    const licStatus = toDocStatus(lic?.status);
+    const licStatus = toDocStatus(lic?.status, !!(lic?.file_url || lic?.back_file_url));
     return {
       license: {
         status:          licStatus,
@@ -1629,7 +1887,7 @@ export const driversApi = {
         rejectionReason: lic?.rejection_reason ?? undefined,
       },
       plate: {
-        status:          toDocStatus(pl?.status),
+        status:          toDocStatus(pl?.status, !!pl?.file_url),
         number:          pl?.number,
         fileUrl:         pl?.file_url,
         rejectionReason: pl?.rejection_reason ?? undefined,
@@ -1639,127 +1897,34 @@ export const driversApi = {
 
   /**
    * Toggle active ↔ inactive. Returns the new status plus any sessions the
-   * backend cancelled (present only when the result is `inactive`), or null on error.
+   * backend cancelled (present only when the result is `inactive`).
+   *
+   * A refusal **throws** the ApiError (FA-210): it used to return null, and
+   * the confirmation closed as if the driver had been deactivated. `status`
+   * is null when the server accepted the change without saying the result;
+   * the caller re-reads the driver rather than guess.
    */
-  async toggleStatus(id: string): Promise<DriverStatusChangeResult | null> {
-    try {
-      const res = await apiClient.patch<StatusChangeResponse>(
-        `/fleet-admin/drivers/${id}/toggle-status`,
-      );
-      if (!res.data?.status) return null;
-      return {
-        status: toDriverStatus(res.data.status),
-        cancelled_sessions: normalizeCancelledSessions(res.data.cancelled_sessions),
-      };
-    } catch {
-      return null;
-    }
-  },
-
-  /**
-   * Block a driver. Returns the new status ('blocked') plus any sessions the
-   * backend cancelled, or null on error.
-   */
-  async block(id: string): Promise<DriverStatusChangeResult | null> {
-    try {
-      const res = await apiClient.patch<StatusChangeResponse>(
-        `/fleet-admin/drivers/${id}/block`,
-      );
-      if (!res.data?.status) return null;
-      return {
-        status: toDriverStatus(res.data.status),
-        cancelled_sessions: normalizeCancelledSessions(res.data.cancelled_sessions),
-      };
-    } catch {
-      return null;
-    }
-  },
-
-  /** Unblock a driver. Returns the new status ('active') or null on error. */
-  async unblock(id: string): Promise<string | null> {
-    try {
-      const res = await apiClient.patch<{ data?: { id: number | string; status: string } }>(
-        `/fleet-admin/drivers/${id}/unblock`,
-      );
-      return res.data?.status ?? null;
-    } catch {
-      return null;
-    }
-  },
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Registration Requests API
-// ─────────────────────────────────────────────────────────────────────────────
-
-function mapRegistrationRequest(r: ApiRegistrationRequest): DriverRegistrationRequest {
-  const fullName = r.name ?? [r.first_name, r.last_name].filter(Boolean).join(' ');
-  const licStatus = toDocStatus(r.driving_license?.status);
-  const plStatus  = toDocStatus(r.plate?.status);
-  const docs: DriverDocuments = {
-    license: {
-      status:     licStatus,
-      hasLicense: !!r.driving_license,
-      number:     r.driving_license?.license_number,
-      expiryDate: r.driving_license?.expiry_date,
-    },
-    customsCard: { status: 'not_uploaded' },
-    plate: {
-      status: plStatus,
-      number: r.plate?.plate_number,
-    },
-  };
-
-  const reqStatus: DriverRegistrationRequest['status'] =
-    r.account_status === 'approved' || r.status === 'approved' ? 'approved'
-    : r.account_status === 'rejected' || r.status === 'rejected' ? 'rejected'
-    : 'pending';
-
-  return {
-    id:          String(r.id),
-    name:        fullName,
-    phone:       r.phone ?? '',
-    email:       r.email,
-    requestedAt: r.requested_at ?? r.created_at ?? new Date().toISOString(),
-    status:      reqStatus,
-    documents:   docs,
-  };
-}
-
-export const registrationRequestsApi = {
-  async list(): Promise<DriverRegistrationRequest[]> {
-    const raw = await apiClient.get<unknown>(
-      '/fleet-admin/registration-requests?status=under_review&per_page=50',
+  async toggleStatus(id: string): Promise<DriverStatusChangeResult> {
+    const res = await apiClient.patch<StatusChangeResponse>(
+      `/fleet-admin/drivers/${id}/toggle-status`,
     );
-    return extractList<ApiRegistrationRequest>(raw).map(mapRegistrationRequest);
+    return toStatusChangeResult(res);
   },
 
-  async approve(req: DriverRegistrationRequest): Promise<Driver> {
-    const res = await apiClient.post<{ data?: ApiDriver } | ApiDriver>(
-      `/fleet-admin/registration-requests/${req.id}/approve`,
+  /** Block a driver. Same contract as {@link toggleStatus}. */
+  async block(id: string): Promise<DriverStatusChangeResult> {
+    const res = await apiClient.patch<StatusChangeResponse>(
+      `/fleet-admin/drivers/${id}/block`,
     );
-    // Backend now returns the full driver object — try to use it
-    const raw = (res as { data?: ApiDriver }).data ?? (res as ApiDriver);
-    if (raw?.id) return mapDriver(raw as ApiDriver);
-    // Fallback: synthesise from the registration request
-    return {
-      id:           req.id,
-      name:         req.name,
-      phone:        req.phone,
-      email:        req.email,
-      vehicleModel: '',
-      status:       'active',
-      trips:        0,
-      totalCost:    0,
-      charges:      0,
-      swaps:        0,
-      walletBalance: 0,
-      documents:    req.documents,
-    };
+    return toStatusChangeResult(res);
   },
 
-  async reject(id: string, reason: string): Promise<void> {
-    await apiClient.post(`/fleet-admin/registration-requests/${id}/reject`, { reason });
+  /** Unblock a driver. Same contract as {@link toggleStatus}. */
+  async unblock(id: string): Promise<DriverStatusChangeResult> {
+    const res = await apiClient.patch<StatusChangeResponse>(
+      `/fleet-admin/drivers/${id}/unblock`,
+    );
+    return toStatusChangeResult(res);
   },
 };
 
@@ -1783,12 +1948,6 @@ interface ApiZone {
    */
   enforced?: boolean | null;
   created_at?: string;
-}
-
-interface ApiZoneListResponse {
-  success: boolean;
-  data: ApiZone[];
-  meta: { current_page: number; last_page: number; per_page: number; total: number };
 }
 
 interface ApiZoneSingleResponse {
@@ -1903,8 +2062,9 @@ export type ZoneUpdateInput = Partial<Omit<ZoneCreateInput, 'polygon'>> & {
 
 export const zonesApi = {
   async list(): Promise<Zone[]> {
-    const res = await apiClient.get<ApiZoneListResponse>('/fleet-admin/zones?limit=100');
-    return (res.data ?? []).map(mapApiZone);
+    // Every zone: the map, the list and the overlap check all need the whole
+    // set. `?limit=100` was not a Laravel paging param (FA-327).
+    return (await fetchAllRows<ApiZone>('/fleet-admin/zones')).map(mapApiZone);
   },
 
   async create(input: ZoneCreateInput): Promise<Zone> {
@@ -1965,28 +2125,21 @@ interface ApiDashboard {
   /** Backend returns null when the fleet has no data yet */
   average_soc?: number | null;
   average_soh?: number | null;
-  total_trips_today?: number;
-  avg_trip_duration_minutes?: number;
-  /** Backend returns null when no trips have occurred */
+  // No trip counters: the platform has no trips (FA-217).
   success_rate?: number | null;
   /** Money: a scalar on older responses, a currency-aware object on current ones. */
   average_cost_per_motorcycle?: number | string | ApiMoneyFields | null;
   // Confirmed new counters
   total_drivers?: number;
-  active_trips?: number;
   unresolved_alarms?: number;
   online_devices?: number;
   // Real trend field names returned by the backend
-  fleet_trend?: number;
-  drivers_trend?: number;
-  batteries_trend?: number;
-  trips_trend?: number;
-  duration_trend?: number;
+  fleet_trend?: number | string | null;
+  drivers_trend?: number | string | null;
+  batteries_trend?: number | string | null;
   // Legacy names (kept as fallback in case API version changes)
-  total_motorcycles_trend?: number;
-  available_batteries_trend?: number;
-  total_trips_today_trend?: number;
-  avg_trip_duration_minutes_trend?: number;
+  total_motorcycles_trend?: number | string | null;
+  available_batteries_trend?: number | string | null;
 }
 
 interface ApiUsageBucket {
@@ -1999,9 +2152,10 @@ interface ApiUsageBucket {
 interface ApiHealthPoint {
   month?: string;
   label?: string;
-  avg_soh?: number;
-  health?: number;
-  value?: number;
+  /** Null for a month with no battery readings. */
+  avg_soh?: number | string | null;
+  health?: number | string | null;
+  value?: number | string | null;
 }
 
 export const dashboardApi = {
@@ -2012,34 +2166,35 @@ export const dashboardApi = {
 
     // Average cost per vehicle is money. It arrives either as a bare scalar or as
     // the currency-aware object, and rendering the object would print
-    // "[object Object]" — resolve both through integer minor units.
+    // "[object Object]" — resolve both through integer minor units. Null, absent
+    // or an object with no amount is *unknown*, not 0 (FA-319): the backend has
+    // no trips, and this trip-era figure may simply not be sent.
     const rawAvgCost = res.average_cost_per_motorcycle;
-    const avgCost = readMoney(
-      rawAvgCost !== null && typeof rawAvgCost === 'object'
-        ? rawAvgCost
-        : { amount: rawAvgCost ?? 0 },
-    );
+    const avgCostObject = rawAvgCost !== null && typeof rawAvgCost === 'object' ? rawAvgCost : null;
+    const avgCostKnown = avgCostObject
+      ? (avgCostObject.amount ?? avgCostObject.balance ?? null) !== null || typeof avgCostObject.minor_units === 'number'
+      : rawAvgCost !== null && rawAvgCost !== undefined && rawAvgCost !== '';
+    const avgCost = avgCostKnown
+      ? readMoney(avgCostObject ?? { amount: rawAvgCost as string | number })
+      : undefined;
 
     return {
       activeFleet:             res.total_motorcycles ?? 0,
       availableBatteries:      res.available_batteries ?? 0,
       chargingBatteries:       res.charging_batteries ?? 0,
       lowBatteryCount:         res.low_battery_count ?? 0,
-      averageSoc:              res.average_soc ?? 0,
-      totalTripsToday:         res.total_trips_today ?? 0,
-      avgTripDurationMinutes:  res.avg_trip_duration_minutes ?? 0,
-      successRate:             res.success_rate ?? 0,
-      averageCostPerVehicle:   moneyToNumber(avgCost),
+      // Null or absent stays absent: "—", never "0%" (FA-319).
+      averageSoc:              readNumber(res.average_soc),
+      successRate:             readNumber(res.success_rate),
+      averageCostPerVehicle:   avgCost?.amount,
       // Trend fields — backend uses short names (fleet_trend, batteries_trend…)
-      // Fall back to legacy long names in case the API version changes
-      fleetTrend:              res.fleet_trend     ?? res.total_motorcycles_trend         ?? 0,
-      driversTrend:            res.drivers_trend ?? 0,
-      batteriesTrend:          res.batteries_trend ?? res.available_batteries_trend       ?? 0,
-      tripsTrend:              res.trips_trend     ?? res.total_trips_today_trend         ?? 0,
-      durationTrend:           res.duration_trend  ?? res.avg_trip_duration_minutes_trend ?? 0,
+      // Fall back to legacy long names in case the API version changes. None
+      // sent (or not a number): no trend, not a 0 % one (FA-320).
+      fleetTrend:              readNumber(res.fleet_trend, res.total_motorcycles_trend),
+      driversTrend:            readNumber(res.drivers_trend),
+      batteriesTrend:          readNumber(res.batteries_trend, res.available_batteries_trend),
       // New counters from the dashboard endpoint
       totalDrivers:            res.total_drivers ?? 0,
-      activeTrips:             res.active_trips ?? 0,
       unresolvedAlarms:        res.unresolved_alarms ?? 0,
       onlineDevices:           res.online_devices ?? 0,
     };
@@ -2061,7 +2216,8 @@ export const dashboardApi = {
     const list = Array.isArray(raw) ? raw : ((raw as { data?: ApiHealthPoint[] }).data ?? []);
     return list.map((p) => ({
       month:  p.label ?? p.month ?? '',
-      health: p.avg_soh ?? p.health ?? p.value ?? 0,
+      // No reading stays no reading — null, a gap in the line — never 0 % (FA-329).
+      health: readNumber(p.avg_soh, p.health, p.value) ?? null,
     }));
   },
 };
@@ -2070,13 +2226,21 @@ export const dashboardApi = {
 // Reports API
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface ApiWeeklyTrip {
+/**
+ * One day of `GET /fleet-admin/reports/weekly-trips`. The route and the count
+ * field keep their old "trips" names, but the count is **sessions** (swaps +
+ * charges): the platform has no trips (FA-333).
+ */
+interface ApiWeeklySessions {
   day?: string;
   label?: string;
   trips_count?: number;
   trips?: number;
-  /** Fixed-precision string in the fleet's currency. */
-  revenue?: string | number;
+  /**
+   * Fixed-precision string in the fleet's currency, with `currency`/`decimals`
+   * beside it — or the money object itself (FA-318).
+   */
+  revenue?: string | number | ApiMoneyFields | null;
   currency?: string | null;
   decimals?: number | null;
 }
@@ -2085,8 +2249,8 @@ interface ApiMonthlyRevenue {
   month?: string;
   date?: string;
   label?: string;
-  /** Fixed-precision string in the fleet's currency. */
-  revenue?: string | number;
+  /** Fixed-precision string in the fleet's currency, or a money object (FA-318). */
+  revenue?: string | number | ApiMoneyFields | null;
   currency?: string | null;
   decimals?: number | null;
   trips_count?: number;
@@ -2104,9 +2268,9 @@ interface ApiBatteryBucket {
 interface ApiCostItem {
   category?: string;
   label?: string;
-  /** Fixed-precision string in the fleet's currency. */
-  amount?: string | number;
-  value?: string | number;
+  /** Fixed-precision string in the fleet's currency, or a money object (FA-318). */
+  amount?: string | number | ApiMoneyFields | null;
+  value?: string | number | ApiMoneyFields | null;
   currency?: string | null;
   decimals?: number | null;
   color?: string;
@@ -2116,8 +2280,6 @@ interface ApiTopDriver {
   driver_id?: number | string;
   user_id?: number | string;
   name?: string;
-  trips_count?: number;
-  trips?: number;
   swaps_count?: number;
   swaps?: number;
   charges_count?: number;
@@ -2127,14 +2289,43 @@ interface ApiTopDriver {
 
 const COST_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
 
+/**
+ * A Reports amount in either shape (FA-318): a bare fixed-precision scalar with
+ * the row's `currency`/`decimals` beside it, or the money object
+ * `{ amount, currency, minor_units, decimals }`, as the dashboard's average
+ * cost already accepts. Read as an object it used to come out as 0. The row's
+ * fields only fill what the object leaves out.
+ */
+function readReportMoney(
+  value: string | number | ApiMoneyFields | null | undefined,
+  row: { currency?: string | null; decimals?: number | null },
+): Money {
+  return readEnvelopeMoney(value, row.currency ?? null, row.decimals ?? null);
+}
+
+/**
+ * One day of weekly sessions. `revenue` is for the chart's geometry only; sum
+ * and format `revenueMoney`, which is exact (FA-317).
+ */
+export interface WeeklySessionsDay {
+  day: string;
+  sessions: number;
+  revenue: number;
+  revenueMoney: Money;
+}
+
 export const reportsApi = {
-  async getWeeklyTrips(): Promise<{ day: string; trips: number; revenue: number }[]> {
+  async getWeeklySessions(): Promise<WeeklySessionsDay[]> {
     const raw = await apiClient.get<unknown>('/fleet-admin/reports/weekly-trips');
-    return extractList<ApiWeeklyTrip>(raw).map((r) => ({
-      day:     r.label ?? r.day ?? '',
-      trips:   r.trips_count ?? r.trips ?? 0,
-      revenue: moneyToNumber(readMoney({ amount: r.revenue, currency: r.currency, decimals: r.decimals })),
-    }));
+    return extractList<ApiWeeklySessions>(raw).map((r) => {
+      const revenueMoney = readReportMoney(r.revenue, r);
+      return {
+        day:      r.label ?? r.day ?? '',
+        sessions: r.trips_count ?? r.trips ?? 0,
+        revenue:  moneyToNumber(revenueMoney),
+        revenueMoney,
+      };
+    });
   },
 
   async getMonthlyRevenue(): Promise<RevenuePoint[]> {
@@ -2145,8 +2336,9 @@ export const reportsApi = {
     const raw = await apiClient.get<unknown>(`/fleet-admin/reports/monthly-revenue?from=${from}&to=${to}`);
     return extractList<ApiMonthlyRevenue>(raw).map((r) => ({
       date:    r.label ?? r.month ?? r.date ?? '',
-      revenue: moneyToNumber(readMoney({ amount: r.revenue, currency: r.currency, decimals: r.decimals })),
-      trips:   r.trips_count ?? r.trips ?? 0,
+      revenue: moneyToNumber(readReportMoney(r.revenue, r)),
+      // Sessions, under the backend's old "trips" name (FA-333).
+      sessions: r.trips_count ?? r.trips ?? 0,
     }));
   },
 
@@ -2161,11 +2353,15 @@ export const reportsApi = {
 
   async getCostAnalysis(): Promise<CostBreakdown[]> {
     const raw = await apiClient.get<unknown>('/fleet-admin/reports/cost-analysis');
-    return extractList<ApiCostItem>(raw).map((c, i) => ({
-      category: c.label ?? c.category ?? `Category ${i + 1}`,
-      value:    moneyToNumber(readMoney({ amount: c.amount ?? c.value, currency: c.currency, decimals: c.decimals })),
-      color:    c.color ?? COST_COLORS[i % COST_COLORS.length],
-    }));
+    return extractList<ApiCostItem>(raw).map((c, i) => {
+      const money = readReportMoney(c.amount ?? c.value, c);
+      return {
+        category: c.label ?? c.category ?? `Category ${i + 1}`,
+        value:    moneyToNumber(money),
+        money,
+        color:    c.color ?? COST_COLORS[i % COST_COLORS.length],
+      };
+    });
   },
 
   // Backend ranks by `activity` (swaps + charges); there is no per-driver revenue.
@@ -2212,8 +2408,7 @@ export interface SwapActivity {
 
 export const swappingApi = {
   async list(): Promise<SwappingStation[]> {
-    const raw = await apiClient.get<unknown>('/fleet-admin/cabinets');
-    return extractList<ApiCabinet>(raw).map(mapCabinet);
+    return (await fetchAllRows<ApiCabinet>('/fleet-admin/cabinets')).map(mapCabinet);
   },
 
   async recentActivity(limit = 10): Promise<SwapActivity[]> {
@@ -2238,8 +2433,7 @@ export const swappingApi = {
 
 export const fastChargingApi = {
   async list(): Promise<FastChargingCabinet[]> {
-    const raw = await apiClient.get<unknown>('/fleet-admin/piles');
-    return extractList<ApiPile>(raw).map(mapPile);
+    return (await fetchAllRows<ApiPile>('/fleet-admin/piles')).map(mapPile);
   },
 };
 
@@ -2449,11 +2643,17 @@ interface ApiWalletStats {
   current_month_spent?: ApiStatsAmount;
   total_spent?: ApiStatsAmount;
   avg_per_driver?: ApiStatsAmount;
-  top_up_trend_pct?: number;
-  top_up_trend?: number;
-  budget_used_pct?: number;
-  budget_used_percent?: number;
+  top_up_trend_pct?: number | string | null;
+  top_up_trend?: number | string | null;
+  budget_used_pct?: number | string | null;
+  budget_used_percent?: number | string | null;
   active_drivers_count?: number;
+}
+
+/** A percentage as a finite number, from a number or a numeric string; else null. */
+function optionalPercent(value: unknown): number | null {
+  const n = typeof value === 'string' && /^\s*[+-]?\d+(?:\.\d+)?\s*$/.test(value) ? Number(value) : value;
+  return typeof n === 'number' && Number.isFinite(n) ? n : null;
 }
 
 // ── Top-up options (minimum + suggested chips) ───────────────────────────────
@@ -2548,6 +2748,65 @@ export function topUpBelowMinimumFrom(
 }
 
 // ── HyperPay (Jordan) ────────────────────────────────────────────────────────
+
+// ── Top-up amounts on the wire (FA-404) ──────────────────────────────────────
+
+/**
+ * How `initiate` and `charge-saved` receive the amount. This is the one switch.
+ *
+ * - `'number'` (today): a JSON number, e.g. `7.5` — what the backend is known
+ *   to accept. It is computed from integer minor units, so it is the exact
+ *   decimal the admin typed, but a float-parsing backend could still mis-read
+ *   a third JOD decimal.
+ * - `'string'`: a fixed-precision decimal string at the form's precision
+ *   (`"10.00"` SAR, `"7.500"` JOD), built digit by digit from minor units.
+ *
+ * Switch to `'string'` only once the backend confirms both endpoints accept it
+ * (question C3), and Ahmed says so. For Jordan, also confirm that `"7.500"`
+ * (three digits, but a two-decimal value) is not refused as `amount_precision`.
+ */
+export const TOP_UP_AMOUNT_WIRE_FORMAT: 'number' | 'string' = 'number';
+
+/** A top-up amount, exactly: integer minor units at `decimals`. */
+export interface TopUpAmount {
+  minorUnits: number;
+  decimals:   number;
+}
+
+/** The `amount` field as sent, per {@link TOP_UP_AMOUNT_WIRE_FORMAT}. */
+export function topUpAmountForWire(
+  amount: TopUpAmount,
+  format: 'number' | 'string' = TOP_UP_AMOUNT_WIRE_FORMAT,
+): number | string {
+  return format === 'string'
+    ? fromMinorUnits(amount.minorUnits, amount.decimals)
+    : amount.minorUnits / 10 ** amount.decimals;
+}
+
+/**
+ * `initiate` answered, but not with a payment this dashboard can start: a field
+ * the gateway form needs is missing or unusable (FA-112). Thrown before any
+ * gateway form opens, so **nothing has been charged**. `detail` names the
+ * fields, for the log; the UI says it in its own words.
+ */
+export class PaymentSetupError extends Error {
+  constructor(public readonly detail: string) {
+    super(detail);
+    this.name = 'PaymentSetupError';
+  }
+}
+
+/** A positive whole number of minor units, as a number or a digit string, else null. */
+function positiveMinorUnits(raw: unknown): number | null {
+  const value = typeof raw === 'string' && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : raw;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+/** Non-empty text from a string or a number, else ''. */
+function requiredText(raw: unknown): string {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw);
+  return typeof raw === 'string' ? raw.trim() : '';
+}
 
 /** What `initiateTopUp` hands the Moyasar form (Saudi Arabia). */
 export interface MoyasarPaymentData {
@@ -2647,7 +2906,7 @@ function mapHyperPayCheckout(raw: ApiHyperPayCheckout, requestedChoice: CardChoi
     !currency        && 'currency',
   ].filter(Boolean);
   if (missing.length > 0 || !money || !currency) {
-    throw new Error(
+    throw new PaymentSetupError(
       `The HyperPay checkout is missing ${missing.join(', ')}. Refusing to start a payment without it.`,
     );
   }
@@ -2713,6 +2972,16 @@ export function hyperPayRefusalFrom(
   if (!(err instanceof ApiError) || !err.code || !HYPERPAY_REFUSAL_CODES.has(err.code)) return null;
   const message = err.message && !/^HTTP \d{3}$/.test(err.message) ? err.message : null;
   return { code: err.code as HyperPayRefusalCode, message };
+}
+
+/**
+ * `409 idempotency_key_conflict`: the Idempotency-Key sent with a charge was
+ * already used for another admin or another driver. The backend did not run
+ * this charge, but one under that key may be in progress, so the caller says
+ * "already being processed, check the ledger" — never "failed".
+ */
+export function isIdempotencyConflict(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 409 && err.code === 'idempotency_key_conflict';
 }
 
 /** `verify` for a HyperPay checkout. Every field past `status` is optional. */
@@ -2806,8 +3075,10 @@ export const walletApi = {
       totalTopUps:        statsAmount(s.current_month_top_ups ?? s.total_top_ups),
       totalSpent:         statsAmount(s.current_month_spent   ?? s.total_spent),
       avgPerDriver:       statsAmount(s.avg_per_driver),
-      topUpTrend:         s.top_up_trend_pct ?? s.top_up_trend ?? 0,
-      budgetUsedPercent:  s.budget_used_pct ?? s.budget_used_percent ?? 0,
+      // Absent is absent, not 0 (FA-417): "+0%" and "0% of budget" were both
+      // claims the backend never made.
+      topUpTrend:         optionalPercent(s.top_up_trend_pct ?? s.top_up_trend),
+      budgetUsedPercent:  optionalPercent(s.budget_used_pct ?? s.budget_used_percent),
       activeDriversCount: s.active_drivers_count ?? 0,
     };
   },
@@ -2928,13 +3199,13 @@ export const walletApi = {
    */
   async initiateTopUp(params: {
     driverId:  string;
-    amount:    number;
+    amount:    TopUpAmount;
     saveCard?: boolean;   // ask the backend/gateway to tokenize this card for reuse
     cardChoice?: CardChoice;
   }): Promise<InitiatedTopUp> {
     const body: Record<string, unknown> = {
       driver_id: Number(params.driverId),
-      amount:    params.amount,
+      amount:    topUpAmountForWire(params.amount),
     };
     if (params.cardChoice) body.card_choice = params.cardChoice;
     if (params.cardChoice !== 'saved') body.save_card = params.saveCard ?? false;
@@ -2945,7 +3216,7 @@ export const walletApi = {
       data?: {
         wallet_transaction_uuid?: string;
         payment_data?: {
-          amount?:          number;
+          amount?:          number | string;
           currency?:        string;
           description?:     string;
           publishable_key?: string;
@@ -2953,9 +3224,9 @@ export const walletApi = {
           metadata?:        Record<string, string>;
         };
       } & ApiHyperPayCheckout;
-    } & ApiHyperPayCheckout>('/fleet-admin/wallet/top-up/initiate', body);
+    } & ApiHyperPayCheckout>('/fleet-admin/wallet/top-up/initiate', body, { timeoutMs: PAYMENT_TIMEOUT_MS });
 
-    if (res.success === false) throw new Error(res.message ?? 'Top-up initiation failed');
+    if (res.success === false) throw new DeclinedError(res.message, 'Top-up initiation failed');
 
     // The gateway may sit inside `data` or beside it. A response without one is
     // the Saudi response as it always was.
@@ -2965,7 +3236,7 @@ export const walletApi = {
       return mapHyperPayCheckout(res.data?.checkout_id != null ? res.data : res, params.cardChoice);
     }
     if (gateway && gateway !== 'moyasar') {
-      throw new Error(
+      throw new PaymentSetupError(
         `Top-up initiation returned a gateway this dashboard cannot pay with ("${gateway}"). ` +
         'Refusing to start a payment.',
       );
@@ -2977,40 +3248,63 @@ export const walletApi = {
     // A payment must never proceed on a guessed currency. Defaulting to SAR here
     // would hand the gateway "SAR" for a JOD charge — an actual mischarge, not a
     // rendering bug — so fail before any payment is attempted.
-    if (!pd.currency) {
-      throw new Error(
-        'Top-up initiation returned no currency (data.payment_data.currency is missing). ' +
-        'Refusing to start a payment without one.',
+    //
+    // Likewise the amount, the publishable key and the wallet transaction the
+    // payment settles (FA-112): a missing amount used to become 0, the others
+    // '', and the Moyasar form was opened on them anyway.
+    const amount     = positiveMinorUnits(pd.amount);
+    const currency   = requiredText(pd.currency);
+    const key        = requiredText(pd.publishable_key);
+    const walletUuid = requiredText(d.wallet_transaction_uuid);
+    const missing = [
+      !currency   && 'data.payment_data.currency',
+      amount == null && 'data.payment_data.amount (positive minor units)',
+      !key        && 'data.payment_data.publishable_key',
+      !walletUuid && 'data.wallet_transaction_uuid',
+    ].filter(Boolean);
+    if (missing.length > 0 || amount == null) {
+      throw new PaymentSetupError(
+        `Top-up initiation returned no usable ${missing.join(', ')}. ` +
+        'Refusing to start a payment without it.',
       );
     }
 
     return {
       gateway: 'moyasar',
-      walletTransactionUuid: d.wallet_transaction_uuid ?? '',
+      walletTransactionUuid: walletUuid,
       paymentData: {
-        amount:         pd.amount         ?? 0,
-        currency:       pd.currency,
+        amount,
+        currency,
         description:    pd.description    ?? 'Driver wallet top-up',
-        publishableKey: pd.publishable_key ?? '',
+        publishableKey: key,
         callbackUrl:    pd.callback_url   ?? '',
         metadata:       (pd.metadata as Record<string, string>) ?? {},
       },
     };
   },
 
-  /** Step 2 — Verify payment after Moyasar 3DS redirect. */
+  /**
+   * Step 2 — Verify payment after Moyasar 3DS redirect.
+   *
+   * `status` is lower-cased, or **null** when the answer carries none — which
+   * is not a failure (FA-402): the caller shows "pending, check the ledger".
+   * `success: false` throws, like the HyperPay verify.
+   */
   async verifyTopUp(paymentId: string): Promise<{
-    status:   string;
+    status:   string | null;
     amount?:  number;
     balance?: number;
   }> {
     const res = await apiClient.post<{
       success?: boolean;
+      message?: string;
       data?: { status?: string; amount?: number; balance?: number };
-    }>('/fleet-admin/wallet/top-up/verify', { payment_id: paymentId });
+    }>('/fleet-admin/wallet/top-up/verify', { payment_id: paymentId }, { timeoutMs: PAYMENT_TIMEOUT_MS });
+
+    if (res.success === false) throw new DeclinedError(res.message, 'Payment verification failed');
 
     return {
-      status:  res.data?.status  ?? 'failed',
+      status:  optionalString(res.data?.status)?.toLowerCase() ?? null,
       amount:  res.data?.amount,
       balance: res.data?.balance,
     };
@@ -3030,9 +3324,9 @@ export const walletApi = {
     } & Record<string, unknown>>('/fleet-admin/wallet/top-up/verify', {
       gateway:     'hyperpay',
       checkout_id: checkoutId,
-    });
+    }, { timeoutMs: PAYMENT_TIMEOUT_MS });
 
-    if (res.success === false) throw new Error(res.message ?? 'Payment verification failed');
+    if (res.success === false) throw new DeclinedError(res.message, 'Payment verification failed');
 
     const d = (res.data && typeof res.data === 'object' && !Array.isArray(res.data))
       ? res.data
@@ -3140,7 +3434,7 @@ export const walletApi = {
     };
     const res = await apiClient.put<unknown>('/fleet-admin/billing-address', body);
     if (res && typeof res === 'object' && (res as { success?: unknown }).success === false) {
-      throw new Error((res as { message?: string }).message ?? 'Could not save the billing address.');
+      throw new DeclinedError((res as { message?: unknown }).message, 'Could not save the billing address.');
     }
     // Some endpoints answer a write with `{ success: true }` only — the address
     // we sent is then the address on file.
@@ -3152,13 +3446,18 @@ export const walletApi = {
    * (it needs the Moyasar secret key), so this hits a backend endpoint that
    * performs the charge and may return a 3DS `transactionUrl` to redirect to.
    * Endpoint: POST /fleet-admin/wallet/top-up/charge-saved
+   *
+   * `idempotencyKey` goes out as the `Idempotency-Key` header (FA-403): one
+   * UUID per attempt, the same one again when the caller retries an attempt
+   * that got no answer. `status` is lower-cased, or null when none was sent.
    */
   async chargeSavedCard(params: {
     driverId: string;
-    amount:   number;
+    amount:   TopUpAmount;
     cardId:   string;
+    idempotencyKey: string;
   }): Promise<{
-    status:          string;
+    status:          string | null;
     transactionUrl?: string;   // present when 3DS authentication is required
     paymentId?:      string;
     amount?:         number;
@@ -3176,15 +3475,15 @@ export const walletApi = {
       };
     }>('/fleet-admin/wallet/top-up/charge-saved', {
       driver_id: Number(params.driverId),
-      amount:    params.amount,
+      amount:    topUpAmountForWire(params.amount),
       card_id:   params.cardId,
-    });
+    }, { timeoutMs: PAYMENT_TIMEOUT_MS, headers: { 'Idempotency-Key': params.idempotencyKey } });
 
-    if (res.success === false) throw new Error(res.message ?? 'Could not charge the saved card.');
+    if (res.success === false) throw new DeclinedError(res.message, 'Could not charge the saved card.');
 
     const d = res.data ?? {};
     return {
-      status:         d.status ?? 'failed',
+      status:         optionalString(d.status)?.toLowerCase() ?? null,
       transactionUrl: d.transaction_url || undefined,
       paymentId:      d.payment_id,
       amount:         d.amount,
@@ -3192,46 +3491,9 @@ export const walletApi = {
     };
   },
 
-  async topUp(
-    driverId: string,
-    amount: number,
-    _paymentMethod: string,
-    note?: string,
-  ): Promise<Driver> {
-    const res = await apiClient.post<{
-      data?: { driver_id?: number | string } & ApiMoneyFields;
-    }>('/fleet-admin/wallet/top-up', { driver_id: Number(driverId), amount, note });
-    // Response: { success, data: { driver_id, name, amount, balance, currency,
-    //                              minor_units, decimals, note } }
-    // No full driver object — extract the new balance and return a stub for merging
-    const data = (res.data && typeof res.data === 'object') ? res.data : {};
-    // `balance` is the post-top-up total; fall back to the amount we just sent.
-    // `minor_units` on this payload describes the top-up amount, not the balance,
-    // so it is deliberately not forwarded here.
-    const newBalance = data.balance != null
-      ? parseAmount(
-          data.balance,
-          data.decimals ?? decimalsForCurrency(data.currency) ?? fractionDigitsOf(data.balance),
-        )
-      : amount;
-    return {
-      id:           String(data.driver_id ?? driverId),
-      name:         '',
-      phone:        '',
-      vehicleModel: '',
-      status:       'active',
-      trips:        0,
-      totalCost:    0,
-      charges:      0,
-      swaps:        0,
-      walletBalance: newBalance,
-      documents: {
-        license:     { status: 'not_uploaded', hasLicense: false },
-        customsCard: { status: 'not_uploaded' },
-        plate:       { status: 'not_uploaded' },
-      },
-    };
-  },
+  // There is deliberately no direct credit. Every top-up is paid through a
+  // gateway (initiate → card → verify, or charge-saved); the old unpaid
+  // `POST /fleet-admin/wallet/top-up` is gone from the backend too (FA-408).
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3239,11 +3501,15 @@ export const walletApi = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const notificationsApi = {
-  async list(perPage = 50): Promise<Notification[]> {
-    const raw = await apiClient.get<unknown>(
-      `/fleet-admin/notifications?status=all&per_page=${perPage}`,
-    );
-    return extractList<ApiNotification>(raw).map(mapNotification);
+  /**
+   * The most recent notifications: one page, with the server's counts, so the
+   * page can say when there are more than it shows (FA-306).
+   */
+  async list(perPage = 50): Promise<ListPage<Notification>> {
+    const path = '/fleet-admin/notifications';
+    const raw = await apiClient.get<unknown>(`${path}?status=all&per_page=${perPage}`);
+    const page = readListPage<ApiNotification>(raw, { page: 1, perPage }, path);
+    return { ...page, rows: page.rows.map(mapNotification) };
   },
 
   async getUnreadCount(): Promise<number> {
@@ -3288,17 +3554,66 @@ function num(v: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-type RawDevice = Record<string, any>;
+/** An id or number as the backend may send it: a JSON number or a string. */
+type RawScalar = string | number;
+
+/** A nested motorcycle reference, in any of the shapes seen on device and alarm rows. */
+interface RawMotorcycleRef {
+  id?: RawScalar | null;
+  plate_number?: string | null;
+  plate?: string | null;
+  battery_level?: RawScalar | null;
+}
+
+/**
+ * An IoT device row. Every field is optional: the shape is not confirmed, so
+ * each alias the mapper reads is listed with the type it is read as (FA-007:
+ * this was `Record<string, any>`, which let any typo through).
+ */
+interface RawDevice {
+  id?: RawScalar | null;
+  device_id?: RawScalar | null;
+  imei?: RawScalar | null;
+  serial?: RawScalar | null;
+  assigned_motorcycle?: RawMotorcycleRef | null;
+  motorcycle?: RawMotorcycleRef | null;
+  motorcycle_id?: RawScalar | null;
+  plate_number?: string | null;
+  latest_gps?: { gps_signal?: unknown; latitude?: unknown; longitude?: unknown; speed?: unknown } | null;
+  latest_battery?: { soc?: unknown; relative_soc?: unknown } | null;
+  is_online?: boolean | null;
+  status?: string | null;
+  connection_status?: string | null;
+  battery_level?: unknown;
+  battery?: unknown;
+  soc?: unknown;
+  gps_signal?: unknown;
+  signal?: unknown;
+  latitude?: unknown;
+  longitude?: unknown;
+  lat?: unknown;
+  lng?: unknown;
+  lon?: unknown;
+  speed_kmh?: unknown;
+  speed?: unknown;
+  last_seen_at?: string | null;
+  last_seen?: string | null;
+  updated_at?: string | null;
+}
 
 function mapDevice(d: RawDevice): IoTDevice {
   // Real API nests: assigned_motorcycle, latest_gps, latest_battery.
-  const moto = d.assigned_motorcycle ?? d.motorcycle ?? {};
-  const gps = d.latest_gps ?? {};
-  const battery = d.latest_battery ?? {};
+  const moto: RawMotorcycleRef = d.assigned_motorcycle ?? d.motorcycle ?? {};
+  const gps: NonNullable<RawDevice['latest_gps']> = d.latest_gps ?? {};
+  const battery: NonNullable<RawDevice['latest_battery']> = d.latest_battery ?? {};
   const isOnline =
     typeof d.is_online === 'boolean' ? d.is_online
     : (d.status ?? d.connection_status) === 'online';
-  const gpsSignal = (gps.gps_signal ?? d.gps_signal ?? d.signal ?? 'strong') as IoTDevice['gpsSignal'];
+  // Read as a pair; exactly 0 / 0 is unlocated, not a fix (FA-328).
+  const position = readPosition(
+    [gps.latitude, gps.longitude],
+    [d.latitude ?? d.lat, d.longitude ?? d.lng ?? d.lon],
+  );
   return {
     id:              String(d.id ?? d.device_id ?? d.imei ?? ''),
     deviceId:        String(d.device_id ?? d.imei ?? d.serial ?? d.id ?? ''),
@@ -3306,21 +3621,23 @@ function mapDevice(d: RawDevice): IoTDevice {
     motorcyclePlate: moto.plate_number ?? moto.plate ?? d.plate_number ?? undefined,
     status:          (isOnline ? 'online' : 'offline') as DeviceStatus,
     batteryLevel:    num(battery.soc ?? battery.relative_soc ?? d.battery_level ?? d.battery ?? d.soc ?? moto.battery_level),
-    gpsSignal:       (['strong', 'weak', 'none'].includes(gpsSignal) ? gpsSignal : 'strong') as IoTDevice['gpsSignal'],
-    latitude:        num(gps.latitude ?? d.latitude ?? d.lat),
-    longitude:       num(gps.longitude ?? d.longitude ?? d.lng ?? d.lon),
+    gpsSignal:       toGpsSignal(gps.gps_signal ?? d.gps_signal ?? d.signal),
+    latitude:        position?.lat,
+    longitude:       position?.lng,
     speedKmh:        num(gps.speed ?? d.speed_kmh ?? d.speed),
     lastSeenAt:      d.last_seen_at ?? d.last_seen ?? d.updated_at ?? undefined,
   };
 }
 
 export const iotDevicesApi = {
-  /** List devices. Optional status filter: 'online' | 'offline'. */
-  async list(status?: DeviceStatus, perPage = 50): Promise<IoTDevice[]> {
-    const qs = new URLSearchParams({ per_page: String(perPage) });
-    if (status) qs.set('status', status);
-    const raw = await apiClient.get<unknown>(`/fleet-admin/iot-devices?${qs.toString()}`);
-    return extractList<RawDevice>(raw).map(mapDevice);
+  /**
+   * Every device of the fleet (optionally only 'online' | 'offline'). There is
+   * one per vehicle, so the whole list is fetched, page by page, and the page's
+   * counts and search cover all of it. It used to be the first 50 (FA-306).
+   */
+  async list(status?: DeviceStatus): Promise<IoTDevice[]> {
+    const path = status ? `/fleet-admin/iot-devices?status=${status}` : '/fleet-admin/iot-devices';
+    return (await fetchAllRows<RawDevice>(path)).map(mapDevice);
   },
 
   async get(id: string): Promise<IoTDevice | null> {
@@ -3338,10 +3655,36 @@ export const iotDevicesApi = {
 // Alarms API  (defensive mapping — see docs/BACKEND_GAPS.md A3)
 // ─────────────────────────────────────────────────────────────────────────────
 
-type RawAlarm = Record<string, any>;
+/** An alarm row; every alias the mapper reads, with the type it is read as (FA-007). */
+interface RawAlarm {
+  id?: RawScalar | null;
+  type?: string | null;
+  alarm_type?: string | null;
+  code?: RawScalar | null;
+  title?: string | null;
+  name?: string | null;
+  message?: string | null;
+  description?: string | null;
+  details?: string | null;
+  severity?: string | null;
+  level?: string | null;
+  priority?: string | null;
+  status?: string | null;
+  is_resolved?: boolean | null;
+  resolved?: boolean | null;
+  resolved_at?: string | null;
+  iot_device?: { id?: RawScalar | null; assigned_motorcycle?: RawMotorcycleRef | null } | null;
+  motorcycle?: RawMotorcycleRef | null;
+  motorcycle_id?: RawScalar | null;
+  device_id?: RawScalar | null;
+  recorded_at?: string | null;
+  created_at?: string | null;
+  triggered_at?: string | null;
+  timestamp?: string | null;
+}
 
-function toAlarmSeverity(s?: string): AlarmSeverity {
-  const v = (s ?? '').toLowerCase();
+function toAlarmSeverity(s?: string | null): AlarmSeverity {
+  const v = String(s ?? '').toLowerCase();
   if (v === 'critical' || v === 'high' || v === 'error' || v === 'danger') return 'critical';
   if (v === 'warning' || v === 'medium' || v === 'warn') return 'warning';
   return 'info';
@@ -3351,7 +3694,7 @@ function mapAlarm(a: RawAlarm): Alarm {
   const resolved =
     a.status === 'resolved' || a.is_resolved === true || a.resolved === true || a.resolved_at != null;
   // Real API nests the bike under iot_device.assigned_motorcycle.
-  const moto = a.iot_device?.assigned_motorcycle ?? a.motorcycle ?? {};
+  const moto: RawMotorcycleRef = a.iot_device?.assigned_motorcycle ?? a.motorcycle ?? {};
   return {
     id:           String(a.id ?? ''),
     type:         String(a.type ?? a.alarm_type ?? a.code ?? 'unknown'),
@@ -3368,22 +3711,29 @@ function mapAlarm(a: RawAlarm): Alarm {
 }
 
 export const alarmsApi = {
-  /** List alarms. Optional status filter: 'unresolved' | 'resolved'. */
-  async list(status?: AlarmStatus, perPage = 50): Promise<Alarm[]> {
-    const qs = new URLSearchParams({ per_page: String(perPage) });
+  /**
+   * One page of alarms, filtered by `status` on the server ('unresolved' |
+   * 'resolved'), with the server's counts (FA-306). Alarms accumulate without
+   * bound, so the page steps through them instead of fetching the first 50.
+   */
+  async list(
+    { status, page = 1, perPage = 20 }: { status?: AlarmStatus; page?: number; perPage?: number } = {},
+  ): Promise<ListPage<Alarm>> {
+    const path = '/fleet-admin/alarms';
+    const qs = new URLSearchParams({ per_page: String(perPage), page: String(page) });
     if (status) qs.set('status', status);
-    const raw = await apiClient.get<unknown>(`/fleet-admin/alarms?${qs.toString()}`);
-    return extractList<RawAlarm>(raw).map(mapAlarm);
+    const raw = await apiClient.get<unknown>(`${path}?${qs.toString()}`);
+    const result = readListPage<RawAlarm>(raw, { page, perPage }, path);
+    return { ...result, rows: result.rows.map(mapAlarm) };
   },
 
-  /** Mark an alarm resolved. Returns true on success. */
-  async resolve(id: string): Promise<boolean> {
-    try {
-      await apiClient.post(`/fleet-admin/alarms/${id}/resolve`);
-      return true;
-    } catch {
-      return false;
-    }
+  /**
+   * Mark an alarm resolved. Throws on failure (FA-307): the caller shows the
+   * backend's reason, so the operator is not left with a button that simply
+   * re-enables.
+   */
+  async resolve(id: string): Promise<void> {
+    await apiClient.post(`/fleet-admin/alarms/${id}/resolve`);
   },
 };
 
@@ -3391,10 +3741,36 @@ export const alarmsApi = {
 // Sessions API — driver swap / charging activity (defensive; see BACKEND_GAPS A4)
 // ─────────────────────────────────────────────────────────────────────────────
 
-type RawSession = Record<string, any>;
+/** A swap or charging session row; every alias the mapper reads, typed (FA-007). */
+interface RawSession {
+  id?: RawScalar | null;
+  user?: { id?: RawScalar | null; name?: string | null } | null;
+  driver?: { id?: RawScalar | null; name?: string | null } | null;
+  station?: { name?: string | null } | null;
+  pile?: { name?: string | null } | null;
+  cabinet?: { name?: string | null } | null;
+  driver_id?: RawScalar | null;
+  driver_name?: string | null;
+  station_name?: string | null;
+  cabinet_name?: string | null;
+  status?: string | null;
+  started_at?: string | null;
+  created_at?: string | null;
+  start_time?: string | null;
+  completed_at?: string | null;
+  ended_at?: string | null;
+  end_time?: string | null;
+  pricing?: { final_price?: unknown; discount_amount?: unknown } | null;
+  swap_fee?: unknown;
+  final_amount?: unknown;
+  amount?: unknown;
+  cost?: unknown;
+  total?: unknown;
+  price?: unknown;
+}
 
-function toSessionStatus(s?: string): SessionStatus {
-  const v = (s ?? '').toLowerCase();
+function toSessionStatus(s?: string | null): SessionStatus {
+  const v = String(s ?? '').toLowerCase();
   if (v === 'completed' || v === 'success' || v === 'done' || v === 'finished') return 'completed';
   if (v === 'cancelled' || v === 'canceled') return 'cancelled';
   if (v === 'failed' || v === 'error') return 'failed';
@@ -3412,7 +3788,7 @@ function toSessionStatus(s?: string): SessionStatus {
  */
 function netSessionAmount(pricing: unknown): string | undefined {
   if (!pricing || typeof pricing !== 'object') return undefined;
-  const value: unknown = (pricing as RawSession).final_price;
+  const value: unknown = (pricing as NonNullable<RawSession['pricing']>).final_price;
   if (value == null || value === '') return undefined;
 
   if (typeof value === 'object') {
@@ -3428,7 +3804,7 @@ function netSessionAmount(pricing: unknown): string | undefined {
 /** True when `pricing.discount_amount` is a positive amount — a coupon was applied. */
 function hasCouponDiscount(pricing: unknown): boolean {
   if (!pricing || typeof pricing !== 'object') return false;
-  const value: unknown = (pricing as RawSession).discount_amount;
+  const value: unknown = (pricing as NonNullable<RawSession['pricing']>).discount_amount;
   if (value == null || value === '') return false;
   if (typeof value === 'object') return readMoney(value as ApiMoneyFields).minorUnits > 0;
   if (typeof value !== 'string' && typeof value !== 'number') return false;
@@ -3438,8 +3814,8 @@ function hasCouponDiscount(pricing: unknown): boolean {
 
 function mapSession(kind: SessionKind, s: RawSession): DriverSession {
   // Real API: driver is `user`; station is `station` (swaps) or `pile` (charging).
-  const driver = s.user ?? s.driver ?? {};
-  const station = s.station ?? s.pile ?? s.cabinet ?? {};
+  const driver: NonNullable<RawSession['user']> = s.user ?? s.driver ?? {};
+  const station: NonNullable<RawSession['station']> = s.station ?? s.pile ?? s.cabinet ?? {};
   return {
     id:          String(s.id ?? ''),
     kind,
@@ -3459,31 +3835,44 @@ function mapSession(kind: SessionKind, s: RawSession): DriverSession {
   };
 }
 
-interface SessionFilters {
+/**
+ * The documented session filters, all applied server-side (FA-302). `from` and
+ * `to` are calendar dates, `YYYY-MM-DD`. ⏳ D1.3: whether `to` is inclusive,
+ * and the sort order (shown as newest first), are not confirmed.
+ */
+export interface SessionFilters {
   status?: SessionStatus;
   driverId?: string;
   from?: string;
   to?: string;
+  page?: number;
   perPage?: number;
 }
 
-function sessionQuery(f?: SessionFilters): string {
-  const qs = new URLSearchParams({ per_page: String(f?.perPage ?? 50) });
-  if (f?.status)   qs.set('status', f.status);
-  if (f?.driverId) qs.set('driver_id', f.driverId);
-  if (f?.from)     qs.set('from', f.from);
-  if (f?.to)       qs.set('to', f.to);
-  return qs.toString();
+const SESSIONS_PER_PAGE = 20;
+
+function sessionQuery(f: SessionFilters = {}): { qs: string; page: number; perPage: number } {
+  const page    = Math.max(1, Math.floor(f.page ?? 1));
+  const perPage = Math.min(100, Math.max(1, f.perPage ?? SESSIONS_PER_PAGE));
+  const qs = new URLSearchParams({ per_page: String(perPage), page: String(page) });
+  if (f.status)   qs.set('status', f.status);
+  if (f.driverId) qs.set('driver_id', f.driverId);
+  if (f.from)     qs.set('from', f.from);
+  if (f.to)       qs.set('to', f.to);
+  return { qs: qs.toString(), page, perPage };
+}
+
+async function listSessions(kind: SessionKind, filters?: SessionFilters): Promise<ListPage<DriverSession>> {
+  const path = kind === 'swap' ? '/fleet-admin/sessions/swaps' : '/fleet-admin/sessions/charging';
+  const { qs, page, perPage } = sessionQuery(filters);
+  const raw = await apiClient.get<unknown>(`${path}?${qs}`);
+  const result = readListPage<RawSession>(raw, { page, perPage }, path);
+  return { ...result, rows: result.rows.map((s) => mapSession(kind, s)) };
 }
 
 export const sessionsApi = {
-  async swaps(filters?: SessionFilters): Promise<DriverSession[]> {
-    const raw = await apiClient.get<unknown>(`/fleet-admin/sessions/swaps?${sessionQuery(filters)}`);
-    return extractList<RawSession>(raw).map((s) => mapSession('swap', s));
-  },
-
-  async charging(filters?: SessionFilters): Promise<DriverSession[]> {
-    const raw = await apiClient.get<unknown>(`/fleet-admin/sessions/charging?${sessionQuery(filters)}`);
-    return extractList<RawSession>(raw).map((s) => mapSession('charging', s));
-  },
+  /** One page of swap sessions, filtered and paged by the server (FA-302). */
+  swaps: (filters?: SessionFilters) => listSessions('swap', filters),
+  /** One page of charging sessions, filtered and paged by the server (FA-302). */
+  charging: (filters?: SessionFilters) => listSessions('charging', filters),
 };

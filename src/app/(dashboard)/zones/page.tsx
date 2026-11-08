@@ -11,14 +11,17 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
 import { ZoneCard } from '@/components/zones/ZoneCard';
 import { ZoneMap } from '@/components/zones/ZoneMap';
-import { ZoneFormDrawer, type ZoneFormValues } from '@/components/zones/ZoneFormDrawer';
+import { ZoneFormDrawer, ZoneSubmitRefusal, type ZoneFormValues } from '@/components/zones/ZoneFormDrawer';
 import { useI18n } from '@/i18n/I18nProvider';
 import { zonesApi } from '@/lib/api';
 import { isForbiddenError } from '@/lib/api-errors';
 import {
+  closingEdgeCrossesPath,
   findOverlappingZones,
   findZoneAtPoint,
   findZoneCrossedByEdge,
+  newEdgeCrossesPath,
+  outlineCrossesItself,
 } from '@/lib/zone-geometry';
 import type { Zone, ZonePoint } from '@/types';
 import { logger } from '@/lib/logger';
@@ -99,6 +102,15 @@ export default function ZonesPage() {
     [drawingMode, drawingPoints, zones],
   );
 
+  /**
+   * The line back to the first point would cross the outline: the shape would
+   * be a "bow-tie" (FA-325). Live, so Finish is off before it is pressed.
+   */
+  const closingCrosses = useMemo(
+    () => drawingMode && drawingPoints.length >= 3 && closingEdgeCrossesPath(drawingPoints),
+    [drawingMode, drawingPoints],
+  );
+
   const listZones = (list: Zone[]) => list.map(zoneLabel).join(locale === 'ar' ? '، ' : ', ');
 
   /** Rejected-point message, or the live overlap of the shape as a whole. */
@@ -106,6 +118,8 @@ export default function ZonesPage() {
     drawError ??
     (drawingConflicts.length > 0
       ? t('zones.overlapWithZones', { zones: listZones(drawingConflicts) })
+      : closingCrosses
+      ? t('zones.selfCrossingClose')
       : null);
 
   const startDrawing = () => {
@@ -138,12 +152,22 @@ export default function ZonesPage() {
       }
     }
 
+    // Nor may the outline cross itself (FA-325).
+    if (newEdgeCrossesPath(drawingPoints, point)) {
+      setDrawError(t('zones.selfCrossingEdge'));
+      return;
+    }
+
     setDrawError(null);
     setDrawingPoints((prev) => [...prev, point]);
   };
 
   const finishDrawing = () => {
     if (drawingPoints.length < 3 || drawingConflicts.length > 0) return;
+    if (closingEdgeCrossesPath(drawingPoints)) {
+      setDrawError(t('zones.selfCrossingClose'));
+      return;
+    }
     setDrawingMode(false);
     setDrawError(null);
     setFormMode({ kind: 'add' });
@@ -151,48 +175,44 @@ export default function ZonesPage() {
 
   // ----- CRUD handlers ------------------------------------------------------
 
+  // Both throw on failure: the drawer stays open and shows why, with each
+  // field the backend refused on that field (FA-326).
   const handleAdd = async (values: ZoneFormValues) => {
     // Last line of defence — the drawing guards should have caught this already.
     const conflicts = findOverlappingZones(drawingPoints, zones);
     if (conflicts.length > 0) {
-      setApiError(t('zones.overlapWithZones', { zones: listZones(conflicts) }));
-      return;
+      throw new ZoneSubmitRefusal([t('zones.overlapWithZones', { zones: listZones(conflicts) })]);
     }
-    try {
-      const created = await zonesApi.create({
-        name_en:       values.name_en,
-        name_ar:       values.name_ar,
-        type:          values.type,
-        speedLimitKmh: values.speedLimitKmh,
-        active:        values.active,
-        polygon:       drawingPoints,
-      });
-      setZones((prev) => [created, ...prev]);
-      setDrawingPoints([]);
-      setFormMode({ kind: 'closed' });
-      setSuccessDialog({ kind: 'added' });
-    } catch (err) {
-      setApiError(err instanceof Error ? err.message : 'Failed to create zone');
+    if (outlineCrossesItself(drawingPoints)) {
+      throw new ZoneSubmitRefusal([t('zones.selfCrossingClose')]);
     }
+    const created = await zonesApi.create({
+      name_en:       values.name_en,
+      name_ar:       values.name_ar,
+      type:          values.type,
+      speedLimitKmh: values.speedLimitKmh,
+      active:        values.active,
+      polygon:       drawingPoints,
+    });
+    setZones((prev) => [created, ...prev]);
+    setDrawingPoints([]);
+    setFormMode({ kind: 'closed' });
+    setSuccessDialog({ kind: 'added' });
   };
 
   const handleEdit = async (values: ZoneFormValues, zoneId?: string) => {
     if (!zoneId) return;
-    try {
-      const updated = await zonesApi.update(zoneId, {
-        name_en:       values.name_en,
-        name_ar:       values.name_ar,
-        type:          values.type,
-        speedLimitKmh: values.speedLimitKmh,
-        active:        values.active,
-      });
-      if (updated) {
-        setZones((prev) => prev.map((z) => (z.id === updated.id ? updated : z)));
-        setFormMode({ kind: 'closed' });
-        setSuccessDialog({ kind: 'updated' });
-      }
-    } catch (err) {
-      setApiError(err instanceof Error ? err.message : 'Failed to update zone');
+    const updated = await zonesApi.update(zoneId, {
+      name_en:       values.name_en,
+      name_ar:       values.name_ar,
+      type:          values.type,
+      speedLimitKmh: values.speedLimitKmh,
+      active:        values.active,
+    });
+    if (updated) {
+      setZones((prev) => prev.map((z) => (z.id === updated.id ? updated : z)));
+      setFormMode({ kind: 'closed' });
+      setSuccessDialog({ kind: 'updated' });
     }
   };
 
@@ -355,7 +375,7 @@ export default function ZonesPage() {
                 <Button
                   variant="primary"
                   onClick={finishDrawing}
-                  disabled={drawingPoints.length < 3 || drawingConflicts.length > 0}
+                  disabled={drawingPoints.length < 3 || drawingConflicts.length > 0 || closingCrosses}
                   leftIcon={<Sparkles className="h-4 w-4" />}
                 >
                   {t('zones.finishDrawing')}

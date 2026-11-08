@@ -7,7 +7,8 @@ import { StatusPill } from '@/components/ui/StatusPill';
 import { VehicleIconTile } from '@/components/ui/VehicleIconTile';
 import { LocationLabel } from '@/components/ui/LocationLabel';
 import { useI18n } from '@/i18n/I18nProvider';
-import { formatNumber, formatRelativeTime } from '@/lib/format';
+import { formatBatteryLevel, formatNumber, formatRelativeTime } from '@/lib/format';
+import { vehicleDisplayName } from '@/lib/vehicle-label';
 import type { Vehicle } from '@/types';
 
 interface VehicleCardProps {
@@ -23,15 +24,20 @@ export function VehicleCard({ vehicle, onClick, onAssignDriver }: VehicleCardPro
 
   return (
     <Card
-      className="cursor-pointer p-5 transition-all hover:shadow-card-hover"
+      className="p-5"
       onClick={onClick}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           <VehicleIconTile status={vehicle.status} size="md" />
           <div className="min-w-0">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-50"><span dir="ltr">{vehicle.id}</span></h3>
-            <p className="text-xs text-slate-500">{vehicle.model}</p>
+            {/* Plate first, as on the machine; the bare database id was the title. */}
+            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-50"><span dir="ltr">{vehicleDisplayName(vehicle)}</span></h3>
+            <p className="text-xs text-slate-500">
+              {vehicle.model}
+              {vehicle.model && vehicle.plateNumber && ' · '}
+              {vehicle.plateNumber && <span dir="ltr">#{vehicle.id}</span>}
+            </p>
           </div>
         </div>
         <StatusPill status={vehicle.status} />
@@ -44,7 +50,7 @@ export function VehicleCard({ vehicle, onClick, onAssignDriver }: VehicleCardPro
             {t('fleet.battery')}
           </span>
           <span className="font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-            {vehicle.batteryLevel}%
+            {formatBatteryLevel(vehicle.batteryLevel)}
           </span>
         </div>
         <BatteryBar value={vehicle.batteryLevel} className="mt-1.5" />
@@ -69,15 +75,19 @@ export function VehicleCard({ vehicle, onClick, onAssignDriver }: VehicleCardPro
         style={{ borderColor: 'rgb(var(--border))' }}
       >
         <div>
-          <p className="text-slate-500">{t('fleet.lastTrip')}</p>
+          {/* When the device last reported. There are no trips (FA-217), and
+              a vehicle that never reported shows "—", not "just now". */}
+          <p className="text-slate-500">{t('fleet.lastReported')}</p>
           <p className="mt-0.5 font-semibold text-slate-700 dark:text-slate-200">
-            {formatRelativeTime(vehicle.lastTripAt, locale)}
+            {formatRelativeTime(vehicle.lastSeenAt, locale)}
           </p>
         </div>
         <div className="text-end">
           <p className="text-slate-500">{t('fleet.totalDistance')}</p>
           <p className="mt-0.5 font-semibold tabular-nums text-slate-700 dark:text-slate-200">
-            {formatNumber(vehicle.totalDistanceKm, locale)} {t('common.kilometers')}
+            {vehicle.totalDistanceKm === undefined
+              ? '—'
+              : `${formatNumber(vehicle.totalDistanceKm, locale)} ${t('common.kilometers')}`}
           </p>
         </div>
       </div>

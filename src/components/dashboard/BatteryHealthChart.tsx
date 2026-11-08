@@ -17,10 +17,14 @@ import type { BatteryHealthPoint } from '@/types';
 interface BatteryHealthChartProps {
   data: BatteryHealthPoint[];
   loading?: boolean;
+  /** Shown instead of the chart when its data failed to load (FA-312). */
+  failure?: React.ReactNode;
 }
 
-export function BatteryHealthChart({ data, loading }: BatteryHealthChartProps) {
+export function BatteryHealthChart({ data, loading, failure }: BatteryHealthChartProps) {
   const { t } = useI18n();
+  // Nothing to plot: no months, or no month with a reading.
+  const empty = !data.some((p) => typeof p.health === 'number');
 
   return (
     <Card className="p-5">
@@ -31,8 +35,12 @@ export function BatteryHealthChart({ data, loading }: BatteryHealthChartProps) {
       <div className="mt-5 h-[220px]">
         {loading ? (
           <Skeleton className="h-full w-full rounded-xl" />
-        ) : null}
-        <ResponsiveContainer width="100%" height="100%" style={loading ? { display: 'none' } : undefined}>
+        ) : failure ? (
+          failure
+        ) : empty ? (
+          <p className="flex h-full items-center justify-center text-sm text-slate-400">{t('dashboard.healthEmpty')}</p>
+        ) : (
+        <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 10, right: 4, left: -22, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
             <XAxis
@@ -55,9 +63,11 @@ export function BatteryHealthChart({ data, loading }: BatteryHealthChartProps) {
                 boxShadow: '0 10px 25px -5px rgb(0 0 0 / 0.08)',
               }}
             />
+            {/* A month with no reading is null: a gap, not a drop to 0. */}
             <Line
               type="monotone"
               dataKey="health"
+              connectNulls={false}
               stroke="#4f46e5"
               strokeWidth={2.5}
               dot={{ r: 4, strokeWidth: 2, stroke: '#4f46e5', fill: '#fff' }}
@@ -65,6 +75,7 @@ export function BatteryHealthChart({ data, loading }: BatteryHealthChartProps) {
             />
           </LineChart>
         </ResponsiveContainer>
+        )}
       </div>
     </Card>
   );

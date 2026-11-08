@@ -17,7 +17,7 @@
  * Everything else stays global: a 500 is not a phone-number problem.
  */
 
-import { ApiError } from '@/lib/api/client';
+import { ApiError, DeclinedError, isTimeoutError } from '@/lib/api/client';
 
 /** The form fields these errors can land on. */
 export type FormFieldName = 'country' | 'phone' | 'name';
@@ -99,6 +99,39 @@ export function fieldErrorFrom(err: unknown): FieldError | null {
   return null;
 }
 
+/**
+ * Every field Laravel refused in a 422, sorted onto a form's own fields.
+ *
+ * `fieldErrorFrom` answers with one field, and only for name, phone and
+ * country; everything else (an email already taken, a plate over 20
+ * characters, a bad licence expiry) used to land in a form-wide banner, away
+ * from the field to fix (FA-213). This reads all of `errors`:
+ *
+ *   fields    the first message for each key `fieldByKey` maps to a field
+ *   unmapped  the messages for keys the form has no field for, for its banner
+ *
+ * **Null** when nothing maps to a field — not a 422, no `errors`, or only keys
+ * the form does not show — so the caller handles it like any other failure.
+ */
+export function fieldErrorsFrom<F extends string>(
+  err: unknown,
+  fieldByKey: Readonly<Record<string, F>>,
+): { fields: Partial<Record<F, string>>; unmapped: string[] } | null {
+  if (!(err instanceof ApiError) || err.status !== 422 || !err.errors) return null;
+  const fields: Partial<Record<F, string>> = {};
+  const unmapped: string[] = [];
+  for (const [key, messages] of Object.entries(err.errors)) {
+    const list = (Array.isArray(messages) ? messages : [messages])
+      .filter((m): m is string => typeof m === 'string' && m.trim() !== '');
+    if (list.length === 0) continue;
+    const field = Object.prototype.hasOwnProperty.call(fieldByKey, key) ? fieldByKey[key] : undefined;
+    if (field === undefined) unmapped.push(...list);
+    else if (fields[field] === undefined) fields[field] = list[0];
+  }
+  if (Object.keys(fields).length === 0) return null;
+  return { fields, unmapped: Array.from(new Set(unmapped)) };
+}
+
 /** True when this failure belongs on a field and must stay off the page. */
 export function isFieldLevelError(err: unknown): boolean {
   return fieldErrorFrom(err) !== null;
@@ -113,4 +146,66 @@ export function isFieldLevelError(err: unknown): boolean {
  */
 export function isForbiddenError(err: unknown): boolean {
   return err instanceof ApiError && err.status === 403;
+}
+
+// ── Saying why a request failed ──────────────────────────────────────────────
+
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+/**
+ * The backend's own words for a failed request, or **null** when it wrote none.
+ *
+ * Laravel names each refused field in `errors`, and its top-level `message`
+ * only summarises them ("… (and 1 more error)"), so the field messages win.
+ * Null for a request that got no answer at all (status 0: no connection, or
+ * the client's deadline) and for the client's placeholder `HTTP 500` text:
+ * neither is a sentence anyone wrote, and neither is in the UI language.
+ */
+export function serverMessages(err: unknown): string[] | null {
+  if (err instanceof DeclinedError) return err.serverMessage ? [err.serverMessage] : null;
+  if (!(err instanceof ApiError) || err.status === 0) return null;
+  const fieldMessages = Array.from(new Set(
+    Object.values(err.errors ?? {})
+      .flat()
+      .filter((m): m is string => typeof m === 'string' && m.trim() !== ''),
+  ));
+  if (fieldMessages.length > 0) return fieldMessages;
+  if (err.message && !/^HTTP \d{3}$/.test(err.message)) return [err.message];
+  return null;
+}
+
+/** The backend's first sentence about a failed request, or **null**. */
+export function serverMessage(err: unknown): string | null {
+  return serverMessages(err)?.[0] ?? null;
+}
+
+/**
+ * What to tell the operator about a failed request: the backend's own messages
+ * when it wrote some, otherwise why there are none — no connection, no answer
+ * in time, or a bare status code — in the UI language.
+ */
+export function failureLines(err: unknown, t: Translate): string[] {
+  const fromServer = serverMessages(err);
+  if (fromServer) return fromServer;
+  if (isTimeoutError(err)) return [t('common.requestTimedOut')];
+  if (err instanceof ApiError) {
+    return [err.status === 0
+      ? t('common.requestFailedNetwork')
+      : t('common.requestFailedStatus', { status: err.status })];
+  }
+  return [t('common.error')];
+}
+
+/**
+ * One line for a form's error banner (FA-422): the backend's own words when it
+ * wrote some, "no connection" or "no answer in time" in the UI language, and
+ * otherwise `fallback` — the caller's specific, translated sentence. Never the
+ * client's own English ("Network error: …", "HTTP 500", a thrown guard).
+ */
+export function failureMessage(err: unknown, t: Translate, fallback: string): string {
+  const fromServer = serverMessages(err);
+  if (fromServer) return fromServer.join(' ');
+  if (isTimeoutError(err)) return t('common.requestTimedOut');
+  if (err instanceof ApiError && err.status === 0) return t('common.requestFailedNetwork');
+  return fallback;
 }

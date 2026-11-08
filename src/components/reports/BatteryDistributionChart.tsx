@@ -10,9 +10,11 @@ import type { BatteryDistribution } from '@/types';
 interface Props {
   data: BatteryDistribution[];
   loading?: boolean;
+  /** Shown instead of the chart when its data failed to load (FA-312). */
+  failure?: React.ReactNode;
 }
 
-export function BatteryDistributionChart({ data, loading }: Props) {
+export function BatteryDistributionChart({ data, loading, failure }: Props) {
   const { t } = useI18n();
 
   return (
@@ -31,6 +33,8 @@ export function BatteryDistributionChart({ data, loading }: Props) {
 
       {loading ? (
         <Skeleton className="mt-4 h-[220px] w-full" />
+      ) : failure ? (
+        <div className="mt-4">{failure}</div>
       ) : (
         <div className="mt-2 flex items-center gap-5">
           <div className="h-[200px] w-[200px] shrink-0">

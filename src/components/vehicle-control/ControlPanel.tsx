@@ -3,12 +3,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
+import { FailureNote } from '@/components/ui/FailureNote';
+import { LoadError } from '@/components/ui/LoadError';
 import { AlertTriangle, Lock, Power, ShieldCheck, Unlock, UserPlus, UserMinus, Loader2, WifiOff } from 'lucide-react';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
+import { failureLines } from '@/lib/api-errors';
 import { cn } from '@/lib/cn';
 import { ltrIsolate } from '@/lib/format';
-import { VEHICLE_SPEED_LIMIT_MAX, clampSpeedLimit } from '@/lib/vehicle-speed';
+import { VEHICLE_SPEED_LIMIT_MAX, VEHICLE_SPEED_LIMIT_MIN, clampSpeedLimit } from '@/lib/vehicle-speed';
 import type { Vehicle } from '@/types';
 import type { Driver } from '@/types';
 import type { VehicleCommand, VehicleCommandOutcome } from '@/lib/api';
@@ -16,8 +19,19 @@ import type { VehicleCommand, VehicleCommandOutcome } from '@/lib/api';
 interface ControlPanelProps {
   vehicle: Vehicle;
   drivers?: Driver[];
-  onAssignDriver?: (motorcycleId: string, driverId: string) => Promise<boolean>;
-  onUnassignDriver?: (motorcycleId: string) => Promise<boolean>;
+  /**
+   * Why the driver list failed to load, if it did. The picker is then replaced
+   * by that reason and a Retry, rather than an empty dropdown that reads as
+   * "no active drivers" (FA-208).
+   */
+  driversError?: unknown;
+  /** The driver list is loading (first load or a retry). */
+  driversLoading?: boolean;
+  onRetryDrivers?: () => void;
+  /** Throws when the backend refuses. */
+  onAssignDriver?: (motorcycleId: string, driverId: string) => Promise<void>;
+  /** Throws when the backend refuses. */
+  onUnassignDriver?: (motorcycleId: string) => Promise<void>;
   /** Sends a real control command and reports exactly what happened to it. */
   onCommand?: (motorcycleId: string, action: VehicleCommand, speedLimit?: number) => Promise<VehicleCommandOutcome>;
 }
@@ -25,6 +39,9 @@ interface ControlPanelProps {
 export function ControlPanel({
   vehicle,
   drivers = [],
+  driversError,
+  driversLoading = false,
+  onRetryDrivers,
   onAssignDriver,
   onUnassignDriver,
   onCommand,
@@ -35,8 +52,15 @@ export function ControlPanel({
   // Control state — mirrors the backend, updated from each command's response.
   const [isLocked,   setIsLocked]   = useState(vehicle.isLocked);
   const [isRunning,  setIsRunning]  = useState(vehicle.isEngineRunning);
-  /** null = the backend has never reported a limit for this vehicle. */
+  /** The limit the backend reported or confirmed. null = never reported. */
   const [speedLimit, setSpeedLimit] = useState<number | null>(vehicle.speedLimitKmh ?? null);
+  /**
+   * Where the slider is while the operator moves it, before the vehicle has
+   * accepted it. null = showing the confirmed limit. A refused command drops
+   * the draft, so the slider and label return to the confirmed value instead
+   * of showing a limit the vehicle never took (FA-204).
+   */
+  const [speedDraft, setSpeedDraft] = useState<number | null>(null);
   const [pending,      setPending]      = useState<VehicleCommand | null>(null);
   const [commandError, setCommandError] = useState<string | null>(null);
 
@@ -51,17 +75,23 @@ export function ControlPanel({
    */
   const [unsupported, setUnsupported] = useState<Set<VehicleCommand>>(new Set());
 
-  const [confirmEmergencyStop, setConfirmEmergencyStop] = useState(false);
+  /**
+   * The command waiting for the operator to confirm it. Both cut the engine of
+   * a vehicle that may have a driver on it right now, so neither fires on the
+   * click: plain Stop used to (FA-221).
+   */
+  const [confirming, setConfirming] = useState<'stop' | 'emergency_stop' | null>(null);
 
   // Re-sync when a different vehicle is selected (component instance is reused).
   useEffect(() => {
     setIsLocked(vehicle.isLocked);
     setIsRunning(vehicle.isEngineRunning);
     setSpeedLimit(vehicle.speedLimitKmh ?? null);
+    setSpeedDraft(null);
     setPending(null);
     setCommandError(null);
     setUnsupported(new Set());
-    setConfirmEmergencyStop(false);
+    setConfirming(null);
     // Only resync on vehicle switch, not on every optimistic prop update.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vehicle.id]);
@@ -89,12 +119,16 @@ export function ControlPanel({
 
     const outcome = await onCommand(vehicle.id, action, nextSpeed);
     setPending(null);
+    // Accepted or not, the slider goes back to what the backend says.
+    if (action === 'set_speed_limit') setSpeedDraft(null);
 
     if (!outcome.ok) {
       if (outcome.reason === 'unsupported') {
         // Never offer it again — it is not going to start working.
         setUnsupported((prev) => new Set(prev).add(action));
         setCommandError(tv('vehicleControl.commandUnsupported'));
+      } else if (outcome.reason === 'unconfirmed') {
+        setCommandError(tv('vehicleControl.commandUnconfirmed'));
       } else {
         setCommandError(outcome.message ?? tv('vehicleControl.commandFailed'));
       }
@@ -113,25 +147,34 @@ export function ControlPanel({
   // Driver assignment
   const [selectedDriverId, setSelectedDriverId] = useState('');
   const [assigning,  setAssigning]  = useState(false);
-  const [assignError, setAssignError] = useState<string | null>(null);
+  /** Why the backend refused, under a line saying what failed. */
+  const [assignError, setAssignError] = useState<{ title: string; lines: string[] } | null>(null);
 
   const handleAssign = async () => {
     if (!selectedDriverId || !onAssignDriver) return;
     setAssigning(true);
     setAssignError(null);
-    const ok = await onAssignDriver(vehicle.id, selectedDriverId);
-    setAssigning(false);
-    if (!ok) setAssignError(t('vehicleControl.assignFailed'));
-    else setSelectedDriverId('');
+    try {
+      await onAssignDriver(vehicle.id, selectedDriverId);
+      setSelectedDriverId('');
+    } catch (err) {
+      setAssignError({ title: t('vehicleControl.assignFailed'), lines: failureLines(err, t) });
+    } finally {
+      setAssigning(false);
+    }
   };
 
   const handleUnassign = async () => {
     if (!onUnassignDriver) return;
     setAssigning(true);
     setAssignError(null);
-    const ok = await onUnassignDriver(vehicle.id);
-    setAssigning(false);
-    if (!ok) setAssignError(t('vehicleControl.unassignFailed'));
+    try {
+      await onUnassignDriver(vehicle.id);
+    } catch (err) {
+      setAssignError({ title: t('vehicleControl.unassignFailed'), lines: failureLines(err, t) });
+    } finally {
+      setAssigning(false);
+    }
   };
 
   // Only show active drivers who are not already assigned to this motorcycle
@@ -145,12 +188,30 @@ export function ControlPanel({
   // arrived pinned to the wrong end and the first drag *sent* that wrong value.
   const engineCommand: VehicleCommand = isRunning ? 'stop' : 'start';
   const lockCommand:   VehicleCommand = isLocked  ? 'unlock' : 'lock';
+  /** Speed for the Stop confirmation, only when the vehicle reported moving. */
+  const reportedSpeed = vehicle.currentSpeedKmh !== undefined && vehicle.currentSpeedKmh > 0
+    ? `${vehicle.currentSpeedKmh} ${t('common.kmh')}`
+    : null;
   const speedSupported = isSupported('set_speed_limit');
-  const sliderValue    = clampSpeedLimit(speedLimit ?? 0);
+  /** What the label shows: the value being dragged, else the confirmed one. */
+  const shownSpeed     = speedDraft ?? speedLimit;
+  const sliderValue    = clampSpeedLimit(shownSpeed ?? VEHICLE_SPEED_LIMIT_MIN);
   const unsupportedTitle = tv('vehicleControl.commandUnsupportedTooltip');
 
+  /**
+   * Send the slider's value — only when it moved to something new. Tabbing
+   * onto the slider, or releasing it where it started, sends nothing (FA-236).
+   */
+  const commitSpeed = () => {
+    if (speedDraft === null || speedDraft === speedLimit) {
+      setSpeedDraft(null);
+      return;
+    }
+    void runCommand('set_speed_limit', speedDraft);
+  };
+
   const speedTicks = useMemo(
-    () => [0, VEHICLE_SPEED_LIMIT_MAX / 2, VEHICLE_SPEED_LIMIT_MAX],
+    () => [VEHICLE_SPEED_LIMIT_MIN, (VEHICLE_SPEED_LIMIT_MIN + VEHICLE_SPEED_LIMIT_MAX) / 2, VEHICLE_SPEED_LIMIT_MAX],
     [],
   );
 
@@ -178,7 +239,7 @@ export function ControlPanel({
 
         {/* A command to an offline device may simply never arrive. Say so rather
             than letting a spinner and a success imply it did. */}
-        {!vehicle.isOnline && (
+        {vehicle.isOnline === false && (
           <div className="mt-3 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
             <WifiOff className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
             <p>{tv('vehicleControl.commandOffline')}</p>
@@ -187,12 +248,19 @@ export function ControlPanel({
 
         {/* Power */}
         <div className="mt-4">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-            {t('vehicleControl.powerControl')}
-          </p>
+          {/* The heading says the state; the button says what it will do. */}
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+              {t('vehicleControl.powerControl')}
+            </p>
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              {isRunning ? t('vehicleControl.running') : t('vehicleControl.stopped')}
+            </span>
+          </div>
           <button
             type="button"
-            onClick={() => runCommand(engineCommand)}
+            // Starting is safe; stopping is confirmed first (FA-221).
+            onClick={() => (engineCommand === 'stop' ? setConfirming('stop') : runCommand('start'))}
             disabled={!!pending || !isSupported(engineCommand)}
             title={!isSupported(engineCommand) ? unsupportedTitle : undefined}
             className={cn(
@@ -211,9 +279,14 @@ export function ControlPanel({
 
         {/* Security Lock */}
         <div className="mt-4">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-            {t('vehicleControl.securityLock')}
-          </p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+              {t('vehicleControl.securityLock')}
+            </p>
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              {isLocked ? t('vehicleControl.locked') : t('vehicleControl.unlocked')}
+            </span>
+          </div>
           <button
             type="button"
             onClick={() => runCommand(lockCommand)}
@@ -226,10 +299,12 @@ export function ControlPanel({
                 : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400'
             )}
           >
+            {/* The action, not the state: it used to read "Locked" on the
+                button that unlocks (FA-221). */}
             {pending === 'lock' || pending === 'unlock'
               ? <Loader2 className="h-4 w-4 animate-spin" />
-              : isLocked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
-            {isLocked ? t('vehicleControl.locked') : t('vehicleControl.unlocked')}
+              : isLocked ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+            {isLocked ? t('vehicleControl.unlockAction') : t('vehicleControl.lockAction')}
           </button>
         </div>
 
@@ -241,27 +316,30 @@ export function ControlPanel({
             </p>
             {/* An unreported limit says so. It used to read "80 km/h" — a number
                 no fleet had set, on a slider that could not reach it. */}
-            {speedLimit === null ? (
+            {shownSpeed === null ? (
               <span className="text-xs font-medium text-slate-400">
                 {tv('vehicleControl.speedLimitUnknown')}
               </span>
             ) : (
               <span className="text-sm font-bold tabular-nums text-slate-900 dark:text-slate-100">
-                {speedLimit} {t('common.kmh')}
+                {shownSpeed} {t('common.kmh')}
               </span>
             )}
           </div>
+          {/* 10–80 km/h: what the vehicle command accepts (FA-204). */}
           <input
             type="range"
-            min={0}
+            min={VEHICLE_SPEED_LIMIT_MIN}
             max={VEHICLE_SPEED_LIMIT_MAX}
+            step={1}
             value={sliderValue}
             disabled={!!pending || !speedSupported}
             title={!speedSupported ? unsupportedTitle : undefined}
-            onChange={(e) => setSpeedLimit(Number(e.target.value))}
-            // Commit to the backend only when the user releases the slider.
-            onPointerUp={() => speedLimit !== null && runCommand('set_speed_limit', speedLimit)}
-            onKeyUp={() => speedLimit !== null && runCommand('set_speed_limit', speedLimit)}
+            aria-label={t('vehicleControl.speedLimit')}
+            onChange={(e) => setSpeedDraft(Number(e.target.value))}
+            // Commit to the backend only when the operator lets go, and only a change.
+            onPointerUp={commitSpeed}
+            onKeyUp={commitSpeed}
             className="mt-2 w-full accent-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
           />
           <div className="mt-1 flex justify-between text-[10px] text-slate-400">
@@ -282,9 +360,10 @@ export function ControlPanel({
           style={{ borderColor: 'rgb(var(--border))' }}
         >
           <div className="flex items-center justify-between text-xs">
+            {/* As last reported: nothing on this page polls (FA-315). */}
             <span className="text-slate-500">{t('vehicleControl.currentSpeed')}</span>
             <span className="font-bold tabular-nums text-slate-900 dark:text-slate-100">
-              {vehicle.currentSpeedKmh} {t('common.kmh')}
+              {vehicle.currentSpeedKmh === undefined ? '—' : `${vehicle.currentSpeedKmh} ${t('common.kmh')}`}
             </span>
           </div>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
@@ -293,7 +372,7 @@ export function ControlPanel({
               style={{
                 // Same scale as every other speed here, so a vehicle doing
                 // 60 km/h no longer renders as a full bar.
-                width: `${(clampSpeedLimit(vehicle.currentSpeedKmh) / VEHICLE_SPEED_LIMIT_MAX) * 100}%`,
+                width: `${Math.min(100, Math.max(0, ((vehicle.currentSpeedKmh ?? 0) / VEHICLE_SPEED_LIMIT_MAX) * 100)) || 0}%`,
               }}
             />
           </div>
@@ -308,7 +387,7 @@ export function ControlPanel({
             type="button"
             // Confirmed, not fired on the click: this cuts the engine of a
             // vehicle that may have a driver on it right now.
-            onClick={() => setConfirmEmergencyStop(true)}
+            onClick={() => setConfirming('emergency_stop')}
             disabled={!!pending || !isSupported('emergency_stop')}
             title={!isSupported('emergency_stop') ? unsupportedTitle : undefined}
             className="mt-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 text-sm font-bold text-white shadow-sm transition-all hover:from-rose-700 hover:to-red-700 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
@@ -326,15 +405,24 @@ export function ControlPanel({
       </Card>
 
       <ConfirmDeleteDialog
-        open={confirmEmergencyStop}
-        onClose={() => setConfirmEmergencyStop(false)}
+        open={confirming !== null}
+        onClose={() => setConfirming(null)}
         onConfirm={() => {
-          setConfirmEmergencyStop(false);
-          void runCommand('emergency_stop');
+          const action = confirming;
+          setConfirming(null);
+          if (action) void runCommand(action);
         }}
-        title={tv('vehicleControl.emergencyStopConfirmTitle')}
-        description={tv('vehicleControl.emergencyStopConfirmDescription')}
-        confirmLabel={tv('vehicleControl.emergencyStopConfirmAction')}
+        title={confirming === 'stop'
+          ? tv('vehicleControl.stopEngineConfirmTitle')
+          : tv('vehicleControl.emergencyStopConfirmTitle')}
+        description={confirming === 'stop'
+          ? [tv('vehicleControl.stopEngineConfirmDescription'),
+             reportedSpeed ? t('vehicleControl.stopEngineConfirmSpeed', { speed: reportedSpeed }) : '',
+            ].filter(Boolean).join(' ')
+          : tv('vehicleControl.emergencyStopConfirmDescription')}
+        confirmLabel={confirming === 'stop'
+          ? t('vehicleControl.stopEngineConfirmAction')
+          : tv('vehicleControl.emergencyStopConfirmAction')}
       />
 
       {/* Driver Assignment */}
@@ -377,6 +465,15 @@ export function ControlPanel({
           /* No driver — show dropdown + assign button */
           <div>
             <p className="mb-2 text-xs text-slate-500">{tv('vehicleControl.noDriverAssigned')}</p>
+            {driversError !== undefined ? (
+              <LoadError
+                title={t('vehicleControl.driversLoadFailed')}
+                lines={failureLines(driversError, t)}
+                onRetry={onRetryDrivers}
+                retrying={driversLoading}
+              />
+            ) : (
+            <>
             <select
               value={selectedDriverId}
               onChange={(e) => setSelectedDriverId(e.target.value)}
@@ -408,13 +505,13 @@ export function ControlPanel({
               }
               {t('vehicleControl.assignDriver')}
             </button>
+            </>
+            )}
           </div>
         )}
 
         {/* Error */}
-        {assignError && (
-          <p className="mt-2 text-xs text-rose-600">{assignError}</p>
-        )}
+        {assignError && <FailureNote title={assignError.title} lines={assignError.lines} />}
       </Card>
 
       {/* System Status */}
@@ -435,21 +532,25 @@ export function ControlPanel({
           />
           <SystemStatusRow
             label={t('vehicleControl.gpsSignal')}
-            // 'none' used to render as a bare em dash — indistinguishable from
-            // "we have no reading" when it means "the device reports no fix".
+            // 'none' is the device reporting no fix; 'unknown' is no reading at
+            // all, which used to be shown as a green "Strong" (FA-218).
             value={
               vehicle.gpsSignal === 'strong'
                 ? t('vehicleControl.strong')
                 : vehicle.gpsSignal === 'weak'
                 ? t('vehicleControl.weak')
-                : t('vehicleControl.gpsNone')
+                : vehicle.gpsSignal === 'none'
+                ? t('vehicleControl.gpsNone')
+                : t('vehicleControl.gpsUnknown')
             }
-            tone={vehicle.gpsSignal === 'strong' ? 'success' : 'warning'}
+            tone={vehicle.gpsSignal === 'strong' ? 'success' : vehicle.gpsSignal === 'unknown' ? 'neutral' : 'warning'}
           />
           <SystemStatusRow
             label={t('vehicleControl.connection')}
-            value={vehicle.isOnline ? t('vehicleControl.online') : t('vehicleControl.offline')}
-            tone={vehicle.isOnline ? 'success' : 'danger'}
+            value={vehicle.isOnline === undefined
+              ? t('vehicleControl.connectionUnknown')
+              : vehicle.isOnline ? t('vehicleControl.online') : t('vehicleControl.offline')}
+            tone={vehicle.isOnline === undefined ? 'neutral' : vehicle.isOnline ? 'success' : 'danger'}
           />
         </ul>
       </Card>

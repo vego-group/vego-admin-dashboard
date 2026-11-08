@@ -17,10 +17,14 @@ import {
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
 import { NoAccessState } from '@/components/ui/NoAccessState';
+import { LoadError } from '@/components/ui/LoadError';
 import { useNotificationStore } from '@/store/notifications';
 import { useI18n } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/cn';
+import { failureLines } from '@/lib/api-errors';
+import { formatRelativeTime } from '@/lib/format';
 import type { Notification, NotificationType } from '@/types';
 
 /* ── Type config ─────────────────────────────────── */
@@ -72,18 +76,6 @@ const TYPE_CFG: Record<
   },
 };
 
-/* ── Time helper ─────────────────────────────────── */
-
-function timeAgo(dateStr: string): string {
-  const mins = Math.floor((Date.now() - new Date(dateStr).getTime()) / 60_000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins} minute${mins !== 1 ? 's' : ''} ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
-  const days = Math.floor(hours / 24);
-  return `${days} day${days !== 1 ? 's' : ''} ago`;
-}
-
 /* ── Filter tabs ─────────────────────────────────── */
 
 type FilterTab = 'all' | 'unread' | 'alert' | 'warning' | 'success';
@@ -92,21 +84,30 @@ type FilterTab = 'all' | 'unread' | 'alert' | 'warning' | 'success';
 
 export default function NotificationsPage() {
   const { t } = useI18n();
-  const { notifications, unreadCount, loading, forbidden, fetchNotifications, markAsRead, markAllAsRead, remove, clearAll } =
+  const { notifications, total, truncated, unreadCount, loading, forbidden, loadError, fetchNotifications, markAsRead, markAllAsRead, remove, clearAll } =
     useNotificationStore();
+  // A failed load: the counts are unknown ("—") and the list says why, with
+  // Retry — never an empty list that reads as "no notifications" (FA-312).
+  const failed = loadError !== undefined && !loading;
+  const count = (n: number) => (failed ? '—' : n);
   const [filter, setFilter] = useState<FilterTab>('all');
+  // "Clear All" deletes every notification on the server — including any past
+  // the first page this list shows — with no undo, so it asks first (FA-304).
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
 
   useEffect(() => { void fetchNotifications(); }, [fetchNotifications]);
 
   const stats = useMemo(
     () => ({
-      total:   notifications.length,
+      // The server's total when it sent one; the per-type counts can only
+      // cover the notifications loaded, which the note below says (FA-306).
+      total:   total ?? notifications.length,
       success: notifications.filter((n) => n.type === 'success').length,
       warning: notifications.filter((n) => n.type === 'warning').length,
       alert:   notifications.filter((n) => n.type === 'alert').length,
       error:   notifications.filter((n) => n.type === 'error').length,
     }),
-    [notifications]
+    [notifications, total]
   );
 
   const filtered = useMemo(() => {
@@ -145,39 +146,49 @@ export default function NotificationsPage() {
         <StatCard
           icon={<Bell className="h-5 w-5" />}
           label={t('notifications.total')}
-          count={stats.total}
+          count={count(stats.total)}
           cardCls="bg-blue-50/70 dark:bg-blue-500/10"
           iconCls="bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400"
         />
         <StatCard
           icon={<CheckCircle2 className="h-5 w-5" />}
           label={t('notifications.success')}
-          count={stats.success}
+          count={count(stats.success)}
           cardCls="bg-emerald-50/70 dark:bg-emerald-500/10"
           iconCls="bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400"
         />
         <StatCard
           icon={<AlertTriangle className="h-5 w-5" />}
           label={t('notifications.warnings')}
-          count={stats.warning}
+          count={count(stats.warning)}
           cardCls="bg-amber-50/70 dark:bg-amber-500/10"
           iconCls="bg-amber-100 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400"
         />
         <StatCard
           icon={<AlertOctagon className="h-5 w-5" />}
           label={t('notifications.alerts')}
-          count={stats.alert}
+          count={count(stats.alert)}
           cardCls="bg-orange-50/70 dark:bg-orange-500/10"
           iconCls="bg-orange-100 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400"
         />
         <StatCard
           icon={<XCircle className="h-5 w-5" />}
           label={t('notifications.errors')}
-          count={stats.error}
+          count={count(stats.error)}
           cardCls="bg-red-50/70 dark:bg-red-500/10"
           iconCls="bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400"
         />
       </div>
+
+      {/* Never cut short without saying so (FA-306). */}
+      {truncated && !loading && (
+        <p className="mt-3 flex items-start gap-1.5 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {total !== undefined
+            ? t('notifications.partialListOfTotal', { shown: notifications.length, total })
+            : t('notifications.partialList', { shown: notifications.length })}
+        </p>
+      )}
 
       {/* ── Filter + actions row ──────────────────── */}
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
@@ -221,7 +232,7 @@ export default function NotificationsPage() {
             {t('notifications.markAllRead')}
           </button>
           <button
-            onClick={clearAll}
+            onClick={() => setConfirmClearAll(true)}
             disabled={notifications.length === 0}
             className="flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium text-rose-600 transition-colors hover:bg-rose-50 disabled:opacity-40 dark:text-rose-400 dark:hover:bg-rose-500/10"
             style={{ borderColor: 'rgb(var(--border))' }}
@@ -233,6 +244,15 @@ export default function NotificationsPage() {
       </div>
 
       {/* ── Notification list ─────────────────────── */}
+      {failed ? (
+        <LoadError
+          className="mt-4"
+          title={t('notifications.loadFailed')}
+          lines={failureLines(loadError, t)}
+          onRetry={() => { void fetchNotifications(); }}
+          retrying={loading}
+        />
+      ) : (
       <Card className="mt-4 divide-y divide-slate-100 overflow-hidden dark:divide-slate-800">
         {loading ? (
           <div className="space-y-px">
@@ -262,6 +282,19 @@ export default function NotificationsPage() {
           ))
         )}
       </Card>
+      )}
+
+      <ConfirmDeleteDialog
+        open={confirmClearAll}
+        onClose={() => setConfirmClearAll(false)}
+        onConfirm={() => {
+          setConfirmClearAll(false);
+          void clearAll();
+        }}
+        title={t('notifications.clearAllConfirmTitle')}
+        description={t('notifications.clearAllConfirmDescription')}
+        confirmLabel={t('notifications.clearAllConfirmAction')}
+      />
     </DashboardShell>
   );
 }
@@ -277,7 +310,8 @@ function StatCard({
 }: {
   icon: React.ReactNode;
   label: string;
-  count: number;
+  /** A number, or "—" when the list failed to load. */
+  count: number | string;
   cardCls: string;
   iconCls: string;
 }) {
@@ -305,7 +339,7 @@ function NotificationItem({
   onMarkRead: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const cfg = TYPE_CFG[notification.type];
   const { Icon } = cfg;
 
@@ -333,7 +367,9 @@ function NotificationItem({
             {notification.title}
           </h3>
           <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">
-            {timeAgo(notification.createdAt)}
+            {/* Was an English-only "N minutes ago" that read "NaN days ago" for
+                an unreadable date; now the shared, guarded formatter. */}
+            {formatRelativeTime(notification.createdAt, locale)}
           </span>
         </div>
 

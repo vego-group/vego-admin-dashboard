@@ -9,6 +9,7 @@ import { BrandPanel } from '@/components/auth/BrandPanel';
 import { LanguageSwitcher } from '@/components/layout/LanguageSwitcher';
 import { toE164 } from '@/lib/country';
 import { cn } from '@/lib/cn';
+import { LEGAL_LINKS } from '@/lib/legal-links';
 
 const OTP_LENGTH = 6;
 const RESEND_COUNTDOWN = 60;
@@ -21,7 +22,7 @@ function formatCountdown(seconds: number): string {
 
 export default function OtpPage() {
   const router = useRouter();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { verifyOtp, sendOtp, isLoading, error, isAuthenticated, pendingPhone, loginCountry } =
     useAuthStore();
 
@@ -182,9 +183,9 @@ export default function OtpPage() {
       {/* Footer */}
       <p className="mt-5 text-center text-sm text-slate-400">
         {t('auth.agreePrefix')}{' '}
-        <a href="https://www.vego.sa/en/terms-and-conditions" target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">{t('auth.termsOfService')}</a>
+        <a href={LEGAL_LINKS[locale].terms} target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">{t('auth.termsOfService')}</a>
         {t('auth.agreeJoin')}
-        <a href="https://www.vego.sa/en/privacy-policy" target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">{t('auth.privacyPolicy')}</a>
+        <a href={LEGAL_LINKS[locale].privacy} target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">{t('auth.privacyPolicy')}</a>
       </p>
     </div>
   );

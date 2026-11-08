@@ -14,6 +14,9 @@ const en = {
   common: {
     appName: 'MyVego',
     appTagline: 'Fleet Management',
+    // The signed-in account's role in the top bar (FA-005).
+    roleFleetAdmin: 'Fleet admin',
+    toggleNavigation: 'Toggle navigation',
     search: 'Search',
     searchByName: 'Search by name...',
     all: 'All',
@@ -42,20 +45,32 @@ const en = {
     noAccessTitle: "You don't have access to this data",
     noAccessDescription: 'The server refused this request for your account. Contact your MyVego administrator if you need access.',
     retry: 'Retry',
+    pagination: 'Pagination',
+    previousPage: 'Previous page',
+    nextPage: 'Next page',
+    // Which rows of a server-paged list are on screen (FA-302, FA-306).
+    showingRange: 'Showing {{from}}–{{to}} of {{total}}',
+    showingRangeNoTotal: "Showing {{from}}–{{to}}. The server didn't report a total, so there may be more: use Next to check.",
+    // Why a request failed, when the backend wrote no message of its own
+    // (`failureLines` in @/lib/api-errors).
+    requestFailedNetwork: "Couldn't reach the server. Check your connection and try again.",
+    requestTimedOut: "The server didn't answer in time. Refresh the page to check whether the change was saved.",
+    requestFailedStatus: 'The server returned an error (HTTP {{status}}). Please try again.',
+    // A part of a page that failed to load, under its own heading (FA-312).
+    sectionLoadFailed: "This section couldn't be loaded.",
     today: 'Today',
     yesterday: 'Yesterday',
     fromYesterday: 'from yesterday',
-    lastUpdate: 'Last update now',
+    // Nothing in this app polls: data is as last reported when the page loaded (FA-315).
+    lastKnown: 'Last known',
     minutes: 'min',
     kilometers: 'km',
     kmh: 'km/h',
-    minAgo: 'min ago',
-    hourAgo: 'hour ago',
-    daysAgo: 'days ago',
-    justNow: 'Just now',
+    volts: 'V',
+    celsius: '°C',
     signOut: 'Sign Out',
     signIn: 'Sign In',
-    liveUpdates: 'Live Updates',
+    lastKnownPositions: 'Last known positions',
     realtime: 'Real-time',
   },
   nav: {
@@ -92,14 +107,17 @@ const en = {
     gpsStrong: 'Strong',
     gpsWeak: 'Weak',
     gpsNone: 'No signal',
+    gpsUnknown: 'Not reported',
   },
   alarms: {
     title: 'Alarms',
+    loadFailed: "Alarms couldn't be loaded.",
     subtitle: 'Review and resolve device and {{vehicle}} alarms',
     unresolved: 'Unresolved',
     criticalOpen: 'Critical (open)',
     resolved: 'Resolved',
     resolve: 'Resolve',
+    resolveFailed: "This alarm couldn't be marked resolved.",
     allClearTitle: 'All clear',
     allClearDescription: 'There are no alarms to show for this filter.',
     severityCritical: 'Critical',
@@ -111,8 +129,14 @@ const en = {
     subtitle: 'Battery swap and charging activity across drivers',
     swaps: 'Battery Swaps',
     charging: 'Charging',
-    searchPlaceholder: 'Search by driver or station…',
     empty: 'No sessions found for this filter.',
+    allStatuses: 'All statuses',
+    allDrivers: 'All drivers',
+    from: 'From',
+    to: 'To',
+    clearFilters: 'Clear filters',
+    dateRangeInvalid: 'The "From" date is after the "To" date.',
+    loadFailed: "Sessions couldn't be loaded.",
     driver: 'Driver',
     station: 'Station',
     status: 'Status',
@@ -127,13 +151,11 @@ const en = {
   },
   dashboard: {
     title: 'Dashboard',
-    subtitle: 'Real-time fleet monitoring and analytics',
+    subtitle: 'Fleet monitoring and analytics',
     activeFleet: 'Active Fleet',
     availableBatteries: 'Available Batteries',
-    totalTripsToday: 'Total Trips Today',
-    avgTripDuration: 'Avg. Trip Duration',
-    liveFleetMap: 'Live Fleet Map',
-    liveFleetMapSubtitle: 'Real-time location of {{vehicles}} and battery stations',
+    liveFleetMap: 'Fleet Map',
+    liveFleetMapSubtitle: 'Last known location of {{vehicles}} and battery stations',
     fleetStatus: 'Fleet Status',
     chargingBattery: 'Charging battery',
     averageSoc: 'Average SOC',
@@ -141,17 +163,19 @@ const en = {
     averageCostVehicle: 'Average cost/{{vehicle}}',
     successRate: 'Success rate',
     totalDrivers: 'Total Drivers',
-    activeTrips: 'Active Trips',
     unresolvedAlarms: 'Unresolved Alarms',
     onlineDevices: 'Online Devices',
     todaysUsage: "Today's Usage",
     batteryHealthTrend: 'Battery Health Trend',
-    charged: 'charged',
     available: 'Available',
     inUse: 'In Use',
     total: 'Total',
     availability: 'Availability',
     batteryStation: 'Battery Station',
+    metricsLoadFailed: "The fleet figures couldn't be loaded.",
+    mapLoadFailed: "Part of the map couldn't be loaded.",
+    usageEmpty: 'No usage data for today.',
+    healthEmpty: 'No battery health readings yet.',
   },
   fleet: {
     title: 'Fleet Management',
@@ -161,7 +185,9 @@ const en = {
     idle: 'Idle',
     maintenance: 'Maintenance',
     battery: 'Battery',
-    lastTrip: 'Last Trip',
+    lastReported: 'Last reported',
+    sortReportedNewest: 'Last reported: newest first',
+    sortReportedOldest: 'Last reported: oldest first',
     totalDistance: 'Total Distance',
     vehicleId: '{{Vehicle}} ID',
     plateNumber: 'Plate Number',
@@ -183,6 +209,10 @@ const en = {
     assignSuccessDescription: '{{driver}} is now assigned to {{plate}}.',
     unassignSuccessTitle: 'Driver unassigned',
     unassignSuccessDescription: '{{plate}} no longer has a driver assigned.',
+    // Loading the list (was raw English err.message, FA-215).
+    loadFailed: "Your {{vehicles}} couldn't be loaded.",
+    emptyNone: 'Your fleet has no {{vehicles}} yet.',
+    emptyNoMatch: 'Nothing matches this search or filter.',
   },
   stations: {
     title: 'Battery Stations',
@@ -196,23 +226,23 @@ const en = {
     currentlyInVehicles: 'Currently in {{vehicles}}',
     acrossStations: 'Across {{count}} stations',
     stationLocations: 'Station Locations',
-    realtimeMap: 'Real-time battery availability map',
+    realtimeMap: 'Battery availability, as last reported',
     avgWaitTime: 'Avg Wait Time',
   },
   drivers: {
     title: 'Driver Management',
     subtitle: 'Monitor and manage your Drivers',
     activeDrivers: 'Active Drivers',
-    pendingDrivers: 'Pending Approval',
+    // App sign-ups waiting for VEGO (SuperAdmin) — not something a fleet approves.
+    pendingDrivers: 'Awaiting VEGO review',
+    pendingDriversHint: 'Registered in the app. VEGO reviews them; nothing to do here.',
     blockedDrivers: 'Blocked',
     inactive: 'Inactive',
-    totalCost: 'Total Cost',
     driverId: 'Driver ID',
     name: 'Name',
     phone: 'Phone',
     vehicles: '{{Vehicles}}',
     status: 'Status',
-    trips: 'Trips',
     charges: 'Charges',
     swaps: 'Swaps',
     actions: 'Actions',
@@ -237,6 +267,12 @@ const en = {
     cityPlaceholder: { SA: 'Riyadh', JO: 'Amman' },
     // Saudi only: there is no confirmed Jordanian licence format.
     licenseNumberPlaceholder: { SA: 'SA-XXXXXX' },
+    // Saudi only, as before: there is no confirmed Jordanian plate format.
+    plateNumberPlaceholder: { SA: 'ABC 1234' },
+    fullNamePlaceholder: 'e.g. Ahmed Al-Khaldi',
+    emailPlaceholder: 'name@example.com',
+    // An upload box for a document the driver already has on file.
+    fileOnRecord: 'File on record',
     vehicleAssignment: '{{Vehicle}} Assignment',
     assignVehicle: 'Assign {{Vehicle}}',
     assignedVehicle: 'Assigned {{Vehicle}}',
@@ -245,7 +281,7 @@ const en = {
     noVehicleAssigned: 'No {{Vehicle}} Assigned',
     noteLabel: 'Note',
     assignmentHint:
-      'Use the Assign {{Vehicle}} action in the drivers list to give this driver a {{vehicle}}. Once assigned, they can start trips with it, and you can change the assignment at any time.',
+      'Use the Assign {{Vehicle}} action in the drivers list to give this driver a {{vehicle}}. You can change the assignment at any time.',
     fullNameRequired: 'Full name is required',
     phoneRequired: 'Phone number is required',
     phoneInvalid: 'Please enter a valid phone number',
@@ -287,40 +323,18 @@ const en = {
     // `{{count}}` is "0/3" — verified out of the three documents.
     docsVerifiedCount: '{{count}} verified',
     docUploadFailedTitle: 'The driver was saved, but the documents were not uploaded.',
-    docUploadFailedStatus: 'The server answered HTTP {{status}}.',
-    docUploadFailedNetwork: 'The server could not be reached.',
     docUploadRetryHint: 'Fix the files and save again to retry the upload.',
-    // Pending requests tab
-    pendingRequests: 'Pending Requests',
-    registrationRequests: 'Registration Requests',
-    registrationRequestsSubtitle: 'Drivers who registered via the app awaiting approval',
-    requestedAt: 'Requested At',
-    approve: 'Approve',
-    reject: 'Reject',
-    viewDetails: 'View Details',
-    approveRequestConfirm: 'Approve this driver and add them to your fleet?',
-    rejectRequestConfirm: 'Reject this registration request?',
-    noPendingRequests: 'No pending registration requests',
-    noPendingRequestsDescription: 'All requests have been reviewed. New registrations will appear here.',
-    // Confirmation popups
-    approveDriverTitle: 'Approve Driver?',
-    approveDriverMessage: 'Are you sure you want to approve {{name}} and add them to your fleet?',
-    rejectRequestTitle: 'Reject Request?',
-    rejectRequestMessage: "Are you sure you want to reject {{name}}'s registration request? This action cannot be undone.",
-    rejectReason: 'Reason for Rejection',
-    rejectReasonPlaceholder: 'e.g. License image is blurry. Please resubmit with a clearer photo.',
-    rejectReasonTooShort: 'Please provide a reason (at least 5 characters).',
-    rejectReasonTooLong: 'Reason must be 500 characters or fewer.',
-    // View details modal
-    contactInformation: 'Contact Information',
-    noLicenseLabel: 'No license',
-    expiresLabel: 'Expires',
-    uploadedCount: '{{count}}/3 uploaded',
-    // Table columns
-    driverColumn: 'Driver',
-    contactColumn: 'Contact',
-    pendingBadge: 'Pending',
-    requestedLabel: 'Requested {{time}}',
+    // A refused save or status change, followed by the backend's reason.
+    createFailed: "The driver wasn't added.",
+    updateFailed: "Your changes weren't saved.",
+    activateFailed: "Couldn't activate {{name}}.",
+    deactivateFailed: "Couldn't set {{name}} to inactive.",
+    blockFailed: "Couldn't block {{name}}.",
+    unblockFailed: "Couldn't unblock {{name}}.",
+    // The list itself (FA-209).
+    loadFailed: "Drivers couldn't be loaded.",
+    emptyNone: 'No drivers yet. Use Add New Driver to add one.',
+    emptyNoMatch: 'No drivers match this search or filter.',
     // Wallet balance & top-up
     walletBalance: 'Wallet Balance',
     topUp: 'Top Up',
@@ -362,8 +376,8 @@ const en = {
     searchMotorcycles: 'Search by plate, ID, or model…',
     noAvailableMotorcycles: 'No unassigned {{vehicles}} available.',
     noMotorcycleAssigned: 'No {{vehicle}}',
-    assignMotorcycleFailed: 'Failed to assign the {{vehicle}}. Please try again.',
-    unassignMotorcycleFailed: 'Failed to unassign the {{vehicle}}. Please try again.',
+    assignMotorcycleFailed: "Couldn't assign the {{vehicle}}.",
+    unassignMotorcycleFailed: "Couldn't unassign the {{vehicle}}.",
     motorcycleAssignedTitle: '{{Vehicle}} assigned',
     motorcycleAssignedDescription: '{{motorcycle}} is now assigned to {{driver}}.',
     motorcycleUnassignedTitle: '{{Vehicle}} unassigned',
@@ -391,6 +405,8 @@ const en = {
     topUpSuccessDescription: "{{name}}'s wallet has been topped up with {{amount}}.",
     topUpAmountRequired: 'Please enter a valid amount',
     topUpAmountInvalid: 'Amount must be greater than 0',
+    // More decimals than the currency has (FA-423): refused, never rounded.
+    topUpAmountTooPrecise: 'This amount has too many decimal places. Use at most {{decimals}}.',
     // Minimum top-up — the amount comes from the backend, never from this app.
     minTopUpHint: 'Minimum top-up: {{amount}}',
     minTopUpAbsoluteFloor: 'The minimum top-up is {{amount}}.',
@@ -412,6 +428,18 @@ const en = {
     removeCardConfirm: 'Remove this saved card?',
     saveCardHint: 'You can choose to save this card on the next step for faster future top-ups.',
     chargeFailed: 'The payment could not be completed. Please try again or use another card.',
+    chargeUncertain: "We couldn't confirm this payment. It may still go through. Check Wallet Transactions before trying again.",
+    paymentAlreadyProcessing: 'This payment is already being processed. Check Wallet Transactions before trying again.',
+    cardFormLoadFailed: 'The card form could not be loaded. Check your connection and try again. Nothing has been charged.',
+    paymentAmountMismatch: 'The payment server prepared {{prepared}}, not the {{shown}} shown here, so the card form was not opened. Nothing has been charged. Close this form and start the top-up again.',
+    initiateNoAnswer: "The payment server didn't answer, so no card form was opened. Nothing has been charged. Please try again.",
+    initiateIncomplete: "The payment server's answer was incomplete, so no card form was opened. Nothing has been charged. Please try again.",
+    // Translated stand-ins for the client's English error text (FA-422).
+    initiateFailed: "The payment couldn't be started. Nothing has been charged. Please try again.",
+    topUpBelowMinimum: 'This amount is below the minimum top-up.',
+    // The fleet profile has no country yet (FA-424): Pay waits for it.
+    topUpCountryUnknown: "Couldn't load your fleet's country",
+    topUpCountryUnknownHint: 'Card payments depend on it, so Pay stays off until it loads. Nothing has been charged.',
     // These four were hardcoded English in TopUpModal — invisible to the
     // language switch, and the two naming Moyasar were wrong outright for a
     // Jordanian fleet, where Moyasar is not the gateway. The gateway is now a
@@ -426,19 +454,20 @@ const en = {
   },
   vehicleControl: {
     title: '{{Vehicle}} Control',
-    subtitle: 'Real-time fleet monitoring and analytics',
+    subtitle: 'Status and controls for your fleet',
     selectVehicle: 'Select a {{Vehicle}}',
     selectVehicleDescription: 'Choose a {{vehicle}} from the list to view details and controls',
+    searchVehicles: 'Search by plate, ID, model or driver…',
     batteryStatus: 'Battery Status',
     currentLevel: 'Current Level',
     estRange: 'Est. Range',
     vehicleInformation: '{{Vehicle}} Information',
     location: 'Location',
     assignedDriver: 'Assigned Driver',
-    currentSpeed: 'Current Speed',
-    liveLocation: 'Live Location',
-    fullMap: 'Full Map',
-    mapPlaceholder: 'Map View Placeholder',
+    currentSpeed: 'Last known speed',
+    lastKnownPosition: 'Last known position',
+    lastSeen: 'Last reported {{time}}',
+    openInMaps: 'Open in Google Maps',
     controlPanel: 'Control Panel',
     powerControl: 'Power Control',
     stopEngine: 'Stop Engine',
@@ -446,6 +475,9 @@ const en = {
     securityLock: 'Security Lock',
     locked: 'Locked',
     unlocked: 'Unlocked',
+    // What the lock button does; `locked` / `unlocked` above say the state.
+    lockAction: 'Lock',
+    unlockAction: 'Unlock',
     speedLimit: 'Speed Limit',
     emergency: 'Emergency',
     emergencyStop: 'EMERGENCY STOP',
@@ -459,24 +491,32 @@ const en = {
     // 'none' used to render as a bare em dash, which reads as "we didn't check"
     // rather than "the device is reporting no fix".
     gpsNone: 'No signal',
+    gpsUnknown: 'Not reported',
     connection: 'Connection',
     online: 'Online',
     offline: 'Offline',
+    connectionUnknown: 'Not reported',
     // Statistics card
     statistics: 'Statistics',
-    statTrips: 'Trips',
+    // Sessions, not trips: the platform has no trips (FA-206).
     statSwaps: 'Swaps',
+    statCharges: 'Charges',
     statAlarms: 'Alarms',
     statDistance: 'Total Distance',
+    // Battery detail chips (were hard-coded English).
+    stateOfHealth: 'Health',
+    voltage: 'Voltage',
+    temperature: 'Temperature',
     // Driver assignment card
     driverAssignment: 'Driver Assignment',
     noDriverAssigned: 'No driver currently assigned to this {{vehicle}}.',
     selectDriver: 'Select a driver…',
     assignDriver: 'Assign Driver',
     unassignDriver: 'Unassign Driver',
-    assignFailed: 'Failed to assign driver. Please try again.',
-    unassignFailed: 'Failed to unassign driver. Please try again.',
+    assignFailed: "Couldn't assign the driver.",
+    unassignFailed: "Couldn't unassign the driver.",
     commandFailed: 'The command did not reach the {{vehicle}}. Nothing has changed — please try again.',
+    commandUnconfirmed: 'The {{vehicle}} didn’t confirm the command in time. It may still have been applied — check the {{vehicle}} before trying again.',
 
     // ── Who owns these controls (CR-7.1) ────────────────────────────────────
     // Individual owners *do* get engine, lock and speed control in the mobile
@@ -494,9 +534,21 @@ const en = {
     emergencyStopConfirmDescription:
       'An emergency stop cuts the engine and locks the {{vehicle}} immediately, wherever it is. If a driver is riding it, it will stop under them. Only use this when the {{vehicle}} must not keep moving.',
     emergencyStopConfirmAction: 'Emergency stop',
+    // Plain Stop is confirmed too (FA-221): it also cuts a possibly moving vehicle.
+    stopEngineConfirmTitle: 'Stop the engine of this {{vehicle}}?',
+    stopEngineConfirmDescription:
+      'The engine stops at once, wherever the {{vehicle}} is. If a driver is riding it, it will stop under them.',
+    stopEngineConfirmSpeed: 'Last reported speed: {{speed}}.',
+    stopEngineConfirmAction: 'Stop engine',
     speedLimitUnknown: 'Not reported',
     speedLimitUnknownHint:
       'This {{vehicle}} has not reported a speed limit. Setting one below sends it to the device.',
+    // Loading the page (FA-208). The vehicle list and the driver picker load
+    // separately: a failed driver list only costs the picker.
+    loadFailed: "Your {{vehicles}} couldn't be loaded.",
+    driversLoadFailed: "Drivers couldn't be loaded, so none can be picked here.",
+    listEmpty: 'Your fleet has no {{vehicles}} yet.',
+    listNoMatch: 'Nothing matches this search.',
   },
   zones: {
     title: 'Zone Control',
@@ -534,24 +586,26 @@ const en = {
     speedNormalLabel: 'Normal Speed',
     speedSlowLabel: 'Slow',
     speedLimitRequired: 'Set a speed limit between {{min}} and {{max}} km/h',
-    speedHint: 'All fleet {{vehicles}} in this zone will be automatically limited to this maximum speed',
+    // Zones are advisory (FA-303): nothing pushes a zone to a vehicle, so no
+    // string here may say a vehicle is slowed, limited or stopped by one.
+    speedHint:
+      'The advised maximum speed shown to your drivers in this zone. It is not applied to {{vehicles}} automatically.',
     statusLabel: 'Status',
-    statusActiveDescription: 'Zone rules are switched on',
-    statusInactiveDescription: 'Zone rules are paused',
+    statusActiveDescription: 'Switched on: shown to your drivers',
+    statusInactiveDescription: 'Switched off. You can turn it back on at any time.',
 
-    // ── Who a zone binds (CR-7.4) ───────────────────────────────────────────
-    // `enforced` is not `active`: active is "the rules are switched on",
-    // enforced is "the backend binds riders to them". And a fleet's zones bind
-    // that fleet's drivers only — an operator reading an unlabelled map assumes
-    // it covers every rider on those roads, which it does not.
+    // ── Who a zone covers (CR-7.4) ──────────────────────────────────────────
+    // `enforced` is not `active`: active is "the zone is switched on",
+    // enforced is a backend flag. The chip appears only when the backend sends
+    // it, and even then it claims nothing about the vehicle itself.
     enforcedLabel: 'Enforced',
     notEnforcedLabel: 'Advisory',
     enforcedFleetNote:
-      'Enforced on your fleet’s drivers: their {{vehicles}} are limited automatically inside this zone.',
+      'Marked as enforced by VEGO for your fleet’s drivers inside this zone.',
     notEnforcedFleetNote:
-      'Not enforced — this zone is shown on the map but does not limit any {{vehicle}}.',
+      'Advisory: shown to your drivers. It does not limit any {{vehicle}}.',
     enforcementScopeNote:
-      'Your zones bind your own drivers. Individual owners riding their own {{vehicles}} on these roads are not affected by them.',
+      'Zones are shown to your fleet’s drivers as guidance only. Nothing slows down or stops a {{vehicle}} automatically, and riders outside your fleet are not covered.',
     saveZone: 'Save Zone',
     cancel: 'Cancel',
     notice: 'Notice',
@@ -562,13 +616,13 @@ const en = {
     types: {
       normal: 'Normal',
       normalLong: 'Normal Zone',
-      normalDescription: 'The {{vehicle}} operates normally with no restrictions',
+      normalDescription: 'No speed advice and no riding restriction',
       slow: 'Slow Zone',
       slowLong: 'Slow Zone',
-      slowDescription: 'Speed capped — the {{vehicle}} is limited to the set speed',
+      slowDescription: 'Drivers are asked to stay below the set speed. It is not applied automatically.',
       restricted: 'Restricted',
       restrictedLong: 'Restricted Zone',
-      restrictedDescription: 'The {{vehicle}} is shut down — riding is not allowed inside',
+      restrictedDescription: 'Drivers are told not to ride inside. {{Vehicles}} are not stopped automatically.',
     },
 
     // Validation
@@ -583,6 +637,15 @@ const en = {
     overlapWithZones:
       'The drawn zone overlaps: {{zones}}. Adjust the boundaries so the zones do not overlap.',
     overlapHint: 'The current shape overlaps an existing zone — adjust the boundaries.',
+    // The outline may not cross itself (FA-325).
+    selfCrossingEdge:
+      'This line would cross the zone’s own outline. Place the point so the outline does not cross itself.',
+    selfCrossingClose:
+      'Closing this shape would make its outline cross itself. Add points so the line back to the first point does not cross it, or start again.',
+    // A refused save, shown inside the drawer (FA-326).
+    createFailed: "The zone wasn't saved.",
+    updateFailed: "Your changes to the zone weren't saved.",
+    shapeOnMap: 'Shape on the map',
 
     // Actions / dialogs
     showOnMap: 'Show on map',
@@ -602,6 +665,10 @@ const en = {
   notifications: {
     title: 'Notifications',
     subtitle: 'Stay updated with your fleet activities',
+    partialListOfTotal:
+      'Showing the {{shown}} most recent of {{total}} notifications. The type counts and tabs cover these {{shown}} only.',
+    partialList:
+      'Showing the {{shown}} most recent notifications; there may be older ones. The type counts and tabs cover these {{shown}} only.',
     total: 'Total',
     success: 'Success',
     warnings: 'Warnings',
@@ -611,8 +678,13 @@ const en = {
     unread: 'Unread',
     markAllRead: 'Mark All Read',
     clearAll: 'Clear All',
+    clearAllConfirmTitle: 'Delete all notifications?',
+    clearAllConfirmDescription:
+      'This permanently deletes every notification for your account, including any not shown on this page. It can’t be undone.',
+    clearAllConfirmAction: 'Delete all',
     markRead: 'Mark Read',
     noNotifications: 'No notifications',
+    loadFailed: "Notifications couldn't be loaded.",
     typeAlert: 'Alert',
     typeWarning: 'Warning',
     typeSuccess: 'Success',
@@ -623,21 +695,14 @@ const en = {
   reports: {
     title: 'Report Management',
     subtitle: 'Monitor and manage your entire electric {{vehicle}} fleet',
-    partialLoad: 'Some report data could not be loaded:',
-    sectionMetrics: 'Key metrics',
-    sectionWeeklyTrips: 'Weekly trips',
-    sectionMonthlyRevenue: 'Monthly revenue',
-    sectionBatteryDistribution: 'Battery distribution',
-    sectionCostAnalysis: 'Cost analysis',
-    sectionTopDrivers: 'Top drivers',
     sessions7d: 'Sessions (7 days)',
     revenue7d: 'Revenue (7 days)',
     onlineDevices: 'Online Devices',
-    totalTripsToday: 'Total Trips Today',
     dailyRevenue: 'Daily Revenue',
     averageBattery: 'Average Battery',
-    avgTripTime: 'Avg Trip Time',
-    weeklyTrips: 'Weekly Trips',
+    weeklySessions: 'Weekly Sessions',
+    weeklySessionsHint: 'Battery swaps and charging sessions, last 7 days',
+    sessionsSeries: 'Sessions',
     last7Days: 'Last 7 days',
     batteryStatus: 'Battery Status',
     currentDistribution: 'Current distribution',
@@ -682,6 +747,7 @@ const en = {
     smartMobility: 'Smart Mobility Management System',
     noFleetAdminAccess: "This account doesn't have access to the Fleet Admin dashboard.",
     sessionExpired: 'Your session has expired. Please sign in again.',
+    signedOutThisDeviceOnly: "Signed out on this device only. The server didn't confirm the sign-out.",
     cannotConnect: 'Cannot connect to the server. Please check your connection and try again.',
     // Login page
     loginSubtitle: 'Enter your phone number to sign in to your account',
@@ -722,7 +788,12 @@ const en = {
     speed: 'Speed',
     avgWait: 'Avg Wait: {{minutes}} min',
     todaySwaps: 'Today: {{count}} swaps',
-    liveUpdatesActive: 'Live Updates: Active',
+    lastKnownStatus: 'Last known status',
+    // Fast-charging pile popup (FA-321)
+    fastChargingCabinet: 'Fast-Charging Cabinet',
+    portsTotal: '{{count}} ports',
+    avgCharge: 'Avg charge: {{minutes}} min',
+    sessionsToday: 'Sessions today: {{count}}',
   },
   batterySwapping: {
     title: 'Battery Swapping',
@@ -736,7 +807,7 @@ const en = {
     totalCapacity: 'Total Capacity',
     totalCapacitySubtitle: 'Full network scale',
     cabinetLocations: 'Cabinet Locations',
-    realtimeMap: 'Real-time battery swap availability across the region',
+    realtimeMap: 'Battery swap availability across the region, as last reported',
     all: 'All',
     available: 'Available',
     empty: 'Empty',
@@ -745,10 +816,10 @@ const en = {
     sync: 'Sync',
     avgWait: 'AVG WAIT',
     todaySwaps: 'TODAY SWAPS',
-    viewDiagnostics: 'View Full Diagnostics',
     searchCabinets: 'Search cabinets...',
     efficiencyOverview: 'Efficiency Overview',
     recentSwaps: 'Recent Swaps',
+    loadFailed: "The battery swapping cabinets couldn't be loaded.",
     noRecentActivity: 'No recent activity',
     lastSevenDays: 'Last 7 Days',
     cabinetId: 'Cabinet ID',
@@ -767,7 +838,7 @@ const en = {
     errorSubtitle: 'Needs attention',
     totalPorts: 'Total Ports',
     cabinetLocations: 'Cabinet Locations',
-    realtimeMap: 'Real-time charging port availability across the city',
+    realtimeMap: 'Charging port availability across the city, as last reported',
     all: 'All',
     available: 'Available',
     nearbyCabinets: 'Nearby Cabinets',
@@ -785,6 +856,7 @@ const en = {
     avgEfficiency: 'Avg Efficiency',
     viewDetails: 'View Details →',
     minsUnit: 'min',
+    loadFailed: "The fast charging cabinets couldn't be loaded.",
   },
   theme: {
     light: 'Light',
@@ -797,11 +869,14 @@ const en = {
     switchLanguage: 'Switch language',
   },
   status: {
+    // Vehicle statuses.
     active: 'Active',
     charging: 'Charging',
     idle: 'Idle',
     maintenance: 'Maintenance',
-    inactive: 'Inactive',
+    // Driver statuses: their own keys, since Arabic needs other words (FA-239).
+    driverActive: 'Active',
+    driverInactive: 'Inactive',
     pending: 'Pending',
     blocked: 'Blocked',
   },
@@ -832,7 +907,7 @@ const en = {
     resultTruncated:
       'Too many matching transactions to load in full — this view and the CSV export are incomplete. Narrow the date range.',
     filterRejected: 'The server rejected this filter, so nothing could be loaded:',
-    bonusesUnderTopUp: 'Bonuses are listed under Top-Up',
+    fleetTopUpsNoBonus: "Top-ups paid from this dashboard don't earn bonuses.",
     typeTopUp: 'Top-Up',
     typeFastCharge: 'Fast Charge',
     typeBatterySwap: 'Battery Swap',
@@ -850,6 +925,8 @@ const en = {
     helpDescription: 'Our financial operations team is available 24/7 to resolve top-up issues or adjust wallet balances for your drivers.',
     contactFinanceTeam: 'Contact Finance Team',
     noTransactions: 'No transactions found',
+    loadFailed: "Couldn't load wallet transactions",
+    exportFailed: "Couldn't export the CSV",
     noTransactionsHint: 'Try adjusting your filters or date range.',
     // Payment settings — billing address (Jordan / HyperPay) and saved cards
     paymentSettingsTitle: 'Payment settings',
@@ -913,7 +990,17 @@ const en = {
     processingTitle: 'Payment Processing',
     processingBody: 'Your payment is being processed. The wallet balance will update shortly.',
     confirmingBody: 'Your payment is being confirmed. The wallet balance will update shortly.',
+    uncertainBody: "We couldn't confirm this payment. It may still have gone through.",
     paidWithCard: 'Paid with {{card}}',
+    checkLedgerFirst: 'Check Wallet Transactions before trying again.',
+    openLedger: 'Open Wallet Transactions',
+    // HyperPay: the payment ended with no money taken (FA-410).
+    notCompletedTitle: 'Payment not completed',
+    notCompletedBody: "This payment didn't go through, so no money was taken. You can start the top-up again.",
+    notCompletedExpiredBody: 'The payment session expired before the card was charged, so no money was taken. You can start the top-up again.',
+    // HyperPay: ask again about a pending payment (FA-409).
+    checkAgain: 'Check again',
+    stillPending: 'Still not confirmed. Try again in a minute.',
   },
 };
 

@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/i18n/I18nProvider';
 import { billingAddressErrorsFrom, walletApi, type BillingAddressField } from '@/lib/api';
+import { failureMessage } from '@/lib/api-errors';
+import { logger } from '@/lib/logger';
 import type { BillingAddress } from '@/types';
 
 /** HyperPay's parameter limits (`billing.street1`, `billing.city`, `billing.state`). */
@@ -82,8 +84,8 @@ export function BillingAddressForm({ initial, submitLabel, onSaved, onCancel, ca
       if (fieldErrors) {
         setErrors(fieldErrors);
       } else {
-        const message = err instanceof Error ? err.message : '';
-        setFormError(message && !/^HTTP \d{3}$/.test(message) ? message : t('wallet.billingSaveFailed'));
+        logger.error('[BillingAddressForm] save failed:', err);
+        setFormError(failureMessage(err, t, t('wallet.billingSaveFailed')));
       }
     } finally {
       setSaving(false);

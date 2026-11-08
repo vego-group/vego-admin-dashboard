@@ -129,9 +129,12 @@ export interface CancelledSessions {
   charging_sessions: number[];
 }
 
-/** Result of a block / toggle-status status change. */
+/**
+ * Result of a toggle-status / block / unblock call. `status` is **null** when
+ * the server accepted the change without saying what the status became.
+ */
 export interface DriverStatusChangeResult {
-  status: DriverStatus;
+  status: DriverStatus | null;
   cancelled_sessions?: CancelledSessions;
 }
 export type Theme = 'light' | 'dark' | 'system';
@@ -139,12 +142,22 @@ export type Locale = 'en' | 'ar';
 export type Direction = 'ltr' | 'rtl';
 export type UserRole = 'admin' | 'operator';
 
+/**
+ * GPS fix quality as a device reported it. 'unknown' = no telemetry: a missing
+ * value used to read 'strong', a green "Strong" for a vehicle or device that
+ * had sent nothing (FA-218, FA-311).
+ */
+export type GpsSignal = 'strong' | 'weak' | 'none' | 'unknown';
+
 export interface Vehicle {
   id: string;
-  plateNumber: string;
-  model: 'VegoMax Pro' | 'VegoLite' | 'VEGO Pro 400' | 'VEGO Cargo 500';
+  /** As the API sends it; absent when it has none. Show `vehicleDisplayName()`. */
+  plateNumber?: string;
+  /** Brand + model as the API sends them ("VEGO Pro 400"); absent when it has none. */
+  model?: string;
   status: VehicleStatus;
-  batteryLevel: number;
+  /** State of charge, 0–100. Absent when not reported — "—", never "0%" (FA-207). */
+  batteryLevel?: number;
   location: string;
   /**
    * Last known position, **absent when nothing has ever reported one**.
@@ -156,25 +169,30 @@ export interface Vehicle {
   coordinates?: { lat: number; lng: number };
   assignedDriverId?: string;
   assignedDriverName?: string;
-  lastTripAt: string;
-  totalDistanceKm: number;
-  currentSpeedKmh: number;
-  estimatedRangeKm: number;
+  /** Absent when not reported — rendered "—", never 0 (FA-206). */
+  totalDistanceKm?: number;
+  /** Speed in the last telemetry; absent when there is none — "—", never 0. */
+  currentSpeedKmh?: number;
+  /** Absent when not reported (FA-207). */
+  estimatedRangeKm?: number;
   /**
    * Speed ceiling the fleet has set on this vehicle, in km/h — **absent when the
    * backend did not report one**.
    *
    * There is deliberately no default. This used to read `speed_limit_kmh ?? 80`,
    * which invented a ceiling the fleet never set and then showed it back to the
-   * operator as fact, on a slider that only went to 45. The one scale every
-   * speed limit in this app is expressed on is `VEHICLE_SPEED_LIMIT_MAX` in
-   * @/lib/vehicle-speed.
+   * operator as fact, on a slider that only went to 45. What a fleet can set
+   * is 10–80 km/h — see @/lib/vehicle-speed.
    */
   speedLimitKmh?: number;
   isLocked: boolean;
   isEngineRunning: boolean;
-  gpsSignal: 'strong' | 'weak' | 'none';
-  isOnline: boolean;
+  /** As the device reported it; 'unknown' when it reported nothing (never 'strong'). */
+  gpsSignal: GpsSignal;
+  /** As the device reported it; **undefined when it reported nothing**, never a guessed `false`. */
+  isOnline?: boolean;
+  /** When the vehicle's device last reported (`iot_device.last_seen_at`). */
+  lastSeenAt?: string;
   /**
    * The commands this vehicle's device advertises, when the payload lists them.
    *
@@ -204,6 +222,12 @@ export interface BatteryStation {
 
 export type DocumentStatus = 'not_uploaded' | 'pending' | 'verified' | 'rejected';
 
+/**
+ * A driver's documents. `fileUrl` / `backFileUrl` are **signed links that
+ * expire 15 minutes after they are issued** (backend, 2026-11-05): only the
+ * driver detail carries them, and nothing may keep one — the edit form fetches
+ * the driver again each time it opens, and while it stays open.
+ */
 export interface DriverDocuments {
   license: {
     status: DocumentStatus;
@@ -225,18 +249,6 @@ export interface DriverDocuments {
   };
 }
 
-export type RegistrationRequestStatus = 'pending' | 'approved' | 'rejected';
-
-export interface DriverRegistrationRequest {
-  id: string;
-  name: string;
-  phone: string;
-  email?: string;
-  requestedAt: string;
-  status: RegistrationRequestStatus;
-  documents: DriverDocuments;
-}
-
 export interface Driver {
   id: string;
   name: string;
@@ -254,10 +266,6 @@ export interface Driver {
   /** Plate number of the assigned motorcycle, for display. */
   assignedMotorcyclePlate?: string;
   status: DriverStatus;
-  trips: number;
-  totalCost: number;
-  charges: number;
-  swaps: number;
   walletBalance: number;
   avatarUrl?: string;
   /**
@@ -327,37 +335,31 @@ export interface Zone {
   createdAt: string;
 }
 
-export interface Trip {
-  id: string;
-  vehicleId: string;
-  driverId: string;
-  startedAt: string;
-  endedAt?: string;
-  distanceKm: number;
-  durationMinutes: number;
-  startLocation: string;
-  endLocation: string;
-  cost: number;
-}
-
 export interface DashboardMetrics {
   activeFleet: number;
   availableBatteries: number;
-  totalTripsToday: number;
-  avgTripDurationMinutes: number;
   chargingBatteries: number;
-  averageSoc: number;
+  /** Absent when the backend sends null or nothing (no data yet): shown "—", never "0%" (FA-319). */
+  averageSoc?: number;
   lowBatteryCount: number;
-  averageCostPerVehicle: number;
-  successRate: number;
-  fleetTrend: number;
-  driversTrend: number;
-  batteriesTrend: number;
-  tripsTrend: number;
-  durationTrend: number;
+  /**
+   * Fixed-precision decimal string in the fleet's currency, or absent when the
+   * backend omits or nulls it: shown "—", never a fabricated "0.00" (FA-319).
+   */
+  averageCostPerVehicle?: string;
+  /** Absent when the backend omits or nulls it (trip-era field): shown "—" (FA-319). */
+  successRate?: number;
+  /**
+   * Day-on-day changes, absent when the backend sends none: the card then shows
+   * no trend at all, not "↑ 0%" (FA-320). ⏳ Whether they are percentages or
+   * absolute counts is unconfirmed (the backend calls them "deltas"); the card
+   * keeps showing them with "%".
+   */
+  fleetTrend?: number;
+  driversTrend?: number;
+  batteriesTrend?: number;
   // Additional counters from GET /fleet-admin/dashboard
   totalDrivers: number;
-  activeTrips: number;
   unresolvedAlarms: number;
   onlineDevices: number;
 }
@@ -369,18 +371,26 @@ export interface UsagePoint {
 
 export interface BatteryHealthPoint {
   month: string;
-  health: number;
+  /**
+   * Average SOH for the month, or **null** for a month with no reading: the
+   * chart leaves a gap there instead of plunging to 0 % (FA-329).
+   */
+  health: number | null;
 }
 
 export interface RevenuePoint {
   date: string;
   revenue: number;
-  trips: number;
+  /** Sessions (swaps + charges) that month; the backend calls it `trips_count`. */
+  sessions: number;
 }
 
 export interface CostBreakdown {
   category: string;
+  /** For the chart's geometry only — sum and format {@link CostBreakdown.money}. */
   value: number;
+  /** The exact amount (FA-317). */
+  money: Money;
   color: string;
 }
 
@@ -421,7 +431,8 @@ export interface IoTDevice {
   status: DeviceStatus;
   /** Battery level of the paired motorcycle, 0–100. */
   batteryLevel?: number;
-  gpsSignal: 'strong' | 'weak' | 'none';
+  /** 'unknown' when the device reported no fix quality (FA-311). */
+  gpsSignal: GpsSignal;
   latitude?: number;
   longitude?: number;
   speedKmh?: number;
@@ -493,14 +504,16 @@ export type TransactionType   =
 export type TransactionStatus = 'completed' | 'pending' | 'failed' | 'cancelled' | 'unknown';
 
 /**
- * Which way the money moved: `'in'` = credit / refund, `'out'` = debit.
+ * Which way the money moved: `'in'` = credit / refund, `'out'` = debit, and
+ * `'unknown'` for a row with no `direction` whose `type` no document names
+ * (FA-411) — shown neutral, with no sign, never as a credit.
  *
  * The backend's confirmed convention is that **a debit is a positive amount with
  * `type: "debit"`, never a negative** — so the sign of `amount` carries no
  * information and must never be used to tell a debit from a credit. Colour,
  * sign prefixes and any ledger arithmetic key off this field.
  */
-export type TransactionDirection = 'in' | 'out';
+export type TransactionDirection = 'in' | 'out' | 'unknown';
 
 /**
  * A wallet row's `payment_method`, read into one of three shapes:
@@ -530,7 +543,7 @@ export interface WalletTransaction {
    * the lossy convenience view. Absent on locally-constructed fixtures.
    */
   money?: Money;
-  /** Credit or debit. The only safe source of the sign. */
+  /** Credit, debit, or unknown (no sign). The only safe source of the sign. */
   direction: TransactionDirection;
   /**
    * The backend's `signed_amount` — an exact decimal string carrying the sign
@@ -565,8 +578,10 @@ export interface WalletStats {
   totalTopUps: number | null;
   totalSpent: number | null;
   avgPerDriver: number | null;
-  topUpTrend: number;   // %
-  budgetUsedPercent: number;
+  /** % change. **null** when the backend sent none — the chip is hidden, never "+0%" (FA-417). */
+  topUpTrend: number | null;
+  /** % of the fleet's budget used. **null** when there is no budget — the line is hidden. */
+  budgetUsedPercent: number | null;
   activeDriversCount: number;
 }
 

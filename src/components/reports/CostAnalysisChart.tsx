@@ -5,17 +5,21 @@ import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useFleetContext } from '@/hooks/useFleetContext';
+import { sumMoney } from '@/lib/money';
 import type { CostBreakdown } from '@/types';
 
 interface Props {
   data: CostBreakdown[];
   loading?: boolean;
+  /** Shown instead of the chart when its data failed to load (FA-312). */
+  failure?: React.ReactNode;
 }
 
-export function CostAnalysisChart({ data, loading }: Props) {
+export function CostAnalysisChart({ data, loading, failure }: Props) {
   const { t, locale } = useI18n();
   const { formatMoney } = useFleetContext();
-  const total = data.reduce((sum, c) => sum + c.value, 0);
+  // Summed in integer minor units, formatted once (FA-317).
+  const total = sumMoney(data.map((c) => c.money));
 
   // Translate the categories we know about; otherwise show the backend's own
   // label as-is. Never collapse unknown categories onto one bucket — that made
@@ -36,10 +40,12 @@ export function CostAnalysisChart({ data, loading }: Props) {
 
       {loading ? (
         <Skeleton className="mt-4 h-[220px] w-full" />
+      ) : failure ? (
+        <div className="mt-4">{failure}</div>
       ) : (
         <>
           <div className="relative mt-3 mx-auto h-[180px] w-[180px]">
-            {total > 0 ? (
+            {total.minorUnits > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -66,7 +72,7 @@ export function CostAnalysisChart({ data, loading }: Props) {
                 {t('reports.total')}
               </span>
               <span className="mt-0.5 text-xs font-bold text-slate-900 dark:text-slate-100">
-                {formatMoney(total, locale)}
+                {formatMoney(total.amount, locale)}
               </span>
             </div>
           </div>
@@ -77,7 +83,7 @@ export function CostAnalysisChart({ data, loading }: Props) {
                 <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
                 <span className="text-slate-600 dark:text-slate-300">{displayLabel(item.category)}</span>
                 <span className="ms-auto font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-                  {formatMoney(item.value, locale)}
+                  {formatMoney(item.money.amount, locale)}
                 </span>
               </li>
             ))}

@@ -160,6 +160,29 @@ export function ltrIsolate(value: string): string {
   return `\u2066${value}\u2069`;
 }
 
+/**
+ * A battery level as "64%", or "—" when it was not reported. A vehicle with no
+ * telemetry used to read "0%" — an empty battery — which is a claim, not an
+ * absence (FA-207).
+ */
+export function formatBatteryLevel(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? `${Math.round(Math.min(100, Math.max(0, value)))}%`
+    : '—';
+}
+
+/**
+ * `part` as a whole-number share of `whole` (0–100), or **undefined** when the
+ * share cannot be known: a capacity of 0, an absent capacity (which the mappers
+ * read as 0) or a non-numeric count. `ready / 0` used to print "NaN%" or
+ * "Infinity%" on the swapping cards (FA-308); the callers show "—" instead.
+ */
+export function sharePercent(part: number | null | undefined, whole: number | null | undefined): number | undefined {
+  if (typeof part !== 'number' || typeof whole !== 'number') return undefined;
+  if (!Number.isFinite(part) || !Number.isFinite(whole) || whole <= 0) return undefined;
+  return Math.round(Math.min(100, Math.max(0, (part / whole) * 100)));
+}
+
 export function formatPercent(value: number, locale: Locale = 'en'): string {
   return new Intl.NumberFormat(localeMap[locale], {
     style: 'percent',
@@ -167,10 +190,45 @@ export function formatPercent(value: number, locale: Locale = 'en'): string {
   }).format(value / 100);
 }
 
-/** "5 min ago" / "منذ 5 دقائق" */
-export function formatRelativeTime(iso: string, locale: Locale = 'en'): string {
+/**
+ * A backend timestamp as a Date, or **null** when it cannot be read.
+ *
+ * A date-time with no zone — `"2026-10-20 12:00:00"`, Laravel's plain
+ * serialisation — is read as **UTC**. `new Date()` would take it as the
+ * browser's local time, and every timestamp would shift by the viewer's
+ * offset (three hours in Riyadh and Amman). Anything with a `Z` or an offset
+ * is read as written. ⏳ The backend is confirming its exact format (D1.2);
+ * ISO-8601 with an offset everywhere is what we asked for.
+ */
+export function parseBackendDate(value: string | null | undefined): Date | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (!text) return null;
+  const zoneless = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/.exec(text);
+  const date = new Date(zoneless ? `${zoneless[1]}T${zoneless[2]}Z` : text);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+const warnedUnreadableDates = new Set<string>();
+
+/**
+ * "5 min ago" / "منذ 5 دقائق", or **"—"** for a missing or unreadable date.
+ *
+ * `Intl.RelativeTimeFormat` throws a RangeError on NaN, and one bad
+ * timestamp used to take the whole page down into the error boundary
+ * (alarms, sessions, IoT devices, recent swaps — FA-301).
+ */
+export function formatRelativeTime(iso: string | null | undefined, locale: Locale = 'en'): string {
+  const date = parseBackendDate(iso);
+  if (!date) {
+    if (iso && !warnedUnreadableDates.has(iso)) {
+      warnedUnreadableDates.add(iso);
+      logger.warn(`[format] Unreadable date from the backend: "${iso}". Showing "—".`);
+    }
+    return '—';
+  }
   const rtf = new Intl.RelativeTimeFormat(localeMap[locale], { numeric: 'auto' });
-  const diffMs = new Date(iso).getTime() - Date.now();
+  const diffMs = date.getTime() - Date.now();
   const diffMin = Math.round(diffMs / 60_000);
   const diffHour = Math.round(diffMin / 60);
   const diffDay = Math.round(diffHour / 24);

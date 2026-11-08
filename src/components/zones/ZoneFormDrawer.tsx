@@ -1,18 +1,19 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, ChevronDown, Map as MapIcon, Save, Users } from 'lucide-react';
 import { Drawer, DrawerHeader } from '@/components/ui/Drawer';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
+import { FailureNote } from '@/components/ui/FailureNote';
 import { useI18n } from '@/i18n/I18nProvider';
 import { useVehicleTerm } from '@/hooks/useVehicleTerm';
 import {
-  ZONE_SPEED_LIMIT_MAX, ZONE_SPEED_LIMIT_MIN, ZONE_TYPES, ZONE_TYPE_LIST, isValidZoneSpeedLimit,
+  ZONE_SPEED_LIMIT_MAX, ZONE_SPEED_LIMIT_MIN, ZONE_SPEED_SLIDER_MAX, ZONE_TYPES, ZONE_TYPE_LIST, isValidZoneSpeedLimit,
 } from '@/lib/zone-types';
 import { isArabicOnly, isEnglishOnly } from '@/lib/text-script';
-import { VEHICLE_SPEED_LIMIT_MAX } from '@/lib/vehicle-speed';
+import { failureLines, fieldErrorsFrom } from '@/lib/api-errors';
 import { cn } from '@/lib/cn';
 import type { Zone, ZonePoint, ZoneType } from '@/types';
 
@@ -32,15 +33,49 @@ interface ZoneFormDrawerProps {
   zone?: Zone | null;
   /** Polygon being created — required when adding a new zone. */
   drawingPoints?: ZonePoint[];
-  onSubmit: (values: ZoneFormValues, zoneId?: string) => void | Promise<void>;
+  /**
+   * Saves the zone. A failure **throws**: an ApiError, whose field errors land
+   * on their fields here, or a {@link ZoneSubmitRefusal} for a check the page
+   * made itself. The drawer stays open and says why, inside itself (FA-326).
+   */
+  onSubmit: (values: ZoneFormValues, zoneId?: string) => Promise<void>;
 }
 
+/** A save the page refused before asking the backend, with its reasons. */
+export class ZoneSubmitRefusal extends Error {
+  constructor(readonly lines: string[]) {
+    super(lines.join(' '));
+    this.name = 'ZoneSubmitRefusal';
+  }
+}
+
+type ZoneFormErrors = {
+  name_en?: string;
+  name_ar?: string;
+  type?: string;
+  speedLimit?: string;
+  /** The polygon drawn on the map: it has no input, so it gets its own line. */
+  coordinates?: string;
+};
+
 /**
- * A zone speed limit and a vehicle speed limit are the same quantity, so they
- * are drawn against the same ceiling — previously this slider went to 100 while
- * the vehicle control slider went to 45. See @/lib/vehicle-speed.
+ * The request keys of `POST` / `PUT /fleet-admin/zones` and the drawer field
+ * each lands on. A 422 used to reach only a page banner, as `message`, which
+ * this drawer can cover on a narrow screen (FA-326).
  */
-const MAX_SPEED = VEHICLE_SPEED_LIMIT_MAX;
+const FIELD_BY_REQUEST_KEY = {
+  name_en:     'name_en',
+  name_ar:     'name_ar',
+  type:        'type',
+  speed_limit: 'speedLimit',
+  coordinates: 'coordinates',
+} as const satisfies Record<string, keyof ZoneFormErrors>;
+
+/**
+ * The slider's usual ceiling. Zones keep their own range (1–200, advisory);
+ * the vehicle control's 10–80 km/h is the vehicle command's, not theirs.
+ */
+const MAX_SPEED = ZONE_SPEED_SLIDER_MAX;
 
 /** The form's speed limit for a zone: its own on a slow zone, `null` on any other. */
 function initialSpeedLimit(zone: Zone): number | null {
@@ -65,8 +100,11 @@ export function ZoneFormDrawer({
     speedLimitKmh: null,
     active: true,
   });
-  const [errors, setErrors] = useState<{ name_en?: string; name_ar?: string; speedLimit?: string }>({});
+  const [errors, setErrors] = useState<ZoneFormErrors>({});
   const [submitting, setSubmitting] = useState(false);
+  /** Why the save was refused, when it is not one field's fault. */
+  const [submitError, setSubmitError] = useState<string[] | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   /** Each name field only accepts letters from its own script. */
   const scriptError = (field: 'name_en' | 'name_ar', value: string) => {
@@ -109,6 +147,7 @@ export function ZoneFormDrawer({
       });
     }
     setErrors({});
+    setSubmitError(null);
   }, [open, zone]);
 
   /**
@@ -128,7 +167,7 @@ export function ZoneFormDrawer({
       type: next,
       speedLimitKmh: next === 'slow' ? (v.speedLimitKmh ?? ZONE_TYPES.slow.defaultSpeedKmh) : null,
     }));
-    setErrors((prev) => ({ ...prev, speedLimit: undefined }));
+    setErrors((prev) => ({ ...prev, type: undefined, speedLimit: undefined }));
   };
 
   /** Only a slow zone takes a limit, and it must be 1–200 km/h. */
@@ -146,11 +185,46 @@ export function ZoneFormDrawer({
     if (Object.keys(nextErrors).length > 0) return;
 
     setSubmitting(true);
+    setSubmitError(null);
     try {
       await onSubmit(values, zone?.id);
+    } catch (err) {
+      showFailure(err);
     } finally {
       setSubmitting(false);
     }
+  };
+
+  /**
+   * Put a refused save where the operator will see it: each field the backend
+   * named under that field, anything else in a note at the top of the drawer,
+   * and scroll to the first of them.
+   */
+  const showFailure = (err: unknown) => {
+    if (err instanceof ZoneSubmitRefusal) {
+      setSubmitError(err.lines);
+    } else {
+      const byKey = fieldErrorsFrom(err, FIELD_BY_REQUEST_KEY);
+      if (!byKey) {
+        setSubmitError(failureLines(err, t));
+      } else {
+        const next: ZoneFormErrors = { ...byKey.fields };
+        const unmapped = [...byKey.unmapped];
+        // Only a slow zone shows the speed slider; elsewhere the message would
+        // have nowhere to appear.
+        if (next.speedLimit && values.type !== 'slow') {
+          unmapped.push(next.speedLimit);
+          delete next.speedLimit;
+        }
+        setErrors((prev) => ({ ...prev, ...next }));
+        setSubmitError(unmapped.length > 0 ? unmapped : null);
+      }
+    }
+    window.requestAnimationFrame(() => {
+      bodyRef.current
+        ?.querySelector('[role="alert"], [data-field-error]')
+        ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
   };
 
   // Speed slider label changes based on value
@@ -161,7 +235,7 @@ export function ZoneFormDrawer({
       ? t('zones.speedSlowLabel')
       : t('zones.speedNormalLabel');
 
-  // A stored limit above the shared scale widens the slider rather than being
+  // A stored limit above the usual ceiling widens the slider rather than being
   // clamped — and silently saved — on the first edit.
   const sliderMax = Math.min(
     ZONE_SPEED_LIMIT_MAX,
@@ -181,7 +255,17 @@ export function ZoneFormDrawer({
 
       <form onSubmit={handleSubmit} className="flex flex-1 flex-col overflow-hidden">
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div ref={bodyRef} className="flex-1 overflow-y-auto px-6 py-5">
+          {/* A refused save, inside the drawer: a page banner sat behind it. */}
+          {submitError && (
+            <FailureNote
+              className="mb-4 mt-0"
+              title={isEdit ? t('zones.updateFailed') : t('zones.createFailed')}
+              lines={submitError}
+              onDismiss={() => setSubmitError(null)}
+            />
+          )}
+
           {/* Zone Name (English) */}
           <Field
             label={t('zones.zoneNameEn')}
@@ -216,7 +300,7 @@ export function ZoneFormDrawer({
 
           {/* Zone Type */}
           <div className="mt-4">
-            <Field label={t('zones.zoneType')} required>
+            <Field label={t('zones.zoneType')} required error={errors.type}>
               <div className="relative">
                 <select
                   value={values.type}
@@ -312,9 +396,9 @@ export function ZoneFormDrawer({
             </div>
           </div>
 
-          {/* Who this zone actually binds. An operator drawing a polygon on a
-              public road reasonably assumes it covers everyone riding there; it
-              covers their own drivers. */}
+          {/* What a zone does and doesn't do. Zones are advisory: nothing pushes
+              them to a vehicle (FA-303). They cover this fleet's drivers only,
+              not everyone riding on those roads. */}
           <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50/70 p-3 text-xs text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
             <Users className="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
             <p>{tv('zones.enforcementScopeNote')}</p>
@@ -334,6 +418,14 @@ export function ZoneFormDrawer({
             <div className="mt-3 text-center text-[11px] text-slate-500">
               {t('zones.drawingPointsCount', { count: drawingPoints.length })}
             </div>
+          )}
+
+          {/* The backend's word on the drawn shape, which has no input here. */}
+          {errors.coordinates && (
+            <p data-field-error className="mt-2 text-xs text-rose-600">
+              <span className="font-semibold">{t('zones.shapeOnMap')}: </span>
+              {errors.coordinates}
+            </p>
           )}
         </div>
 
@@ -377,7 +469,7 @@ function Field({
         {label} {required && <span className="text-rose-500">*</span>}
       </label>
       {children}
-      {error && <p className="mt-1 text-xs text-rose-600">{error}</p>}
+      {error && <p data-field-error className="mt-1 text-xs text-rose-600">{error}</p>}
     </div>
   );
 }
